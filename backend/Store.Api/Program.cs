@@ -83,23 +83,41 @@ app.Logger.LogInformation(
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
 
-var configuredAppUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+var configuredAppUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
     ?? builder.Configuration["APP_URL"]
     ?? builder.Configuration["Kestrel:Endpoints:Http:Url"]
     ?? "http://0.0.0.0:3001";
 
-string? appUrl = configuredAppUrl;
+var appUrls = new List<string>();
 string? appPathBase = null;
 
-if (!string.IsNullOrWhiteSpace(configuredAppUrl)
-    && Uri.TryCreate(configuredAppUrl, UriKind.Absolute, out var parsedAppUrl))
+foreach (var rawUrl in configuredAppUrls.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
 {
-    appUrl = parsedAppUrl.GetLeftPart(UriPartial.Authority);
-
-    if (!string.IsNullOrWhiteSpace(parsedAppUrl.AbsolutePath)
-        && parsedAppUrl.AbsolutePath != "/")
+    if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var parsedAppUrl))
     {
-        appPathBase = parsedAppUrl.AbsolutePath.TrimEnd('/');
+        appUrls.Add(rawUrl);
+        continue;
+    }
+
+    appUrls.Add(parsedAppUrl.GetLeftPart(UriPartial.Authority));
+
+    if (string.IsNullOrWhiteSpace(parsedAppUrl.AbsolutePath) || parsedAppUrl.AbsolutePath == "/")
+    {
+        continue;
+    }
+
+    var parsedPathBase = parsedAppUrl.AbsolutePath.TrimEnd('/');
+
+    if (string.IsNullOrWhiteSpace(appPathBase))
+    {
+        appPathBase = parsedPathBase;
+        continue;
+    }
+
+    if (!string.Equals(appPathBase, parsedPathBase, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            $"All configured app URLs must use the same path base. Found '{appPathBase}' and '{parsedPathBase}'.");
     }
 }
 
@@ -147,10 +165,18 @@ app.UseStaticFiles(new StaticFileOptions
 });
 app.MapControllers();
 
-if (!string.IsNullOrWhiteSpace(appUrl))
+if (appUrls.Count > 0)
 {
-    app.Logger.LogInformation("Store API starting at {AppUrl}{PathBase}", appUrl, appPathBase ?? string.Empty);
-    app.Run(appUrl);
+    foreach (var appUrl in appUrls)
+    {
+        app.Urls.Add(appUrl);
+    }
+
+    app.Logger.LogInformation(
+        "Store API starting at {AppUrls}{PathBase}",
+        string.Join(';', appUrls),
+        appPathBase ?? string.Empty);
+    app.Run();
 }
 else
 {
