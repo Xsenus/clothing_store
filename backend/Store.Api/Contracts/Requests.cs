@@ -1,0 +1,51 @@
+namespace Store.Api.Contracts;
+
+/// <summary>
+/// Данные для аутентификации.
+/// </summary>
+public record AuthPayload(string Email, string Password);
+
+/// <summary>
+/// Данные для подтверждения кода.
+/// </summary>
+public record VerifyPayload(string Email, string Code);
+
+/// <summary>
+/// Данные для запроса сброса пароля.
+/// </summary>
+public record ResetRequestPayload(string Email);
+
+/// <summary>
+/// Данные для подтверждения сброса пароля.
+/// </summary>
+public record ResetConfirmPayload(string Email, string Code, string NewPassword);
+
+/// <summary>
+/// Данные профиля пользователя.
+/// </summary>
+public record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname);
+
+/// <summary>
+/// Данные для добавления товара в корзину.
+/// </summary>
+public record CartItemPayload(string ProductId, string Size, int Quantity);
+
+/// <summary>
+/// Данные для обновления позиции корзины.
+/// </summary>
+public record CartUpdatePayload(int Quantity);
+
+/// <summary>
+/// Данные для переключения лайка.
+/// </summary>
+public record LikeTogglePayload(string ProductId);
+
+/// <summary>
+/// Данные отзыва.
+/// </summary>
+public record ReviewPayload(string Text, List<string>? Media);
+
+/// <summary>
+/// Данные для создания заказа.
+/// </summary>
+public record OrderPayload(List<Dictionary<string, object>> Items, double TotalAmount, string? Status);
