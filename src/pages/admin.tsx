@@ -21,6 +21,7 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -53,7 +54,7 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
-export default function AdminPage() {
+export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -97,11 +98,13 @@ export default function AdminPage() {
         setIsAdmin(true);
         await Promise.all([fetchProducts(), fetchAdminData()]);
       } catch (error) {
-        navigate("/admin-login");
+        if (!embedded) {
+          navigate("/profile");
+        }
       }
     };
     checkAuth();
-  }, []);
+  }, [embedded, navigate]);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -378,29 +381,38 @@ export default function AdminPage() {
     }
   };
 
-  if (loading) return <LoadingSpinner className="h-screen" />;
+  if (loading) return <LoadingSpinner className={embedded ? "h-56" : "h-screen"} />;
   if (!isAdmin) return null;
 
   return (
-      <div className="min-h-screen flex flex-col bg-background text-foreground">
-        <Header />
+      <div className={embedded ? "" : "min-h-screen flex flex-col bg-background text-foreground"}>
+        {!embedded && <Header />}
         
-        <main className="flex-1 container mx-auto px-4 py-12">
+        <main className={embedded ? "" : "flex-1 container mx-auto px-4 py-12"}>
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black uppercase tracking-tighter">ПАНЕЛЬ АДМИНИСТРАТОРА</h1>
             <div className="flex items-center gap-3">
-              <Button variant="outline" className="rounded-none font-bold uppercase tracking-widest" onClick={async () => {
+              {!embedded && <Button variant="outline" className="rounded-none font-bold uppercase tracking-widest" onClick={async () => {
                 await FLOW.adminLogout();
-                navigate("/admin-login");
+                navigate("/profile");
               }}>
                 ВЫЙТИ
-              </Button>
+              </Button>}
               <Button onClick={() => handleOpen()} className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest">
                 <Plus className="w-4 h-4 mr-2" /> ДОБАВИТЬ ТОВАР
               </Button>
             </div>
           </div>
 
+          <Tabs defaultValue="products" className="w-full">
+            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
+              <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
+              <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
+              <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
+              <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
+            </TabsList>
+
+          <TabsContent value="products" className="mt-0">
           <div className="border border-gray-200 rounded-none overflow-hidden">
             <Table>
               <TableHeader className="bg-gray-50">
@@ -445,8 +457,9 @@ export default function AdminPage() {
               </TableBody>
             </Table>
           </div>
+          </TabsContent>
 
-          <div className="mt-8 grid gap-8">
+          <TabsContent value="users" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Пользователи и права</h2>
               <Table>
@@ -480,7 +493,9 @@ export default function AdminPage() {
                 </TableBody>
               </Table>
             </div>
+          </TabsContent>
 
+          <TabsContent value="orders" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">История заказов</h2>
               <Table>
@@ -504,7 +519,9 @@ export default function AdminPage() {
                 </TableBody>
               </Table>
             </div>
+          </TabsContent>
 
+          <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
               <div className="grid md:grid-cols-3 gap-3">
@@ -523,7 +540,8 @@ export default function AdminPage() {
                 <Button onClick={saveSettings}>Сохранить настройки</Button>
               </div>
             </div>
-          </div>
+          </TabsContent>
+          </Tabs>
 
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-none border-black">
@@ -794,6 +812,7 @@ export default function AdminPage() {
             </DialogContent>
           </Dialog>
         </main>
+        {!embedded && <Footer />}
       </div>
   );
 }

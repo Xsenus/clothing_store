@@ -185,7 +185,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
           <Card
             className="w-full max-w-[400px] shadow-lg !max-w-[400px]"
             style={{ width: "400px", maxWidth: "400px" }}
@@ -260,7 +260,7 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 py-8 flex items-center justify-center">
+      <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
         <div className="w-full max-w-[400px] !max-w-[400px]" style={{ width: "400px", maxWidth: "400px" }}>
           <Card className="w-full shadow-lg" style={{ width: "400px", maxWidth: "400px" }}>
           <CardHeader className="pb-4">

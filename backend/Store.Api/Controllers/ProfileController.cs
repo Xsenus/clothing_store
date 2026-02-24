@@ -36,8 +36,26 @@ public class ProfileController : ControllerBase
         if (user is null) return Results.Unauthorized();
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         return profile is not null
-            ? Results.Ok(profile)
-            : Results.Ok(new { name = "", phone = "", shippingAddress = "", email = user.Email, nickname = $"user{user.Id[..6]}" });
+            ? Results.Ok(new
+            {
+                name = profile.Name,
+                phone = profile.Phone,
+                shippingAddress = profile.ShippingAddress,
+                email = profile.Email,
+                nickname = profile.Nickname,
+                isAdmin = user.IsAdmin,
+                isBlocked = user.IsBlocked
+            })
+            : Results.Ok(new
+            {
+                name = "",
+                phone = "",
+                shippingAddress = "",
+                email = user.Email,
+                nickname = $"user{user.Id[..6]}",
+                isAdmin = user.IsAdmin,
+                isBlocked = user.IsBlocked
+            });
     }
 
     /// <summary>
