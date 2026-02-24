@@ -8,6 +8,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
+import CookieBanner from "@/components/CookieBanner";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -18,6 +19,7 @@ createRoot(document.getElementById("root")).render(
           <Sonner />
           <BrowserRouter>
             <App />
+            <CookieBanner />
           </BrowserRouter>
         </TooltipProvider>
       </CartProvider>

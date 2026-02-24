@@ -260,9 +260,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       };
 
       if (editingId) {
+        const targetProduct = products.find((p) => p._id === editingId || (p as any).id === editingId);
         await FLOW.updateProduct({
           input: {
             id: editingId,
+            _id: editingId,
+            likesCount: targetProduct?.likesCount ?? 0,
+            creationTime: (targetProduct as any)?._creationTime || Date.now(),
             ...payload
           }
         });
@@ -524,19 +528,39 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
-              <div className="grid md:grid-cols-3 gap-3">
+              <div className="mb-4 flex flex-wrap gap-2">
+                {[
+                  "storeName",
+                  "privacy_policy",
+                  "user_agreement",
+                  "public_offer",
+                  "cookie_consent_text"
+                ].map((key) => (
+                  <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
+                    Добавить ключ {key}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid gap-4">
                 {Object.entries(settings).map(([key, value]) => (
                   <div key={key} className="space-y-1">
                     <Label>{key}</Label>
-                    <Input
-                      value={value}
-                      onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
-                    />
+                    {key.includes("policy") || key.includes("agreement") || key.includes("offer") ? (
+                      <Textarea
+                        value={value}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="min-h-[180px]"
+                      />
+                    ) : (
+                      <Input
+                        value={value}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
               <div className="mt-3 flex gap-2">
-                <Button variant="outline" onClick={() => setSettings((prev) => ({ ...prev, storeName: prev.storeName || "" }))}>Добавить ключ storeName</Button>
                 <Button onClick={saveSettings}>Сохранить настройки</Button>
               </div>
             </div>

@@ -184,6 +184,10 @@ export default function ProductDetailPage() {
 
   const handleAddReview = async () => {
     if (!product) return;
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
     if (!reviewText.trim()) {
       toast.error("Введите отзыв");
       return;
@@ -233,7 +237,7 @@ export default function ProductDetailPage() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Header />
       
-      <main className="flex-1 container mx-auto px-4 py-12">
+      <main className="flex-1 container mx-auto px-4 pt-28 pb-12 md:pt-32">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-24">
           {/* Left: Images */}
           <div className="space-y-4">
@@ -408,7 +412,7 @@ export default function ProductDetailPage() {
             
             <div className="space-y-4 pt-8 border-t">
               <h3 className="text-lg font-bold uppercase tracking-widest">Отзывы</h3>
-              <div className="space-y-3">
+              {isAuthenticated ? <div className="space-y-3">
                 <textarea
                   value={reviewText}
                   onChange={(e) => setReviewText(e.target.value)}
@@ -445,7 +449,7 @@ export default function ProductDetailPage() {
                 <Button onClick={handleAddReview} disabled={reviewSubmitting} className="uppercase font-bold tracking-widest">
                   {reviewSubmitting ? "Отправка..." : "Оставить отзыв"}
                 </Button>
-              </div>
+              </div> : <div className="text-sm text-gray-500">Оставлять отзывы могут только авторизованные пользователи.</div>}
               {product.reviews && product.reviews.length > 0 ? (
                 <div className="space-y-6">
                   {product.reviews.map((review, index) => (

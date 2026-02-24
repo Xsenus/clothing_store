@@ -10,6 +10,7 @@ import AuthPage from "./pages/auth";
 import OnboardingPage from "./pages/onboarding";
 import PrivacyPage from "./pages/privacy";
 import TermsPage from "./pages/terms";
+import OfferPage from "./pages/offer";
 import NotFound from "./pages/not-found";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
+      <Route path="/offer" element={<OfferPage />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
