@@ -52,6 +52,24 @@ var app = builder.Build();
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
 
+var configuredAppUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+    ?? builder.Configuration["APP_URL"];
+
+string? appUrl = configuredAppUrl;
+string? appPathBase = null;
+
+if (!string.IsNullOrWhiteSpace(configuredAppUrl)
+    && Uri.TryCreate(configuredAppUrl, UriKind.Absolute, out var parsedAppUrl))
+{
+    appUrl = parsedAppUrl.GetLeftPart(UriPartial.Authority);
+
+    if (!string.IsNullOrWhiteSpace(parsedAppUrl.AbsolutePath)
+        && parsedAppUrl.AbsolutePath != "/")
+    {
+        appPathBase = parsedAppUrl.AbsolutePath.TrimEnd('/');
+    }
+}
+
 
 if (!app.Environment.IsDevelopment())
 {
@@ -83,6 +101,11 @@ if (app.Configuration.GetValue<bool?>("Swagger:Enabled") ?? app.Environment.IsDe
     app.UseSwaggerUI();
 }
 
+if (!string.IsNullOrWhiteSpace(appPathBase))
+{
+    app.UsePathBase(appPathBase);
+}
+
 app.UseCors("app");
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -90,9 +113,6 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = "/uploads"
 });
 app.MapControllers();
-
-var appUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
-    ?? builder.Configuration["APP_URL"];
 
 if (!string.IsNullOrWhiteSpace(appUrl))
 {
