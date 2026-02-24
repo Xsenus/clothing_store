@@ -55,6 +55,9 @@ interface Product {
 
 export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
@@ -92,7 +95,7 @@ export default function AdminPage() {
       try {
         await FLOW.adminMe();
         setIsAdmin(true);
-        fetchProducts();
+        await Promise.all([fetchProducts(), fetchAdminData()]);
       } catch (error) {
         navigate("/admin-login");
       }
@@ -109,6 +112,58 @@ export default function AdminPage() {
       console.error("Failed to fetch products");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAdminData = async () => {
+    try {
+      const [usersRes, ordersRes, settingsRes] = await Promise.all([
+        FLOW.adminGetUsers(),
+        FLOW.adminGetOrders(),
+        FLOW.adminGetSettings()
+      ]);
+      setUsers(Array.isArray(usersRes) ? usersRes : []);
+      setOrders(Array.isArray(ordersRes) ? ordersRes : []);
+      setSettings(settingsRes || {});
+    } catch (error) {
+      toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
+    }
+  };
+
+  const toggleUserBlock = async (user: any) => {
+    try {
+      await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось изменить блокировку");
+    }
+  };
+
+  const toggleUserAdmin = async (user: any) => {
+    try {
+      await FLOW.adminUpdateUser({ input: { userId: user.id, isAdmin: !user.isAdmin } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось изменить права");
+    }
+  };
+
+  const deleteUser = async (user: any) => {
+    if (!confirm(`Удалить пользователя ${user.email}?`)) return;
+    try {
+      await FLOW.adminDeleteUser({ input: { userId: user.id } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось удалить пользователя");
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      await FLOW.adminSaveSettings({ input: settings });
+      toast.success("Настройки сохранены");
+    } catch (error) {
+      toast.error("Не удалось сохранить настройки");
     }
   };
 
@@ -389,6 +444,85 @@ export default function AdminPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+
+          <div className="mt-8 grid gap-8">
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">Пользователи и права</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Роль</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead className="text-right">Действия</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>{user.isAdmin ? "Админ" : "Пользователь"}{user.isSystem ? " (system)" : ""}</TableCell>
+                      <TableCell>{user.isBlocked ? "Заблокирован" : "Активен"}</TableCell>
+                      <TableCell className="text-right space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => toggleUserBlock(user)}>
+                          {user.isBlocked ? "Разблокировать" : "Блокировать"}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => toggleUserAdmin(user)} disabled={user.isSystem}>
+                          {user.isAdmin ? "Снять админа" : "Сделать админом"}
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => deleteUser(user)} disabled={user.isSystem}>
+                          Удалить
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">История заказов</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Пользователь</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead>Сумма</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
+                      <TableCell>{order.userEmail || order.userId}</TableCell>
+                      <TableCell>{order.status}</TableCell>
+                      <TableCell>{order.totalAmount}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
+              <div className="grid md:grid-cols-3 gap-3">
+                {Object.entries(settings).map(([key, value]) => (
+                  <div key={key} className="space-y-1">
+                    <Label>{key}</Label>
+                    <Input
+                      value={value}
+                      onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button variant="outline" onClick={() => setSettings((prev) => ({ ...prev, storeName: prev.storeName || "" }))}>Добавить ключ storeName</Button>
+                <Button onClick={saveSettings}>Сохранить настройки</Button>
+              </div>
+            </div>
           </div>
 
           <Dialog open={isOpen} onOpenChange={setIsOpen}>

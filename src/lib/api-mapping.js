@@ -229,6 +229,28 @@ export const FLOW = {
 
   adminMe: async () => request("/admin/me"),
 
+  adminGetOrders: async () => request("/admin/orders"),
+
+  adminGetUsers: async () => request("/admin/users"),
+
+  adminUpdateUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isAdmin: input.isAdmin, isBlocked: input.isBlocked }),
+  }),
+
+  adminDeleteUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
+    method: "DELETE",
+  }),
+
+  adminGetSettings: async () => request("/admin/settings"),
+
+  adminSaveSettings: async ({ input }) => request("/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminLogout: async () => {
     await request("/admin/logout", { method: "POST" });
     localStorage.removeItem("adminToken");

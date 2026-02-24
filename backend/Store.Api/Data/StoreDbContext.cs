@@ -52,6 +52,7 @@ public class StoreDbContext : DbContext
     /// Возвращает набор заказов.
     /// </summary>
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

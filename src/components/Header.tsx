@@ -64,10 +64,11 @@ export default function Header() {
                 <Authenticated>
                    <Link 
                     to="/profile"
-                    className="text-2xl font-bold hover:text-muted-foreground transition-colors"
+                    className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
                     onClick={() => setIsOpen(false)}
                   >
-                    АККАУНТ
+                    <User className="h-6 w-6" />
+                    ПРОФИЛЬ
                   </Link>
                   <button 
                     onClick={() => {

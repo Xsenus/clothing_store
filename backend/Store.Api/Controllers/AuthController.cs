@@ -108,6 +108,7 @@ public class AuthController : ControllerBase
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
         if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
+        if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
         var token = AuthService.GenerateToken();
         _db.Sessions.Add(new Session { Token = token, UserId = user.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });

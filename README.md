@@ -77,6 +77,24 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 - `STORE_PRODUCTS_PATH`
 - `STORE_SEED_PRODUCTS_PATH`
 
+### Как переключиться с SQLite на PostgreSQL
+
+По умолчанию (без `DATABASE_URL`) backend запускается на SQLite-файле `backend/app.db`.
+
+Чтобы перейти на PostgreSQL:
+
+1. Поднять PostgreSQL (локально или в Docker).
+2. Перед запуском backend задать переменную `DATABASE_URL` в формате Npgsql:
+
+```bash
+export DATABASE_URL='Host=127.0.0.1;Port=5432;Database=clothing_store;Username=postgres;Password=postgres'
+dotnet run --project backend/Store.Api/Store.Api.csproj
+```
+
+3. Проверить в логах строку `Database provider: postgres`.
+
+Если `DATABASE_URL` не задана, приложение автоматически вернётся к SQLite.
+
 
 Данные инициализации по умолчанию:
 
