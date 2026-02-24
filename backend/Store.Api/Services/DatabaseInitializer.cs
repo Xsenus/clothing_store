@@ -70,8 +70,127 @@ public class DatabaseInitializer
 
             await db.SaveChangesAsync();
         }
+
+        await EnsureDefaultUserAsync(db);
+        await EnsureTestDataAsync(db);
     }
 
+    private async Task EnsureDefaultUserAsync(StoreDbContext db)
+    {
+        var defaultUserEmail = _configuration["DatabaseInitialization:DefaultUser:Email"];
+        var defaultUserPassword = _configuration["DatabaseInitialization:DefaultUser:Password"];
+        var defaultUserName = _configuration["DatabaseInitialization:DefaultUser:Name"];
+
+        if (string.IsNullOrWhiteSpace(defaultUserEmail) || string.IsNullOrWhiteSpace(defaultUserPassword))
+            return;
+
+        var existingUser = await db.Users.FirstOrDefaultAsync(x => x.Email == defaultUserEmail);
+        var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+
+        if (existingUser is null)
+        {
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var (hash, salt) = AuthService.HashPassword(defaultUserPassword, iterations);
+            existingUser = new User
+            {
+                Email = defaultUserEmail,
+                PasswordHash = hash,
+                Salt = salt,
+                Verified = true,
+                CreatedAt = now
+            };
+            db.Users.Add(existingUser);
+
+            db.Profiles.Add(new Profile
+            {
+                UserId = existingUser.Id,
+                Email = defaultUserEmail,
+                Name = string.IsNullOrWhiteSpace(defaultUserName) ? "Default User" : defaultUserName
+            });
+
+            await db.SaveChangesAsync();
+            return;
+        }
+
+        if (!AuthService.VerifyPassword(defaultUserPassword, existingUser.PasswordHash, existingUser.Salt, iterations))
+        {
+            var (hash, salt) = AuthService.HashPassword(defaultUserPassword, iterations);
+            existingUser.PasswordHash = hash;
+            existingUser.Salt = salt;
+            existingUser.Verified = true;
+        }
+
+        var profile = await db.Profiles.FirstOrDefaultAsync(x => x.UserId == existingUser.Id);
+        if (profile is null)
+        {
+            db.Profiles.Add(new Profile
+            {
+                UserId = existingUser.Id,
+                Email = existingUser.Email,
+                Name = string.IsNullOrWhiteSpace(defaultUserName) ? "Default User" : defaultUserName
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(defaultUserName) && string.IsNullOrWhiteSpace(profile.Name))
+        {
+            profile.Name = defaultUserName;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task EnsureTestDataAsync(StoreDbContext db)
+    {
+        var seedTestData = _configuration.GetValue<bool?>("DatabaseInitialization:SeedTestData") ?? false;
+        if (!seedTestData)
+            return;
+
+        var userEmail = _configuration["DatabaseInitialization:DefaultUser:Email"];
+        if (string.IsNullOrWhiteSpace(userEmail))
+            return;
+
+        var user = await db.Users.FirstOrDefaultAsync(x => x.Email == userEmail);
+        if (user is null)
+            return;
+
+        var firstProduct = await db.Products.OrderBy(x => x.CreationTime).FirstOrDefaultAsync();
+        if (firstProduct is null)
+            return;
+
+        var hasCartItem = await db.CartItems.AnyAsync(x => x.UserId == user.Id);
+        if (!hasCartItem)
+        {
+            db.CartItems.Add(new CartItem
+            {
+                UserId = user.Id,
+                ProductId = firstProduct.Id,
+                Size = "M",
+                Quantity = 1
+            });
+        }
+
+        var hasLike = await db.Likes.AnyAsync(x => x.UserId == user.Id && x.ProductId == firstProduct.Id);
+        if (!hasLike)
+        {
+            db.Likes.Add(new Like
+            {
+                UserId = user.Id,
+                ProductId = firstProduct.Id
+            });
+        }
+
+        var hasOrder = await db.Orders.AnyAsync(x => x.UserId == user.Id);
+        if (!hasOrder)
+        {
+            db.Orders.Add(new Order
+            {
+                UserId = user.Id,
+                ItemsJson = $$"[{"productId":"{{firstProduct.Id}}","quantity":1,"size":"M"}]",
+                TotalAmount = 0
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
 
     private async Task CleanupExpiredDataAsync(StoreDbContext db)
     {

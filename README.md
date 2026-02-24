@@ -59,18 +59,24 @@ npm run dev
 Требуется `.NET SDK 8` + PostgreSQL.
 
 ```bash
-ASPNETCORE_URLS=http://0.0.0.0:3001 dotnet run --project backend/Store.Api/Store.Api.csproj
+dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
 Ключевые переменные:
 
 - `DATABASE_URL`
-- `ASPNETCORE_URLS` (по умолчанию `http://0.0.0.0:3001` для локальной разработки)
+- `ASPNETCORE_URLS` (опционально: только если нужно переопределить порт/хост)
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 - `STORE_UPLOADS_DIR`
 - `STORE_PRODUCTS_PATH`
 - `STORE_SEED_PRODUCTS_PATH`
+
+
+Данные инициализации по умолчанию:
+
+- создаётся пользователь `user@clothingstore.local` / `user12345`;
+- автоматически добавляются тестовые данные (лайк, корзина и тестовый заказ) для этого пользователя.
 
 Для доступа к dev-стенду с разных адресов (`localhost`, `127.0.0.1`, `192.168.x.x`, внешний IP):
 
