@@ -4,6 +4,9 @@ using Store.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 var projectRoot = Environment.GetEnvironmentVariable("STORE_ROOT")
     ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
 var seedDir = Environment.GetEnvironmentVariable("STORE_SEED_DIR")
@@ -53,7 +56,9 @@ var app = builder.Build();
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
 
 var configuredAppUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
-    ?? builder.Configuration["APP_URL"];
+    ?? builder.Configuration["APP_URL"]
+    ?? builder.Configuration["Kestrel:Endpoints:Http:Url"]
+    ?? "http://0.0.0.0:3001";
 
 string? appUrl = configuredAppUrl;
 string? appPathBase = null;
@@ -116,9 +121,11 @@ app.MapControllers();
 
 if (!string.IsNullOrWhiteSpace(appUrl))
 {
+    app.Logger.LogInformation("Store API starting at {AppUrl}{PathBase}", appUrl, appPathBase ?? string.Empty);
     app.Run(appUrl);
 }
 else
 {
+    app.Logger.LogInformation("Store API starting with default ASP.NET Core bindings");
     app.Run();
 }
