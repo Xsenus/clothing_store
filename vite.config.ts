@@ -23,6 +23,18 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/uploads': {
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+    },
     hmr:
       process.env.DAYTONA_SANDBOX_ID ?
         {

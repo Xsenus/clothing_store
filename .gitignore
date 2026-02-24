@@ -16,6 +16,13 @@ coverage/
 *.suo
 *.rsuser
 
+# visual studio / csharp tooling
+.vs/
+**/.vs/
+**/.cr/
+*.slnx.sqlite
+*.sln.docstates
+
 # python legacy
 backend/__pycache__/
 *.pyc

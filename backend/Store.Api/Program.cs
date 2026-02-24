@@ -198,7 +198,11 @@ app.MapPost("/orders", (HttpRequest req, OrderPayload payload, AppState s) =>
     return Results.Ok(new { id = s.CreateOrder(u.Id, payload.Items, payload.TotalAmount, payload.Status ?? "processing") });
 });
 
-app.Run("http://0.0.0.0:8000");
+var appUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+    ?? builder.Configuration["APP_URL"]
+    ?? "http://0.0.0.0:3001";
+
+app.Run(appUrl);
 
 record AuthPayload(string Email, string Password);
 record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname);

@@ -59,17 +59,26 @@ npm run dev
 Требуется `.NET SDK 8` + PostgreSQL.
 
 ```bash
-dotnet run --project backend/Store.Api/Store.Api.csproj
+ASPNETCORE_URLS=http://0.0.0.0:3001 dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
 Ключевые переменные:
 
 - `DATABASE_URL`
+- `ASPNETCORE_URLS` (по умолчанию `http://0.0.0.0:3001` для локальной разработки)
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 - `STORE_UPLOADS_DIR`
 - `STORE_PRODUCTS_PATH`
 - `STORE_SEED_PRODUCTS_PATH`
+
+Для доступа к dev-стенду с разных адресов (`localhost`, `127.0.0.1`, `192.168.x.x`, внешний IP):
+
+- frontend dev-сервер слушает `0.0.0.0:5173`;
+- backend по умолчанию слушает `0.0.0.0:3001`;
+- Vite проксирует `/api` и `/uploads` на backend (`VITE_API_TARGET`, по умолчанию `http://127.0.0.1:3001`).
+
+Это позволяет открывать один и тот же dev-стенд по любому IP/хосту машины без правок кода.
 
 ---
 
