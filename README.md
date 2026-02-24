@@ -29,6 +29,8 @@
 
 > То есть “личный кабинет + корзина + заказы + история + каталоги с настройкой” поддерживаются текущими страницами и API.
 
+> Подробный целевой план бизнес-процессов (каталог → корзина → checkout → оплата → доставка → статусы) описан в `docs/PRODUCT_WORKFLOW_PLAN.md`.
+
 ---
 
 ## Архитектура backend
@@ -56,7 +58,10 @@ npm run dev
 
 ### 2) Backend
 
-Требуется `.NET SDK 8` + PostgreSQL.
+Требуется `.NET SDK 8`.
+
+По умолчанию backend стартует на SQLite (`backend/app.db`) — это удобно для локальной разработки без PostgreSQL.
+Если задан `DATABASE_URL`, backend использует PostgreSQL автоматически.
 
 ```bash
 dotnet run --project backend/Store.Api/Store.Api.csproj

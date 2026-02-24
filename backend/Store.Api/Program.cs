@@ -17,11 +17,35 @@ var uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
     ?? Path.Combine(projectRoot, "backend", "uploads");
 Directory.CreateDirectory(uploadsDir);
 
-var connectionString = builder.Configuration["DATABASE_URL"]
-                       ?? builder.Configuration.GetConnectionString("DefaultConnection")
-                       ?? "Host=localhost;Port=5432;Database=clothing_store;Username=postgres;Password=postgres";
+var sqlitePath = Environment.GetEnvironmentVariable("STORE_SQLITE_PATH")
+    ?? Path.Combine(projectRoot, "backend", "app.db");
+var databaseUrl = builder.Configuration["DATABASE_URL"]
+    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+var useSqlite = string.IsNullOrWhiteSpace(databaseUrl)
+    || databaseUrl.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)
+    || databaseUrl.StartsWith("Filename=", StringComparison.OrdinalIgnoreCase)
+    || databaseUrl.StartsWith("sqlite", StringComparison.OrdinalIgnoreCase);
 
-builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(connectionString));
+if (useSqlite)
+{
+    var sqliteDir = Path.GetDirectoryName(sqlitePath);
+    if (!string.IsNullOrWhiteSpace(sqliteDir))
+    {
+        Directory.CreateDirectory(sqliteDir);
+    }
+
+    var sqliteConnection = $"Data Source={sqlitePath}";
+    builder.Configuration["ResolvedDatabase:Provider"] = "sqlite";
+    builder.Configuration["ResolvedDatabase:ConnectionString"] = sqliteConnection;
+    builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseSqlite(sqliteConnection));
+}
+else
+{
+    builder.Configuration["ResolvedDatabase:Provider"] = "postgres";
+    builder.Configuration["ResolvedDatabase:ConnectionString"] = databaseUrl;
+    builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl));
+}
+
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddControllers();
@@ -52,6 +76,10 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+app.Logger.LogInformation(
+    "Database provider: {Provider}",
+    app.Configuration["ResolvedDatabase:Provider"] ?? "unknown");
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
 
