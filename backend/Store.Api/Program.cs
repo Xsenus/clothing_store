@@ -22,13 +22,68 @@ builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(connectionStr
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddControllers();
-builder.Services.AddCors(o => o.AddPolicy("all", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var corsAllowAnyOrigin = builder.Configuration.GetValue<bool?>("Cors:AllowAnyOrigin") ?? true;
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("app", policy =>
+    {
+        if (corsAllowAnyOrigin)
+        {
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            return;
+        }
+
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
+            return;
+        }
+
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
 
-app.UseCors("all");
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    ctx.Response.Headers["X-Frame-Options"] = "DENY";
+    ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    await next();
+});
+
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        var traceId = context.TraceIdentifier;
+        await context.Response.WriteAsJsonAsync(new { detail = "Internal server error", traceId });
+    });
+});
+
+if (app.Configuration.GetValue<bool?>("Swagger:Enabled") ?? app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseCors("app");
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsDir),
@@ -37,7 +92,13 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapControllers();
 
 var appUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
-    ?? builder.Configuration["APP_URL"]
-    ?? "http://0.0.0.0:3001";
+    ?? builder.Configuration["APP_URL"];
 
-app.Run(appUrl);
+if (!string.IsNullOrWhiteSpace(appUrl))
+{
+    app.Run(appUrl);
+}
+else
+{
+    app.Run();
+}

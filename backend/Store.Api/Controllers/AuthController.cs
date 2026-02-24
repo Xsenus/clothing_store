@@ -16,14 +16,16 @@ public class AuthController : ControllerBase
 {
     private readonly StoreDbContext _db;
     private readonly AuthService _authService;
+    private readonly IConfiguration _configuration;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AuthController"/>.
     /// </summary>
-    public AuthController(StoreDbContext db, AuthService authService)
+    public AuthController(StoreDbContext db, AuthService authService, IConfiguration configuration)
     {
         _db = db;
         _authService = authService;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -33,8 +35,12 @@ public class AuthController : ControllerBase
     public async Task<IResult> SignUp([FromBody] AuthPayload payload)
     {
         var email = payload.Email.Trim().ToLowerInvariant();
+        if (!IsValidEmail(email)) return Results.BadRequest(new { detail = "Invalid email" });
+        if (!IsStrongPassword(payload.Password)) return Results.BadRequest(new { detail = "Password is too weak" });
         if (await _db.Users.AnyAsync(x => x.Email == email)) return Results.BadRequest(new { detail = "User already exists" });
-        var (hash, salt) = AuthService.HashPassword(payload.Password);
+
+        var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+        var (hash, salt) = AuthService.HashPassword(payload.Password, iterations);
         _db.Users.Add(new User { Id = Guid.NewGuid().ToString("N"), Email = email, PasswordHash = hash, Salt = salt, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         await UpsertCodeAsync(email, "signup");
         await _db.SaveChangesAsync();
@@ -76,8 +82,10 @@ public class AuthController : ControllerBase
     {
         var email = payload.Email.Trim().ToLowerInvariant();
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
-        if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt)) return Results.BadRequest(new { detail = "Invalid credentials" });
-        var token = Guid.NewGuid().ToString("N");
+        var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+        if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
+        if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
+        var token = AuthService.GenerateToken();
         _db.Sessions.Add(new Session { Token = token, UserId = user.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         await _db.SaveChangesAsync();
         return Results.Ok(new { token });
@@ -134,12 +142,37 @@ public class AuthController : ControllerBase
         if (code is null || code.Code != payload.Code || code.ExpiresAt < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Results.BadRequest(new { detail = "Invalid code" });
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
         if (user is null) return Results.BadRequest(new { detail = "User not found" });
-        var (hash, salt) = AuthService.HashPassword(payload.NewPassword);
+        if (!IsStrongPassword(payload.NewPassword)) return Results.BadRequest(new { detail = "Password is too weak" });
+        var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+        var (hash, salt) = AuthService.HashPassword(payload.NewPassword, iterations);
         user.PasswordHash = hash;
         user.Salt = salt;
         _db.VerificationCodes.Remove(code);
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
+    }
+
+
+    private static bool IsValidEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || email.Length > 320) return false;
+        try
+        {
+            _ = new System.Net.Mail.MailAddress(email);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsStrongPassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 10) return false;
+        return password.Any(char.IsUpper)
+               && password.Any(char.IsLower)
+               && password.Any(char.IsDigit);
     }
 
     private async Task UpsertCodeAsync(string email, string kind)
