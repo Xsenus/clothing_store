@@ -1,0 +1,121 @@
+[
+  {
+    "name": "Оверсайз худи Demon",
+    "slug": "oversize-hoodie-demon",
+    "description": "Стильное оверсайз худи с уникальным принтом в стиле стритвир. Изготовлено из качественного хлопка с добавлением полиэстера для долговечности. Идеально подходит для создания дерзкого городского образа.",
+    "price": 6500.0,
+    "sizes": [
+      "L"
+    ],
+    "images": [
+      "http://127.0.0.1:8000/uploads/DslmWZqrVWWsSbZf.jpg",
+      "http://127.0.0.1:8000/uploads/pHHrYaIJuwHEtALi.jpg",
+      "http://127.0.0.1:8000/uploads/-jEdaC-7fY23mLQ3.jpg"
+    ],
+    "isNew": true,
+    "isPopular": true,
+    "category": "hoodie",
+    "likesCount": 42,
+    "_id": "xzBSLpirIzFRsw",
+    "_creationTime": 1770682739119,
+    "media": [
+      {
+        "type": "image",
+        "url": "http://127.0.0.1:8000/uploads/DslmWZqrVWWsSbZf.jpg"
+      },
+      {
+        "type": "image",
+        "url": "http://127.0.0.1:8000/uploads/pHHrYaIJuwHEtALi.jpg"
+      },
+      {
+        "type": "image",
+        "url": "http://127.0.0.1:8000/uploads/-jEdaC-7fY23mLQ3.jpg"
+      }
+    ],
+    "videos": [],
+    "sku": "",
+    "material": "",
+    "printType": "",
+    "fit": "",
+    "gender": "",
+    "color": "",
+    "shipping": "",
+    "sizeStock": {
+      "L": 1
+    }
+  },
+  {
+    "name": "Футболка Street Culture",
+    "slug": "tshirt-street-culture",
+    "description": "Минималистичная футболка с графичным принтом Street Culture. Выполнена из натурального хлопка премиум качества. Свободный крой обеспечивает максимальный комфорт в повседневной носке.",
+    "price": 3500,
+    "sizes": [
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "images": [
+      "/placeholder-tshirt-1.jpg",
+      "/placeholder-tshirt-2.jpg"
+    ],
+    "isNew": true,
+    "isPopular": false,
+    "category": "t-shirt",
+    "likesCount": 15,
+    "_id": "5YPO0qG9U1QUpA",
+    "_creationTime": 1770682739119,
+    "media": [
+      {
+        "type": "image",
+        "url": "/placeholder-tshirt-1.jpg"
+      },
+      {
+        "type": "image",
+        "url": "/placeholder-tshirt-2.jpg"
+      }
+    ]
+  },
+  {
+    "name": "Карго брюки Urban",
+    "slug": "cargo-pants-urban",
+    "description": "Практичные карго брюки в урбанистическом стиле с множеством функциональных карманов. Прочная ткань и продуманный крой делают эти брюки незаменимыми для городских приключений. Отлично сочетаются с любым верхом.",
+    "price": 7500,
+    "sizes": [
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "images": [
+      "/placeholder-pants-1.jpg",
+      "/placeholder-pants-2.jpg",
+      "/placeholder-pants-3.jpg",
+      "/placeholder-pants-4.jpg"
+    ],
+    "isNew": false,
+    "isPopular": true,
+    "category": "pants",
+    "likesCount": 38,
+    "_id": "4mAV53w4oaqwYQ",
+    "_creationTime": 1770682739119,
+    "media": [
+      {
+        "type": "image",
+        "url": "/placeholder-pants-1.jpg"
+      },
+      {
+        "type": "image",
+        "url": "/placeholder-pants-2.jpg"
+      },
+      {
+        "type": "image",
+        "url": "/placeholder-pants-3.jpg"
+      },
+      {
+        "type": "image",
+        "url": "/placeholder-pants-4.jpg"
+      }
+    ]
+  }
+]
