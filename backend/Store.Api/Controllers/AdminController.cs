@@ -34,12 +34,16 @@ public class AdminController : ControllerBase
     [HttpPost("login")]
     public async Task<IResult> Login([FromBody] AuthPayload payload)
     {
-        var adminEmail = _configuration["ADMIN_EMAIL"] ?? "admin@local.dev";
-        var adminPassword = _configuration["ADMIN_PASSWORD"] ?? "admin";
+        var adminEmail = _configuration["ADMIN_EMAIL"]
+            ?? _configuration["AdminUser:Email"]
+            ?? "admin@local.dev";
+        var adminPassword = _configuration["ADMIN_PASSWORD"]
+            ?? _configuration["AdminUser:Password"]
+            ?? "admin";
         if (!string.Equals(payload.Email, adminEmail, StringComparison.OrdinalIgnoreCase) || payload.Password != adminPassword)
             return Results.BadRequest(new { detail = "Invalid credentials" });
 
-        var token = Guid.NewGuid().ToString("N");
+        var token = AuthService.GenerateToken();
         _db.AdminSessions.Add(new AdminSession { Token = token, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         await _db.SaveChangesAsync();
         return Results.Ok(new { token });

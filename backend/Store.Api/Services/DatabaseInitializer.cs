@@ -38,6 +38,12 @@ public class DatabaseInitializer
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
         await db.Database.EnsureCreatedAsync();
 
+        await CleanupExpiredDataAsync(db);
+
+        var seedMode = _configuration["DatabaseInitialization:SeedMode"] ?? "EnsureSeeded";
+        if (!string.Equals(seedMode, "EnsureSeeded", StringComparison.OrdinalIgnoreCase))
+            return;
+
         if (!db.Products.Any() && File.Exists(seedProductsPath))
         {
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -64,6 +70,22 @@ public class DatabaseInitializer
 
             await db.SaveChangesAsync();
         }
+    }
+
+
+    private async Task CleanupExpiredDataAsync(StoreDbContext db)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var userSessionTtlHours = _configuration.GetValue<int?>("Security:SessionTtlHours") ?? 24 * 30;
+        var adminSessionTtlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+
+        var minUserSessionTime = DateTimeOffset.UtcNow.AddHours(-userSessionTtlHours).ToUnixTimeMilliseconds();
+        var minAdminSessionTime = DateTimeOffset.UtcNow.AddHours(-adminSessionTtlHours).ToUnixTimeMilliseconds();
+
+        db.Sessions.RemoveRange(await db.Sessions.Where(x => x.CreatedAt < minUserSessionTime).ToListAsync());
+        db.AdminSessions.RemoveRange(await db.AdminSessions.Where(x => x.CreatedAt < minAdminSessionTime).ToListAsync());
+        db.VerificationCodes.RemoveRange(await db.VerificationCodes.Where(x => x.ExpiresAt < now).ToListAsync());
+        await db.SaveChangesAsync();
     }
 
     private static async Task EnsureDatabaseExistsAsync(string connectionString)
