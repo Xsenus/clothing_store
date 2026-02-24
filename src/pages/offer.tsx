@@ -1,8 +1,22 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { PUBLIC_OFFER } from '@/lib/legal-texts';
+import { useEffect, useState } from 'react';
+import { fetchPublicSettings } from '@/lib/site-settings';
 
 export default function OfferPage() {
+  const [text, setText] = useState(PUBLIC_OFFER);
+
+  useEffect(() => {
+    const load = async () => {
+      const settings = await fetchPublicSettings();
+      if (settings?.public_offer) {
+        setText(settings.public_offer);
+      }
+    };
+    load();
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Header />
@@ -11,7 +25,7 @@ export default function OfferPage() {
           Публичная оферта
         </h1>
         <div className="text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
-          {PUBLIC_OFFER}
+          {text}
         </div>
       </main>
       <Footer />

@@ -57,7 +57,11 @@ public class AuthService
         var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
 
         var session = await _db.AdminSessions.FirstOrDefaultAsync(x => x.Token == token);
-        return session is not null && session.CreatedAt >= minCreatedAt;
+        if (session is null || session.CreatedAt < minCreatedAt || string.IsNullOrWhiteSpace(session.UserId))
+            return false;
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == session.UserId);
+        return user is not null && user.IsAdmin && !user.IsBlocked;
     }
 
     /// <summary>

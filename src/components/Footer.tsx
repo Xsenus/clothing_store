@@ -37,7 +37,7 @@ export default function Footer() {
           <p>&copy; {new Date().getFullYear()} FASHION_DEMON. Все права защищены.</p>
           <div className="flex gap-6">
             <Link to="/privacy" className="hover:text-white transition-colors">Политика конфиденциальности</Link>
-            <Link to="/agreement" className="hover:text-white transition-colors">Пользовательское соглашение</Link>
+            <Link to="/terms" className="hover:text-white transition-colors">Пользовательское соглашение</Link>
             <Link to="/offer" className="hover:text-white transition-colors">Публичная оферта</Link>
           </div>
         </div>

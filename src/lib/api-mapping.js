@@ -41,22 +41,35 @@ const sortProducts = (products, sortBy) => {
   return sorted;
 };
 
+const normalizeProduct = (product) => {
+  if (!product) return product;
+  const productId = product._id || product.id;
+  return {
+    ...product,
+    _id: productId,
+    id: productId,
+  };
+};
+
+const normalizeProducts = (products) =>
+  Array.isArray(products) ? products.map(normalizeProduct) : [];
+
 export const FLOW = {
-  getNewProducts: async () => request("/products/new"),
+  getNewProducts: async () => normalizeProducts(await request("/products/new")),
 
-  getPopularProducts: async () => request("/products/popular"),
+  getPopularProducts: async () => normalizeProducts(await request("/products/popular")),
 
-  getAllProducts: async () => request("/products"),
+  getAllProducts: async () => normalizeProducts(await request("/products")),
 
   catalogFilter: async ({ input } = {}) => {
-    const products = await request("/products");
+    const products = normalizeProducts(await request("/products"));
     return sortProducts(products, input?.sortBy);
   },
 
-  getSingleProduct: async ({ input }) => request(`/products/${input.slug}`),
+  getSingleProduct: async ({ input }) => normalizeProduct(await request(`/products/${input.slug}`)),
 
   getSimilarProducts: async ({ input }) => {
-    const products = await request("/products");
+    const products = normalizeProducts(await request("/products"));
     return products.filter(
       (p) => p.category === input.category && p._id !== input.productId
     ).slice(0, 4);
@@ -91,17 +104,17 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
-  createProduct: async ({ input }) => request("/products", {
+  createProduct: async ({ input }) => normalizeProduct(await request("/products", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
-  }),
+  })),
 
-  updateProduct: async ({ input }) => request(`/products/${input.id}`, {
+  updateProduct: async ({ input }) => normalizeProduct(await request(`/products/${input.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
-  }),
+  })),
 
   deleteProduct: async ({ input }) => request(`/products/${input.id}`, {
     method: "DELETE",
@@ -228,6 +241,30 @@ export const FLOW = {
   },
 
   adminMe: async () => request("/admin/me"),
+
+  adminGetOrders: async () => request("/admin/orders"),
+
+  adminGetUsers: async () => request("/admin/users"),
+
+  adminUpdateUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isAdmin: input.isAdmin, isBlocked: input.isBlocked }),
+  }),
+
+  adminDeleteUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
+    method: "DELETE",
+  }),
+
+  adminGetSettings: async () => request("/admin/settings"),
+
+  adminSaveSettings: async ({ input }) => request("/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  getPublicSettings: async () => request("/settings/public"),
 
   adminLogout: async () => {
     await request("/admin/logout", { method: "POST" });

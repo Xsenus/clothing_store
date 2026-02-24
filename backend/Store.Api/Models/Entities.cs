@@ -45,6 +45,15 @@ public class User
     /// </summary>
     [Column("created_at")]
     public long CreatedAt { get; set; }
+
+    [Column("is_admin")]
+    public bool IsAdmin { get; set; }
+
+    [Column("is_blocked")]
+    public bool IsBlocked { get; set; }
+
+    [Column("is_system")]
+    public bool IsSystem { get; set; }
 }
 
 /// <summary>
@@ -91,6 +100,20 @@ public class AdminSession
     /// </summary>
     [Column("created_at")]
     public long CreatedAt { get; set; }
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+}
+
+[Table("app_settings")]
+public class AppSetting
+{
+    [Key]
+    [Column("key")]
+    public string Key { get; set; } = string.Empty;
+
+    [Column("value")]
+    public string Value { get; set; } = string.Empty;
 }
 
 /// <summary>

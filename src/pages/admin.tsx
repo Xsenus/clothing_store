@@ -21,6 +21,7 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -53,8 +54,11 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
-export default function AdminPage() {
+export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
@@ -92,13 +96,15 @@ export default function AdminPage() {
       try {
         await FLOW.adminMe();
         setIsAdmin(true);
-        fetchProducts();
+        await Promise.all([fetchProducts(), fetchAdminData()]);
       } catch (error) {
-        navigate("/admin-login");
+        if (!embedded) {
+          navigate("/profile");
+        }
       }
     };
     checkAuth();
-  }, []);
+  }, [embedded, navigate]);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -109,6 +115,58 @@ export default function AdminPage() {
       console.error("Failed to fetch products");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAdminData = async () => {
+    try {
+      const [usersRes, ordersRes, settingsRes] = await Promise.all([
+        FLOW.adminGetUsers(),
+        FLOW.adminGetOrders(),
+        FLOW.adminGetSettings()
+      ]);
+      setUsers(Array.isArray(usersRes) ? usersRes : []);
+      setOrders(Array.isArray(ordersRes) ? ordersRes : []);
+      setSettings(settingsRes || {});
+    } catch (error) {
+      toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
+    }
+  };
+
+  const toggleUserBlock = async (user: any) => {
+    try {
+      await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось изменить блокировку");
+    }
+  };
+
+  const toggleUserAdmin = async (user: any) => {
+    try {
+      await FLOW.adminUpdateUser({ input: { userId: user.id, isAdmin: !user.isAdmin } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось изменить права");
+    }
+  };
+
+  const deleteUser = async (user: any) => {
+    if (!confirm(`Удалить пользователя ${user.email}?`)) return;
+    try {
+      await FLOW.adminDeleteUser({ input: { userId: user.id } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось удалить пользователя");
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      await FLOW.adminSaveSettings({ input: settings });
+      toast.success("Настройки сохранены");
+    } catch (error) {
+      toast.error("Не удалось сохранить настройки");
     }
   };
 
@@ -202,9 +260,13 @@ export default function AdminPage() {
       };
 
       if (editingId) {
+        const targetProduct = products.find((p) => p._id === editingId || (p as any).id === editingId);
         await FLOW.updateProduct({
           input: {
             id: editingId,
+            _id: editingId,
+            likesCount: targetProduct?.likesCount ?? 0,
+            creationTime: (targetProduct as any)?._creationTime || Date.now(),
             ...payload
           }
         });
@@ -323,29 +385,38 @@ export default function AdminPage() {
     }
   };
 
-  if (loading) return <LoadingSpinner className="h-screen" />;
+  if (loading) return <LoadingSpinner className={embedded ? "h-56" : "h-screen"} />;
   if (!isAdmin) return null;
 
   return (
-      <div className="min-h-screen flex flex-col bg-background text-foreground">
-        <Header />
+      <div className={embedded ? "" : "min-h-screen flex flex-col bg-background text-foreground"}>
+        {!embedded && <Header />}
         
-        <main className="flex-1 container mx-auto px-4 py-12">
+        <main className={embedded ? "" : "flex-1 container mx-auto px-4 py-12"}>
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black uppercase tracking-tighter">ПАНЕЛЬ АДМИНИСТРАТОРА</h1>
             <div className="flex items-center gap-3">
-              <Button variant="outline" className="rounded-none font-bold uppercase tracking-widest" onClick={async () => {
+              {!embedded && <Button variant="outline" className="rounded-none font-bold uppercase tracking-widest" onClick={async () => {
                 await FLOW.adminLogout();
-                navigate("/admin-login");
+                navigate("/profile");
               }}>
                 ВЫЙТИ
-              </Button>
+              </Button>}
               <Button onClick={() => handleOpen()} className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest">
                 <Plus className="w-4 h-4 mr-2" /> ДОБАВИТЬ ТОВАР
               </Button>
             </div>
           </div>
 
+          <Tabs defaultValue="products" className="w-full">
+            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
+              <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
+              <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
+              <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
+              <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
+            </TabsList>
+
+          <TabsContent value="products" className="mt-0">
           <div className="border border-gray-200 rounded-none overflow-hidden">
             <Table>
               <TableHeader className="bg-gray-50">
@@ -390,6 +461,111 @@ export default function AdminPage() {
               </TableBody>
             </Table>
           </div>
+          </TabsContent>
+
+          <TabsContent value="users" className="mt-0">
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">Пользователи и права</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Роль</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead className="text-right">Действия</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>{user.isAdmin ? "Админ" : "Пользователь"}{user.isSystem ? " (system)" : ""}</TableCell>
+                      <TableCell>{user.isBlocked ? "Заблокирован" : "Активен"}</TableCell>
+                      <TableCell className="text-right space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => toggleUserBlock(user)}>
+                          {user.isBlocked ? "Разблокировать" : "Блокировать"}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => toggleUserAdmin(user)} disabled={user.isSystem}>
+                          {user.isAdmin ? "Снять админа" : "Сделать админом"}
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => deleteUser(user)} disabled={user.isSystem}>
+                          Удалить
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="orders" className="mt-0">
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">История заказов</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Пользователь</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead>Сумма</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
+                      <TableCell>{order.userEmail || order.userId}</TableCell>
+                      <TableCell>{order.status}</TableCell>
+                      <TableCell>{order.totalAmount}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="settings" className="mt-0">
+            <div className="border border-gray-200 p-4">
+              <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {[
+                  "storeName",
+                  "privacy_policy",
+                  "user_agreement",
+                  "public_offer",
+                  "cookie_consent_text"
+                ].map((key) => (
+                  <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
+                    Добавить ключ {key}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid gap-4">
+                {Object.entries(settings).map(([key, value]) => (
+                  <div key={key} className="space-y-1">
+                    <Label>{key}</Label>
+                    {key.includes("policy") || key.includes("agreement") || key.includes("offer") ? (
+                      <Textarea
+                        value={value}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="min-h-[180px]"
+                      />
+                    ) : (
+                      <Input
+                        value={value}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button onClick={saveSettings}>Сохранить настройки</Button>
+              </div>
+            </div>
+          </TabsContent>
+          </Tabs>
 
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-none border-black">
@@ -660,6 +836,7 @@ export default function AdminPage() {
             </DialogContent>
           </Dialog>
         </main>
+        {!embedded && <Footer />}
       </div>
   );
 }

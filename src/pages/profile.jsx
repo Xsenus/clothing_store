@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Authenticated, useAuthActions } from "@/context/AuthContext";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { toast } from "sonner";
+import AdminPage from "./admin";
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState("orders");
@@ -21,6 +22,7 @@ export default function ProfilePage() {
   const [likedProductIds, setLikedProductIds] = useState([]);
   const [products, setProducts] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -36,7 +38,10 @@ export default function ProfilePage() {
         if (Array.isArray(ordersRes)) setOrders(ordersRes);
         if (Array.isArray(likesRes)) setLikedProductIds(likesRes.map((like) => like.productId));
         if (Array.isArray(productsRes)) setProducts(productsRes);
-        if (profileRes) setProfile(profileRes);
+        if (profileRes) {
+          setProfile(profileRes);
+          setIsAdmin(!!profileRes.isAdmin);
+        }
       } catch (error) {
         console.error("Failed to fetch profile data:", error);
       } finally {
@@ -84,7 +89,7 @@ export default function ProfilePage() {
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter mb-8">МОЙ АККАУНТ</h1>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 space-x-8">
+            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
               <TabsTrigger
                 value="orders"
                 className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all"
@@ -103,6 +108,14 @@ export default function ProfilePage() {
               >
                 НАСТРОЙКИ
               </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger
+                  value="admin"
+                  className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all"
+                >
+                  АДМИН
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="orders" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -233,6 +246,12 @@ export default function ProfilePage() {
                 </form>
               </div>
             </TabsContent>
+
+            {isAdmin && (
+              <TabsContent value="admin" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <AdminPage embedded />
+              </TabsContent>
+            )}
           </Tabs>
         </main>
 

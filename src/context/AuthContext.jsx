@@ -44,7 +44,15 @@ export function AuthProvider({ children }) {
       return { signingIn: true };
     }
     const result = await FLOW.signIn({ input: { email, password } });
-    setUser(result.user);
+    if (result.user) {
+      setUser(result.user);
+      return { signingIn: true };
+    }
+
+    const me = await FLOW.getProfile();
+    if (me?.email) {
+      setUser({ email: me.email, name: me.name, isAdmin: !!me.isAdmin });
+    }
     return { signingIn: true };
   };
 

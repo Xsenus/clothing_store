@@ -30,6 +30,7 @@ public class DatabaseInitializer
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
         await db.Database.EnsureCreatedAsync();
+        await EnsureSchemaAsync(db);
 
         await CleanupExpiredDataAsync(db);
 
@@ -65,7 +66,137 @@ public class DatabaseInitializer
         }
 
         await EnsureDefaultUserAsync(db);
+        await EnsureAdminUserAsync(db);
         await EnsureTestDataAsync(db);
+    }
+
+    private async Task EnsureAdminUserAsync(StoreDbContext db)
+    {
+        var adminEmail = (_configuration["ADMIN_EMAIL"]
+            ?? _configuration["AdminUser:Email"]
+            ?? "admin@clothingstore.local").Trim().ToLowerInvariant();
+        var adminPassword = _configuration["ADMIN_PASSWORD"]
+            ?? _configuration["AdminUser:Password"]
+            ?? "admin12345";
+
+        if (string.IsNullOrWhiteSpace(adminEmail) || string.IsNullOrWhiteSpace(adminPassword))
+            return;
+
+        var adminName = _configuration["AdminUser:Name"] ?? "System Admin";
+        var admin = await db.Users.FirstOrDefaultAsync(x => x.Email == adminEmail);
+        var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+
+        if (admin is null)
+        {
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var (hash, salt) = AuthService.HashPassword(adminPassword, iterations);
+            admin = new User
+            {
+                Email = adminEmail,
+                PasswordHash = hash,
+                Salt = salt,
+                Verified = true,
+                CreatedAt = now,
+                IsAdmin = true,
+                IsSystem = true,
+                IsBlocked = false
+            };
+            db.Users.Add(admin);
+            await db.SaveChangesAsync();
+        }
+        else
+        {
+            admin.IsAdmin = true;
+            admin.IsSystem = true;
+            admin.IsBlocked = false;
+            admin.Verified = true;
+            if (!AuthService.VerifyPassword(adminPassword, admin.PasswordHash, admin.Salt, iterations))
+            {
+                var (hash, salt) = AuthService.HashPassword(adminPassword, iterations);
+                admin.PasswordHash = hash;
+                admin.Salt = salt;
+            }
+        }
+
+        var profile = await db.Profiles.FirstOrDefaultAsync(x => x.UserId == admin.Id);
+        if (profile is null)
+        {
+            db.Profiles.Add(new Profile
+            {
+                UserId = admin.Id,
+                Email = admin.Email,
+                Name = adminName
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task EnsureSchemaAsync(StoreDbContext db)
+    {
+        if (db.Database.IsSqlite())
+        {
+            var userColumns = await GetSqliteColumnsAsync(db, "users");
+            if (!userColumns.Contains("is_admin"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;");
+            if (!userColumns.Contains("is_blocked"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;");
+            if (!userColumns.Contains("is_system"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0;");
+
+            var adminSessionColumns = await GetSqliteColumnsAsync(db, "admin_sessions");
+            if (!adminSessionColumns.Contains("user_id"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE admin_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '';");
+
+            if (!await SqliteTableExistsAsync(db, "app_settings"))
+                await db.Database.ExecuteSqlRawAsync("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
+            return;
+        }
+
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';");
+            await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
+        }
+    }
+
+    private static async Task<bool> SqliteTableExistsAsync(StoreDbContext db, string tableName)
+    {
+        await using var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync();
+        return result is not null;
+    }
+
+    private static async Task<HashSet<string>> GetSqliteColumnsAsync(StoreDbContext db, string tableName)
+    {
+        await using var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        return columns;
     }
 
     private async Task EnsureDefaultUserAsync(StoreDbContext db)

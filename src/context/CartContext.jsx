@@ -14,7 +14,10 @@ export function CartProvider({ children }) {
     try {
       const items = await FLOW.getCart({ input: {} });
       if (Array.isArray(items)) {
-        setCartItems(items);
+        setCartItems(items.map((item) => ({
+          ...item,
+          cartId: item.cartId || item.id,
+        })));
       }
     } catch (error) {
       console.error("Failed to fetch cart:", error);
