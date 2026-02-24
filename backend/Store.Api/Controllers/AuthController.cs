@@ -41,7 +41,21 @@ public class AuthController : ControllerBase
 
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
         var (hash, salt) = AuthService.HashPassword(payload.Password, iterations);
-        _db.Users.Add(new User { Id = Guid.NewGuid().ToString("N"), Email = email, PasswordHash = hash, Salt = salt, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+        var user = new User
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Email = email,
+            PasswordHash = hash,
+            Salt = salt,
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+        _db.Users.Add(user);
+        _db.Profiles.Add(new Profile
+        {
+            UserId = user.Id,
+            Email = email,
+            Name = email.Split('@')[0]
+        });
         await UpsertCodeAsync(email, "signup");
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
@@ -70,8 +84,18 @@ public class AuthController : ControllerBase
         var user = await _db.Users.FirstAsync(x => x.Email == email);
         user.Verified = true;
         _db.VerificationCodes.Remove(code);
+        var token = AuthService.GenerateToken();
+        _db.Sessions.Add(new Session { Token = token, UserId = user.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         await _db.SaveChangesAsync();
-        return Results.Ok(new { ok = true });
+        return Results.Ok(new
+        {
+            token,
+            user = new
+            {
+                id = user.Id,
+                email = user.Email
+            }
+        });
     }
 
     /// <summary>
