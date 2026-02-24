@@ -136,11 +136,20 @@ public class DatabaseInitializer
     {
         if (db.Database.IsSqlite())
         {
-            await ExecuteIgnoreErrorAsync(db, "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;");
-            await ExecuteIgnoreErrorAsync(db, "ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;");
-            await ExecuteIgnoreErrorAsync(db, "ALTER TABLE users ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0;");
-            await ExecuteIgnoreErrorAsync(db, "ALTER TABLE admin_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '';");
-            await ExecuteIgnoreErrorAsync(db, "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
+            var userColumns = await GetSqliteColumnsAsync(db, "users");
+            if (!userColumns.Contains("is_admin"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;");
+            if (!userColumns.Contains("is_blocked"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;");
+            if (!userColumns.Contains("is_system"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0;");
+
+            var adminSessionColumns = await GetSqliteColumnsAsync(db, "admin_sessions");
+            if (!adminSessionColumns.Contains("user_id"))
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE admin_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '';");
+
+            if (!await SqliteTableExistsAsync(db, "app_settings"))
+                await db.Database.ExecuteSqlRawAsync("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
             return;
         }
 
@@ -154,16 +163,40 @@ public class DatabaseInitializer
         }
     }
 
-    private static async Task ExecuteIgnoreErrorAsync(StoreDbContext db, string sql)
+    private static async Task<bool> SqliteTableExistsAsync(StoreDbContext db, string tableName)
     {
-        try
+        await using var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        var result = await command.ExecuteScalarAsync();
+        return result is not null;
+    }
+
+    private static async Task<HashSet<string>> GetSqliteColumnsAsync(StoreDbContext db, string tableName)
+    {
+        await using var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
         {
-            await db.Database.ExecuteSqlRawAsync(sql);
+            columns.Add(reader.GetString(1));
         }
-        catch
-        {
-            // noop: sqlite schema may already contain the target object.
-        }
+
+        return columns;
     }
 
     private async Task EnsureDefaultUserAsync(StoreDbContext db)
