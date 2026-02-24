@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAuthActions } from "@/context/AuthContext";
+import { useAuth, useAuthActions } from "@/context/AuthContext";
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { FLOW } from "@/lib/api-mapping";
 
 export default function AuthPage() {
   const { signIn } = useAuthActions();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState(null);
@@ -33,6 +34,12 @@ export default function AuthPage() {
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
   const [authTab, setAuthTab] = useState("signin");
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate("/profile", { replace: true });
+    }
+  }, [authLoading, isAuthenticated, navigate]);
 
   const getErrorMessage = (error, fallback) => {
     const message = error?.message || "";
@@ -255,6 +262,22 @@ export default function AuthPage() {
       <Footer />
       </div>
     );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <Header />
+        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+          <div className="text-sm text-gray-500">Проверяем сессию…</div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return null;
   }
 
   return (
