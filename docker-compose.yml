@@ -25,6 +25,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8000
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       DATABASE_URL: Host=postgres;Port=5432;Database=${POSTGRES_DB:-clothing_store};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
