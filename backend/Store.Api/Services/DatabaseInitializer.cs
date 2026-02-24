@@ -184,7 +184,7 @@ public class DatabaseInitializer
             db.Orders.Add(new Order
             {
                 UserId = user.Id,
-                ItemsJson = $$"[{"productId":"{{firstProduct.Id}}","quantity":1,"size":"M"}]",
+                ItemsJson = $"[{{\"productId\":\"{firstProduct.Id}\",\"quantity\":1,\"size\":\"M\"}}]",
                 TotalAmount = 0
             });
         }
