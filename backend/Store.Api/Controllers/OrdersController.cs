@@ -38,7 +38,7 @@ public class OrdersController : ControllerBase
         return Results.Json(await _db.Orders.Where(x => x.UserId == user.Id).OrderByDescending(x => x.CreatedAt).Select(x => new
         {
             x.Id,
-            items = JsonSerializer.Deserialize<object>(x.ItemsJson),
+            items = x.ItemsJson,
             x.TotalAmount,
             x.Status,
             x.CreatedAt
