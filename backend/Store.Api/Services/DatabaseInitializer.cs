@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using NpgsqlTypes;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -28,11 +29,16 @@ public class DatabaseInitializer
     /// </summary>
     public async Task InitializeAsync(string seedProductsPath)
     {
-        var connectionString = _configuration["DATABASE_URL"]
+        var provider = _configuration["ResolvedDatabase:Provider"] ?? "postgres";
+        var connectionString = _configuration["ResolvedDatabase:ConnectionString"]
+            ?? _configuration["DATABASE_URL"]
             ?? _configuration.GetConnectionString("DefaultConnection")
             ?? "Host=localhost;Port=5432;Database=clothing_store;Username=postgres;Password=postgres";
 
-        await EnsureDatabaseExistsAsync(connectionString);
+        if (string.Equals(provider, "postgres", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureDatabaseExistsAsync(connectionString);
+        }
 
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
@@ -216,13 +222,14 @@ public class DatabaseInitializer
         await using var conn = new NpgsqlConnection(builder.ConnectionString);
         await conn.OpenAsync();
 
-        await using var cmd = new NpgsqlCommand($"SELECT 1 FROM pg_database WHERE datname = @db", conn);
-        cmd.Parameters.AddWithValue("db", dbName);
+        await using var cmd = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @db", conn);
+        cmd.Parameters.Add("db", NpgsqlDbType.Text).Value = dbName;
         var exists = await cmd.ExecuteScalarAsync();
 
         if (exists is null)
         {
-            await using var createCmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", conn);
+            var quotedDbName = NpgsqlCommandBuilder.QuoteIdentifier(dbName);
+            await using var createCmd = new NpgsqlCommand($"CREATE DATABASE {quotedDbName}", conn);
             await createCmd.ExecuteNonQueryAsync();
         }
     }
