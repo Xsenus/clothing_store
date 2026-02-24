@@ -89,8 +89,8 @@ export default function AuthPage() {
 
   const handleSignUp = async (e) => {
     e.preventDefault();
-    if (signUpPassword.length < 8) {
-      toast.error("Пароль должен быть не менее 8 символов");
+    if (signUpPassword.length < 10 || !/[A-Z]/.test(signUpPassword) || !/[a-z]/.test(signUpPassword) || !/\d/.test(signUpPassword)) {
+      toast.error("Пароль должен быть от 10 символов и содержать A-Z, a-z и цифру");
       return;
     }
     setLoading(true);
