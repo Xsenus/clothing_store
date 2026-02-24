@@ -1,7 +1,5 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
-using NpgsqlTypes;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -29,17 +27,6 @@ public class DatabaseInitializer
     /// </summary>
     public async Task InitializeAsync(string seedProductsPath)
     {
-        var provider = _configuration["ResolvedDatabase:Provider"] ?? "postgres";
-        var connectionString = _configuration["ResolvedDatabase:ConnectionString"]
-            ?? _configuration["DATABASE_URL"]
-            ?? _configuration.GetConnectionString("DefaultConnection")
-            ?? "Host=localhost;Port=5432;Database=clothing_store;Username=postgres;Password=postgres";
-
-        if (string.Equals(provider, "postgres", StringComparison.OrdinalIgnoreCase))
-        {
-            await EnsureDatabaseExistsAsync(connectionString);
-        }
-
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
         await db.Database.EnsureCreatedAsync();
@@ -50,7 +37,7 @@ public class DatabaseInitializer
         if (!string.Equals(seedMode, "EnsureSeeded", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!db.Products.Any() && File.Exists(seedProductsPath))
+        if (!await db.Products.AnyAsync() && File.Exists(seedProductsPath))
         {
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             foreach (var line in await File.ReadAllLinesAsync(seedProductsPath))
@@ -211,26 +198,5 @@ public class DatabaseInitializer
         db.AdminSessions.RemoveRange(await db.AdminSessions.Where(x => x.CreatedAt < minAdminSessionTime).ToListAsync());
         db.VerificationCodes.RemoveRange(await db.VerificationCodes.Where(x => x.ExpiresAt < now).ToListAsync());
         await db.SaveChangesAsync();
-    }
-
-    private static async Task EnsureDatabaseExistsAsync(string connectionString)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(connectionString);
-        var dbName = builder.Database;
-        builder.Database = "postgres";
-
-        await using var conn = new NpgsqlConnection(builder.ConnectionString);
-        await conn.OpenAsync();
-
-        await using var cmd = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @db", conn);
-        cmd.Parameters.Add("db", NpgsqlDbType.Text).Value = dbName;
-        var exists = await cmd.ExecuteScalarAsync();
-
-        if (exists is null)
-        {
-            var quotedDbName = NpgsqlCommandBuilder.QuoteIdentifier(dbName);
-            await using var createCmd = new NpgsqlCommand($"CREATE DATABASE {quotedDbName}", conn);
-            await createCmd.ExecuteNonQueryAsync();
-        }
     }
 }
