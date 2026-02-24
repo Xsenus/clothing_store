@@ -31,31 +31,31 @@ public class ProductsController : ControllerBase
     /// Возвращает список товаров.
     /// </summary>
     [HttpGet]
-    public async Task<IResult> List() => Results.Json((await _db.Products.Select(p => p.Data).ToListAsync()).Select(JsonNode.Parse));
+    public async Task<IResult> List() => Results.Json((await _db.Products.Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
     /// <summary>
     /// Возвращает новые товары.
     /// </summary>
     [HttpGet("new")]
-    public async Task<IResult> ListNew() => Results.Json((await _db.Products.Where(p => p.IsNew).Select(p => p.Data).ToListAsync()).Select(JsonNode.Parse));
+    public async Task<IResult> ListNew() => Results.Json((await _db.Products.Where(p => p.IsNew).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
     /// <summary>
     /// Возвращает популярные товары.
     /// </summary>
     [HttpGet("popular")]
-    public async Task<IResult> ListPopular() => Results.Json((await _db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(JsonNode.Parse));
+    public async Task<IResult> ListPopular() => Results.Json((await _db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
     /// <summary>
     /// Возвращает новые товары по категории.
     /// </summary>
     [HttpGet("category/{category}/new")]
-    public async Task<IResult> CategoryNew(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsNew).Select(p => p.Data).ToListAsync()).Select(JsonNode.Parse));
+    public async Task<IResult> CategoryNew(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsNew).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
     /// <summary>
     /// Возвращает популярные товары по категории.
     /// </summary>
     [HttpGet("category/{category}/popular")]
-    public async Task<IResult> CategoryPopular(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(JsonNode.Parse));
+    public async Task<IResult> CategoryPopular(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
     /// <summary>
     /// Возвращает товар по slug.
