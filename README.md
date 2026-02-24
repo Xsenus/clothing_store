@@ -7,35 +7,73 @@
 - **DB:** PostgreSQL 16
 - **Deploy:** Docker Compose + Nginx + GitHub Actions (SSH deploy на VPS)
 
-## Что уже покрыто по функционалу сайта
+---
 
-На основе текущих страниц и flow сайта реализованы и сохранены:
+## Что реализовано в текущем сайте
 
-- Каталог товаров, карточка товара, похожие товары
-- Лайки товаров
-- Корзина (добавление, изменение количества, удаление, очистка)
-- Оформление заказа и история заказов
-- Личный кабинет покупателя (профиль, лайки, заказы)
-- Регистрация/логин/логаут, подтверждение кода, сброс пароля
-- Админка: логин, CRUD товаров, удаление отзывов, загрузка медиа
+На основании фактических страниц и текущего UI/flow:
 
-> Т.е. структура “личный кабинет + корзина + заказы + история + каталоги с настройкой” в текущем сайте поддерживается API и фронтом.
+- Каталог товаров + фильтрация/сортировка
+- Карточка товара + похожие товары + отзывы + лайки
+- Корзина (добавление/изменение/удаление/очистка)
+- Оформление заказа
+- Личный кабинет покупателя:
+  - история заказов
+  - избранное
+  - настройки профиля
+- Админка:
+  - авторизация администратора
+  - CRUD товаров
+  - загрузка изображений/видео
+  - удаление отзывов
+
+> То есть “личный кабинет + корзина + заказы + история + каталоги с настройкой” поддерживаются текущими страницами и API.
 
 ---
 
 ## Архитектура backend
 
-- `backend/Store.Api/Program.cs` — все endpoints + бизнес-логика
-- `backend/Store.Api/Migrations/001_init.sql` — SQL-миграция схемы
-- Миграции применяются автоматически при старте API
-- Продукты теперь хранятся в PostgreSQL (`products`), а не в JSON-файле
-- При первом запуске делается seed из:
-  1) `backend/products.json`, если есть
-  2) иначе `seed/products.jsonl`
+- `backend/Store.Api/Program.cs` — маршруты API + бизнес-логика
+- `backend/Store.Api/Migrations/*.sql` — SQL-миграции
+- Миграции применяются автоматически при старте backend
+- Рабочая БД — PostgreSQL (runtime-хранилище)
+- Seed продуктов при пустой таблице:
+  1) `backend/products.json`
+  2) fallback: `seed/products.jsonl`
+
+Подробности: `docs/ARCHITECTURE.md`.
 
 ---
 
-## Быстрый старт (Docker, рекомендовано)
+## Локальный запуск
+
+### 1) Frontend
+
+```bash
+npm ci
+npm run dev
+```
+
+### 2) Backend
+
+Требуется `.NET SDK 8` + PostgreSQL.
+
+```bash
+dotnet run --project backend/Store.Api/Store.Api.csproj
+```
+
+Ключевые переменные:
+
+- `DATABASE_URL`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `STORE_UPLOADS_DIR`
+- `STORE_PRODUCTS_PATH`
+- `STORE_SEED_PRODUCTS_PATH`
+
+---
+
+## Production (Docker Compose)
 
 1. Создать env:
 
@@ -43,7 +81,7 @@
 cp .env.example .env
 ```
 
-2. Заполнить `.env` безопасными значениями.
+2. Заполнить безопасные значения в `.env`.
 
 3. Запуск:
 
@@ -54,68 +92,60 @@ docker compose up -d --build
 4. Проверка:
 
 - frontend: `http://<server-ip>/`
-- api через nginx: `http://<server-ip>/api/products`
+- API: `http://<server-ip>/api/products`
+
+Подробности: `docs/DEPLOYMENT.md`.
 
 ---
 
-## Локальная разработка без Docker
-
-### Frontend
-
-```bash
-npm ci
-npm run dev
-```
-
-### Backend
-
-Нужны .NET SDK 8 + PostgreSQL.
-
-```bash
-dotnet run --project backend/Store.Api/Store.Api.csproj
-```
-
-Переменные окружения для backend:
-
-- `DATABASE_URL` (строка подключения PostgreSQL)
-- `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
-- `STORE_UPLOADS_DIR` (куда складывать upload-файлы)
-- `STORE_PRODUCTS_PATH` (источник seed)
-- `STORE_SEED_PRODUCTS_PATH` (fallback seed)
-
----
-
-## Деплой на VPS (автоматический)
+## Автодеплой на VPS (push в main)
 
 Workflow: `.github/workflows/deploy-vps.yml`
 
-Триггер: push в `main`.
-
-Что делает:
-
-1. Подключается по SSH к VPS
-2. Обновляет репозиторий
-3. Поднимает стек `docker compose up -d --build`
-
-GitHub Secrets:
+Нужные GitHub Secrets:
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 
-Подготовка VPS:
+Логика workflow:
 
-1. Установить Docker и Docker Compose plugin
-2. Клонировать проект в `/opt/clothing_store`
-3. Создать `.env`
-4. (Опционально) подключить systemd unit `deploy/systemd/clothing-store.service`
+1. SSH на VPS
+2. Обновление репозитория
+3. Подъем `docker compose up -d --build --remove-orphans`
 
 ---
 
-## Важные замечания
+## Что удалено как legacy
 
-- Python backend удален.
-- База данных переведена на PostgreSQL.
-- JSON-файлы не используются как рабочая БД, только как источник начального seed.
-- Для production фронт использует `VITE_API_URL=/api`.
+- Python backend (`backend/app.py`, `backend/db.py`, `backend/requirements.txt`)
+- Python `__pycache__/` и `*.pyc`
+
+---
+
+## Репозиторные правила
+
+- `.gitignore` покрывает React + .NET + runtime data
+- `deploy/data/*` хранит runtime данные в docker-режиме
+- В репозитории оставлены только `.gitkeep` для структуры каталогов
+
+---
+
+## Диагностика
+
+Если API недоступен:
+
+1. Проверить контейнеры:
+
+```bash
+docker compose ps
+```
+
+2. Проверить логи backend/postgres:
+
+```bash
+docker compose logs backend --tail=200
+docker compose logs postgres --tail=200
+```
+
+3. Проверить env и строку подключения `DATABASE_URL`.
