@@ -1,6 +1,5 @@
 import React from "react";
 import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +10,22 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
+
+
+function AuthMiniFooter() {
+  return (
+    <div className="w-full space-y-3 py-4 text-center text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+        <Link className="underline-offset-2 hover:underline" to="/privacy">Политика конфиденциальности</Link>
+        <span className="hidden sm:inline">•</span>
+        <Link className="underline-offset-2 hover:underline" to="/agreement">Соглашение</Link>
+        <span className="hidden sm:inline">•</span>
+        <Link className="underline-offset-2 hover:underline" to="/offer">Оферта</Link>
+      </div>
+      <p>© 2026 FASHION_DEMON</p>
+    </div>
+  );
+}
 
 export default function AuthPage() {
   const { signIn } = useAuthActions();
@@ -192,10 +207,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <Card
-            className="w-full max-w-[400px] shadow-lg !max-w-[400px]"
-            style={{ width: "400px", maxWidth: "400px" }}
+            className="mx-auto w-full shadow-lg" style={{ width: "min(100%, 400px)" }}
           >
             <CardHeader className="pb-4">
               <CardTitle className="text-xl">Восстановление пароля</CardTitle>
@@ -259,7 +273,7 @@ export default function AuthPage() {
             </div>
           </Card>
         </main>
-      <Footer />
+        <AuthMiniFooter />
       </div>
     );
   }
@@ -268,10 +282,10 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
         </main>
-        <Footer />
+        <AuthMiniFooter />
       </div>
     );
   }
@@ -283,9 +297,8 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
-        <div className="w-full max-w-[400px] !max-w-[400px]" style={{ width: "400px", maxWidth: "400px" }}>
-          <Card className="w-full shadow-lg" style={{ width: "400px", maxWidth: "400px" }}>
+      <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
+        <Card className="mx-auto w-full shadow-lg" style={{ width: "min(100%, 400px)" }}>
           <CardHeader className="pb-4">
             <CardTitle className="text-xl text-center">Вход в аккаунт</CardTitle>
             <CardDescription className="text-center text-sm">
@@ -381,20 +394,6 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Вход..." : "Войти"}
                     </Button>
-                    <div className="text-[11px] leading-snug text-center text-gray-500">
-                      Входя, вы принимаете{" "}
-                      <Link className="underline hover:text-gray-700" to="/privacy">
-                        политику конфиденциальности
-                      </Link>
-                      ,{" "}
-                      <Link className="underline hover:text-gray-700" to="/agreement">
-                        соглашение
-                      </Link>{" "}
-                      и{" "}
-                      <Link className="underline hover:text-gray-700" to="/offer">
-                        оферту
-                      </Link>
-                    </div>
                   </form>
                 </TabsContent>
 
@@ -428,29 +427,14 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Регистрация..." : "Зарегистрироваться"}
                     </Button>
-                    <div className="text-[11px] leading-snug text-center text-gray-500">
-                      Регистрируясь, вы принимаете{" "}
-                      <Link className="underline hover:text-gray-700" to="/privacy">
-                        политику конфиденциальности
-                      </Link>
-                      ,{" "}
-                      <Link className="underline hover:text-gray-700" to="/agreement">
-                        соглашение
-                      </Link>{" "}
-                      и{" "}
-                      <Link className="underline hover:text-gray-700" to="/offer">
-                        оферту
-                      </Link>
-                    </div>
                   </form>
                 </TabsContent>
               </Tabs>
             )}
           </CardContent>
         </Card>
-        </div>
       </main>
-      <Footer />
+      <AuthMiniFooter />
     </div>
   );
 }
