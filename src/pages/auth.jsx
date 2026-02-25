@@ -14,7 +14,7 @@ import { FLOW } from "@/lib/api-mapping";
 
 function AuthMiniFooter() {
   return (
-    <div className="mt-6 space-y-3 text-center text-xs text-muted-foreground">
+    <div className="mt-auto w-full space-y-3 pt-8 pb-4 text-center text-xs text-muted-foreground">
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
         <Link className="underline-offset-2 hover:underline" to="/privacy">Политика конфиденциальности</Link>
         <span className="hidden sm:inline">•</span>
@@ -207,7 +207,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
           <Card
             className="w-full max-w-[350px] shadow-lg"
           >
@@ -282,7 +282,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
           <AuthMiniFooter />
         </main>
@@ -297,7 +297,7 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
+      <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
         <div className="w-full max-w-[350px]">
           <Card className="w-full shadow-lg">
           <CardHeader className="pb-4">
@@ -395,20 +395,6 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Вход..." : "Войти"}
                     </Button>
-                    <div className="text-[11px] leading-snug text-center text-gray-500">
-                      Входя, вы принимаете{" "}
-                      <Link className="underline hover:text-gray-700" to="/privacy">
-                        политику конфиденциальности
-                      </Link>
-                      ,{" "}
-                      <Link className="underline hover:text-gray-700" to="/agreement">
-                        соглашение
-                      </Link>{" "}
-                      и{" "}
-                      <Link className="underline hover:text-gray-700" to="/offer">
-                        оферту
-                      </Link>
-                    </div>
                   </form>
                 </TabsContent>
 
@@ -442,28 +428,14 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Регистрация..." : "Зарегистрироваться"}
                     </Button>
-                    <div className="text-[11px] leading-snug text-center text-gray-500">
-                      Регистрируясь, вы принимаете{" "}
-                      <Link className="underline hover:text-gray-700" to="/privacy">
-                        политику конфиденциальности
-                      </Link>
-                      ,{" "}
-                      <Link className="underline hover:text-gray-700" to="/agreement">
-                        соглашение
-                      </Link>{" "}
-                      и{" "}
-                      <Link className="underline hover:text-gray-700" to="/offer">
-                        оферту
-                      </Link>
-                    </div>
                   </form>
                 </TabsContent>
               </Tabs>
             )}
           </CardContent>
         </Card>
-          <AuthMiniFooter />
         </div>
+        <AuthMiniFooter />
       </main>
     </div>
   );
