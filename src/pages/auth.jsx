@@ -1,6 +1,5 @@
 import React from "react";
 import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -192,7 +191,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
           <Card
             className="w-full max-w-[400px] shadow-lg !max-w-[400px]"
             style={{ width: "400px", maxWidth: "400px" }}
@@ -259,7 +258,6 @@ export default function AuthPage() {
             </div>
           </Card>
         </main>
-      <Footer />
       </div>
     );
   }
@@ -268,10 +266,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
         </main>
-        <Footer />
       </div>
     );
   }
@@ -283,7 +280,7 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 pt-28 pb-10 md:pt-32 flex items-center justify-center">
+      <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
         <div className="w-full max-w-[400px] !max-w-[400px]" style={{ width: "400px", maxWidth: "400px" }}>
           <Card className="w-full shadow-lg" style={{ width: "400px", maxWidth: "400px" }}>
           <CardHeader className="pb-4">
@@ -450,7 +447,6 @@ export default function AuthPage() {
         </Card>
         </div>
       </main>
-      <Footer />
     </div>
   );
 }
