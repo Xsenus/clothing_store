@@ -11,6 +11,22 @@ import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
 
+
+function AuthMiniFooter() {
+  return (
+    <div className="mt-6 space-y-3 text-center text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+        <Link className="underline-offset-2 hover:underline" to="/privacy">Политика конфиденциальности</Link>
+        <span className="hidden sm:inline">•</span>
+        <Link className="underline-offset-2 hover:underline" to="/agreement">Соглашение</Link>
+        <span className="hidden sm:inline">•</span>
+        <Link className="underline-offset-2 hover:underline" to="/offer">Оферта</Link>
+      </div>
+      <p>© 2026 FASHION_DEMON</p>
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const { signIn } = useAuthActions();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -191,10 +207,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
           <Card
-            className="w-full max-w-[400px] shadow-lg !max-w-[400px]"
-            style={{ width: "400px", maxWidth: "400px" }}
+            className="w-full max-w-md shadow-lg"
           >
             <CardHeader className="pb-4">
               <CardTitle className="text-xl">Восстановление пароля</CardTitle>
@@ -257,6 +272,7 @@ export default function AuthPage() {
               </Button>
             </div>
           </Card>
+          <AuthMiniFooter />
         </main>
       </div>
     );
@@ -266,8 +282,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
+          <AuthMiniFooter />
         </main>
       </div>
     );
@@ -280,9 +297,9 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 py-10 pt-28 md:pt-32 flex items-center justify-center">
-        <div className="w-full max-w-[400px] !max-w-[400px]" style={{ width: "400px", maxWidth: "400px" }}>
-          <Card className="w-full shadow-lg" style={{ width: "400px", maxWidth: "400px" }}>
+      <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-center">
+        <div className="w-full max-w-md">
+          <Card className="w-full shadow-lg">
           <CardHeader className="pb-4">
             <CardTitle className="text-xl text-center">Вход в аккаунт</CardTitle>
             <CardDescription className="text-center text-sm">
@@ -445,6 +462,7 @@ export default function AuthPage() {
             )}
           </CardContent>
         </Card>
+          <AuthMiniFooter />
         </div>
       </main>
     </div>
