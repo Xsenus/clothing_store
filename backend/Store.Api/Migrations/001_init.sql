@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   created_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS refresh_sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_refresh_sessions_user_id ON refresh_sessions(user_id);
+
 CREATE TABLE IF NOT EXISTS verification_codes (
   email TEXT NOT NULL,
   code TEXT NOT NULL,

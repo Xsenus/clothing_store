@@ -83,6 +83,32 @@ public class Session
 }
 
 /// <summary>
+/// Представляет refresh-сессию пользователя.
+/// </summary>
+[Table("refresh_sessions")]
+public class RefreshSession
+{
+    /// <summary>
+    /// Получает или задаёт refresh-токен сессии.
+    /// </summary>
+    [Key]
+    [Column("token")]
+    public string Token { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Получает или задаёт идентификатор пользователя.
+    /// </summary>
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Получает или задаёт время создания в миллисекундах Unix.
+    /// </summary>
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+/// <summary>
 /// Представляет админскую сессию.
 /// </summary>
 [Table("admin_sessions")]

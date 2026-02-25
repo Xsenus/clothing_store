@@ -29,6 +29,10 @@ public class StoreDbContext : DbContext
     /// </summary>
     public DbSet<AdminSession> AdminSessions => Set<AdminSession>();
     /// <summary>
+    /// Возвращает набор refresh-сессий.
+    /// </summary>
+    public DbSet<RefreshSession> RefreshSessions => Set<RefreshSession>();
+    /// <summary>
     /// Возвращает набор кодов подтверждения.
     /// </summary>
     public DbSet<VerificationCode> VerificationCodes => Set<VerificationCode>();
@@ -61,6 +65,7 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<Product>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CartItem>().HasIndex(x => new { x.UserId, x.ProductId, x.Size }).IsUnique();
         modelBuilder.Entity<Like>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();
+        modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
     }
 }

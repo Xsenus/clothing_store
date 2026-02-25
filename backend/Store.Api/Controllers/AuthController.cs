@@ -84,12 +84,11 @@ public class AuthController : ControllerBase
         var user = await _db.Users.FirstAsync(x => x.Email == email);
         user.Verified = true;
         _db.VerificationCodes.Remove(code);
-        var token = AuthService.GenerateToken();
-        _db.Sessions.Add(new Session { Token = token, UserId = user.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
-        await _db.SaveChangesAsync();
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
         return Results.Ok(new
         {
             token,
+            refreshToken,
             user = new
             {
                 id = user.Id,
@@ -110,10 +109,54 @@ public class AuthController : ControllerBase
         if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
         if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
-        var token = AuthService.GenerateToken();
-        _db.Sessions.Add(new Session { Token = token, UserId = user.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
-        await _db.SaveChangesAsync();
-        return Results.Ok(new { token });
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        return Results.Ok(new { token, refreshToken });
+    }
+
+    /// <summary>
+    /// Обновляет пользовательскую сессию по refresh-токену.
+    /// </summary>
+    [HttpPost("refresh")]
+    public async Task<IResult> Refresh([FromBody] RefreshPayload payload)
+    {
+        var refreshToken = payload.RefreshToken?.Trim();
+        if (string.IsNullOrWhiteSpace(refreshToken))
+            return Results.Unauthorized();
+
+        var refreshTtlHours = _configuration.GetValue<int?>("Security:RefreshSessionTtlHours") ?? 24 * 30;
+        var minRefreshCreatedAt = DateTimeOffset.UtcNow.AddHours(-refreshTtlHours).ToUnixTimeMilliseconds();
+
+        var refreshSession = await _db.RefreshSessions.FirstOrDefaultAsync(x => x.Token == refreshToken);
+        if (refreshSession is null)
+            return Results.Unauthorized();
+
+        if (refreshSession.CreatedAt < minRefreshCreatedAt || string.IsNullOrWhiteSpace(refreshSession.UserId))
+        {
+            _db.RefreshSessions.Remove(refreshSession);
+            await _db.SaveChangesAsync();
+            return Results.Unauthorized();
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == refreshSession.UserId);
+        if (user is null || user.IsBlocked || !user.Verified)
+        {
+            _db.RefreshSessions.Remove(refreshSession);
+            await _db.SaveChangesAsync();
+            return Results.Unauthorized();
+        }
+
+        _db.RefreshSessions.Remove(refreshSession);
+
+        var currentAccessToken = _authService.ExtractBearer(Request);
+        if (!string.IsNullOrWhiteSpace(currentAccessToken))
+        {
+            var currentSession = await _db.Sessions.FirstOrDefaultAsync(x => x.Token == currentAccessToken && x.UserId == user.Id);
+            if (currentSession is not null)
+                _db.Sessions.Remove(currentSession);
+        }
+
+        var (token, nextRefreshToken) = await CreateSessionPairAsync(user.Id);
+        return Results.Ok(new { token, refreshToken = nextRefreshToken });
     }
 
     /// <summary>
@@ -132,16 +175,25 @@ public class AuthController : ControllerBase
     /// Выполняет выход авторизованного пользователя.
     /// </summary>
     [HttpPost("logout")]
-    public async Task<IResult> Logout()
+    public async Task<IResult> Logout([FromBody] RefreshPayload? payload)
     {
         var token = _authService.ExtractBearer(Request);
         var session = await _db.Sessions.FirstOrDefaultAsync(x => x.Token == token);
+        var currentUserId = session?.UserId;
         if (session is not null)
-        {
             _db.Sessions.Remove(session);
-            await _db.SaveChangesAsync();
+
+        var refreshToken = payload?.RefreshToken?.Trim();
+        if (!string.IsNullOrWhiteSpace(refreshToken))
+        {
+            var refreshSession = string.IsNullOrWhiteSpace(currentUserId)
+                ? await _db.RefreshSessions.FirstOrDefaultAsync(x => x.Token == refreshToken)
+                : await _db.RefreshSessions.FirstOrDefaultAsync(x => x.Token == refreshToken && x.UserId == currentUserId);
+            if (refreshSession is not null)
+                _db.RefreshSessions.Remove(refreshSession);
         }
 
+        await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
     }
 
@@ -177,6 +229,30 @@ public class AuthController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
+
+    private async Task<(string token, string refreshToken)> CreateSessionPairAsync(string userId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var token = AuthService.GenerateToken();
+        var refreshToken = AuthService.GenerateToken();
+
+        _db.Sessions.Add(new Session
+        {
+            Token = token,
+            UserId = userId,
+            CreatedAt = now
+        });
+
+        _db.RefreshSessions.Add(new RefreshSession
+        {
+            Token = refreshToken,
+            UserId = userId,
+            CreatedAt = now
+        });
+
+        await _db.SaveChangesAsync();
+        return (token, refreshToken);
+    }
 
     private static bool IsValidEmail(string email)
     {

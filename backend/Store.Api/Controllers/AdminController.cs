@@ -151,6 +151,7 @@ public class AdminController : ControllerBase
 
         _db.Sessions.RemoveRange(_db.Sessions.Where(x => x.UserId == userId));
         _db.AdminSessions.RemoveRange(_db.AdminSessions.Where(x => x.UserId == userId));
+        _db.RefreshSessions.RemoveRange(_db.RefreshSessions.Where(x => x.UserId == userId));
         _db.CartItems.RemoveRange(_db.CartItems.Where(x => x.UserId == userId));
         _db.Likes.RemoveRange(_db.Likes.Where(x => x.UserId == userId));
         _db.Orders.RemoveRange(_db.Orders.Where(x => x.UserId == userId));
@@ -191,19 +192,7 @@ public class AdminController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
-    private async Task<User?> RequireAdminUserAsync()
-    {
-        var token = Request.Headers["X-Admin-Token"].ToString().Trim();
-        if (string.IsNullOrWhiteSpace(token)) return null;
-
-        var ttlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
-        var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
-        var session = await _db.AdminSessions.FirstOrDefaultAsync(x => x.Token == token);
-        if (session is null || session.CreatedAt < minCreatedAt) return null;
-        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == session.UserId);
-        if (user is null || !user.IsAdmin || user.IsBlocked) return null;
-        return user;
-    }
+    private Task<User?> RequireAdminUserAsync() => _auth.RequireAdminUserAsync(Request);
 }
 
 public class AdminUserPatchPayload

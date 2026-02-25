@@ -1,10 +1,60 @@
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 const getToken = () => localStorage.getItem("authToken");
+const getRefreshToken = () => localStorage.getItem("refreshToken");
 const getAdminToken = () => localStorage.getItem("adminToken");
 
-const request = async (path, options = {}) => {
-  const headers = options.headers || {};
+const saveAuthTokens = ({ token, refreshToken }) => {
+  if (token) {
+    localStorage.setItem("authToken", token);
+  }
+  if (refreshToken) {
+    localStorage.setItem("refreshToken", refreshToken);
+  }
+};
+
+const clearAuthTokens = () => {
+  localStorage.removeItem("authToken");
+  localStorage.removeItem("refreshToken");
+};
+
+const shouldSkipRefresh = (path) => {
+  return path.startsWith("/auth/login")
+    || path.startsWith("/auth/signup")
+    || path.startsWith("/auth/verify")
+    || path.startsWith("/auth/resend")
+    || path.startsWith("/auth/reset")
+    || path.startsWith("/auth/refresh");
+};
+
+const refreshAuthSession = async () => {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+
+  const token = getToken();
+  const headers = { "Content-Type": "application/json" };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_URL}/auth/refresh`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!res.ok) {
+    clearAuthTokens();
+    return false;
+  }
+
+  const payload = await res.json();
+  saveAuthTokens(payload || {});
+  return !!payload?.token;
+};
+
+const request = async (path, options = {}, retry = true) => {
+  const headers = { ...(options.headers || {}) };
   const token = getToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -13,17 +63,28 @@ const request = async (path, options = {}) => {
   if (adminToken) {
     headers["X-Admin-Token"] = adminToken;
   }
+
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
   });
+
+  if (res.status === 401 && retry && !shouldSkipRefresh(path)) {
+    const refreshed = await refreshAuthSession();
+    if (refreshed) {
+      return request(path, options, false);
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
   }
+
   if (res.status === 204) {
     return null;
   }
+
   return res.json();
 };
 
@@ -181,7 +242,7 @@ export const FLOW = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    localStorage.setItem("authToken", result.token);
+    saveAuthTokens(result || {});
     return result;
   },
 
@@ -206,7 +267,7 @@ export const FLOW = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    localStorage.setItem("authToken", result.token);
+    saveAuthTokens(result || {});
     return result;
   },
 
@@ -224,9 +285,25 @@ export const FLOW = {
       body: JSON.stringify(input),
     }),
 
+  refreshSession: async () => {
+    const refreshed = await refreshAuthSession();
+    if (!refreshed) {
+      throw new Error("Unable to refresh session");
+    }
+    return { ok: true };
+  },
+
   signOut: async () => {
-    await request("/auth/logout", { method: "POST" });
-    localStorage.removeItem("authToken");
+    const refreshToken = getRefreshToken();
+    try {
+      await request("/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+    } finally {
+      clearAuthTokens();
+    }
     return true;
   },
 
