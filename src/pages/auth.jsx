@@ -207,9 +207,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex flex-col items-center justify-start">
           <Card
-            className="w-full max-w-[350px] shadow-lg"
+            className="mx-auto w-full max-w-[350px] md:max-w-[400px] shadow-lg"
           >
             <CardHeader className="pb-4">
               <CardTitle className="text-xl">Восстановление пароля</CardTitle>
@@ -282,7 +282,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex flex-col items-center justify-start">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
           <AuthMiniFooter />
         </main>
@@ -297,9 +297,8 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 py-8 pt-24 md:py-10 md:pt-28 flex flex-col items-center justify-start">
-        <div className="w-full max-w-[350px]">
-          <Card className="w-full shadow-lg">
+      <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex flex-col items-center justify-start">
+        <Card className="mx-auto w-full max-w-[350px] md:max-w-[400px] shadow-lg">
           <CardHeader className="pb-4">
             <CardTitle className="text-xl text-center">Вход в аккаунт</CardTitle>
             <CardDescription className="text-center text-sm">
@@ -434,7 +433,6 @@ export default function AuthPage() {
             )}
           </CardContent>
         </Card>
-        </div>
         <AuthMiniFooter />
       </main>
     </div>
