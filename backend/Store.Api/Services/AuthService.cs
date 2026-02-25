@@ -42,7 +42,49 @@ public class AuthService
         if (session is null || session.CreatedAt < minCreatedAt)
             return null;
 
-        return await _db.Users.FirstOrDefaultAsync(u => u.Id == session.UserId);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == session.UserId);
+        if (user is null)
+            return null;
+
+        await TouchSessionIfNeededAsync(session);
+        return user;
+    }
+
+    /// <summary>
+    /// Возвращает администратора по админскому токену или обычной пользовательской сессии.
+    /// </summary>
+    public async Task<User?> RequireAdminUserAsync(HttpRequest request)
+    {
+        var adminToken = request.Headers["X-Admin-Token"].ToString().Trim();
+        if (!string.IsNullOrWhiteSpace(adminToken))
+        {
+            var ttlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+            var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
+
+            var session = await _db.AdminSessions.FirstOrDefaultAsync(x => x.Token == adminToken);
+            if (session is not null && session.CreatedAt >= minCreatedAt && !string.IsNullOrWhiteSpace(session.UserId))
+            {
+                var sessionUser = await _db.Users.FirstOrDefaultAsync(x => x.Id == session.UserId);
+                if (sessionUser is not null && sessionUser.IsAdmin && !sessionUser.IsBlocked)
+                    return sessionUser;
+            }
+        }
+
+        var userToken = ExtractBearer(request);
+        if (string.IsNullOrWhiteSpace(userToken)) return null;
+
+        var adminTtlHoursForUserSession = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+        var minUserSessionForAdmin = DateTimeOffset.UtcNow.AddHours(-adminTtlHoursForUserSession).ToUnixTimeMilliseconds();
+        var userSession = await _db.Sessions.FirstOrDefaultAsync(x => x.Token == userToken);
+        if (userSession is null || userSession.CreatedAt < minUserSessionForAdmin || string.IsNullOrWhiteSpace(userSession.UserId))
+            return null;
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userSession.UserId);
+        if (user is null || !user.IsAdmin || user.IsBlocked)
+            return null;
+
+        await TouchSessionIfNeededAsync(userSession);
+        return user;
     }
 
     /// <summary>
@@ -50,18 +92,19 @@ public class AuthService
     /// </summary>
     public async Task<bool> RequireAdminAsync(HttpRequest request)
     {
-        var token = request.Headers["X-Admin-Token"].ToString().Trim();
-        if (string.IsNullOrWhiteSpace(token)) return false;
+        return await RequireAdminUserAsync(request) is not null;
+    }
 
-        var ttlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
-        var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
+    private async Task TouchSessionIfNeededAsync(Session session)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var slidingWindowMinutes = _configuration.GetValue<int?>("Security:SessionSlidingUpdateMinutes") ?? 5;
+        var minDeltaMs = Math.Max(1, slidingWindowMinutes) * 60L * 1000L;
+        if (now - session.CreatedAt < minDeltaMs)
+            return;
 
-        var session = await _db.AdminSessions.FirstOrDefaultAsync(x => x.Token == token);
-        if (session is null || session.CreatedAt < minCreatedAt || string.IsNullOrWhiteSpace(session.UserId))
-            return false;
-
-        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == session.UserId);
-        return user is not null && user.IsAdmin && !user.IsBlocked;
+        session.CreatedAt = now;
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

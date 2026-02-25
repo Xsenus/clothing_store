@@ -22,8 +22,13 @@ export function AuthProvider({ children }) {
       }
     };
     const token = localStorage.getItem("authToken");
+    const refreshToken = localStorage.getItem("refreshToken");
     if (token) {
       bootstrap();
+    } else if (refreshToken) {
+      FLOW.refreshSession()
+        .then(() => bootstrap())
+        .catch(() => setIsLoading(false));
     } else {
       setIsLoading(false);
     }

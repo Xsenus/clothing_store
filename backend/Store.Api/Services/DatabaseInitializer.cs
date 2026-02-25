@@ -148,6 +148,12 @@ public class DatabaseInitializer
             if (!adminSessionColumns.Contains("user_id"))
                 await db.Database.ExecuteSqlRawAsync("ALTER TABLE admin_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '';");
 
+            if (!await SqliteTableExistsAsync(db, "refresh_sessions"))
+            {
+                await db.Database.ExecuteSqlRawAsync("CREATE TABLE refresh_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL);");
+                await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS ix_refresh_sessions_user_id ON refresh_sessions(user_id);");
+            }
+
             if (!await SqliteTableExistsAsync(db, "app_settings"))
                 await db.Database.ExecuteSqlRawAsync("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
             return;
@@ -159,6 +165,8 @@ public class DatabaseInitializer
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';");
+            await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS refresh_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at BIGINT NOT NULL);");
+            await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS ix_refresh_sessions_user_id ON refresh_sessions(user_id);");
             await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
         }
     }
@@ -321,12 +329,15 @@ public class DatabaseInitializer
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var userSessionTtlHours = _configuration.GetValue<int?>("Security:SessionTtlHours") ?? 24 * 30;
         var adminSessionTtlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+        var refreshSessionTtlHours = _configuration.GetValue<int?>("Security:RefreshSessionTtlHours") ?? 24 * 30;
 
         var minUserSessionTime = DateTimeOffset.UtcNow.AddHours(-userSessionTtlHours).ToUnixTimeMilliseconds();
         var minAdminSessionTime = DateTimeOffset.UtcNow.AddHours(-adminSessionTtlHours).ToUnixTimeMilliseconds();
+        var minRefreshSessionTime = DateTimeOffset.UtcNow.AddHours(-refreshSessionTtlHours).ToUnixTimeMilliseconds();
 
         db.Sessions.RemoveRange(await db.Sessions.Where(x => x.CreatedAt < minUserSessionTime).ToListAsync());
         db.AdminSessions.RemoveRange(await db.AdminSessions.Where(x => x.CreatedAt < minAdminSessionTime).ToListAsync());
+        db.RefreshSessions.RemoveRange(await db.RefreshSessions.Where(x => x.CreatedAt < minRefreshSessionTime).ToListAsync());
         db.VerificationCodes.RemoveRange(await db.VerificationCodes.Where(x => x.ExpiresAt < now).ToListAsync());
         await db.SaveChangesAsync();
     }

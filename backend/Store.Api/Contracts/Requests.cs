@@ -21,6 +21,11 @@ public record ResetRequestPayload(string Email);
 public record ResetConfirmPayload(string Email, string Code, string NewPassword);
 
 /// <summary>
+/// Данные обновления сессии по refresh-токену.
+/// </summary>
+public record RefreshPayload(string RefreshToken);
+
+/// <summary>
 /// Данные профиля пользователя.
 /// </summary>
 public record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname);
