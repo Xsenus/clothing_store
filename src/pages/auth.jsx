@@ -207,9 +207,9 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <Card
-            className="mx-auto w-full max-w-[400px] shadow-lg"
+            className="mx-auto w-full shadow-lg" style={{ width: "min(100%, 400px)" }}
           >
             <CardHeader className="pb-4">
               <CardTitle className="text-xl">Восстановление пароля</CardTitle>
@@ -282,7 +282,7 @@ export default function AuthPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex items-center justify-center">
+        <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
         </main>
         <AuthMiniFooter />
@@ -297,8 +297,8 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="flex-1 container mx-auto px-4 py-8 pt-32 md:py-10 md:pt-36 flex items-center justify-center">
-        <Card className="mx-auto w-full max-w-[400px] shadow-lg">
+      <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
+        <Card className="mx-auto w-full shadow-lg" style={{ width: "min(100%, 400px)" }}>
           <CardHeader className="pb-4">
             <CardTitle className="text-xl text-center">Вход в аккаунт</CardTitle>
             <CardDescription className="text-center text-sm">
