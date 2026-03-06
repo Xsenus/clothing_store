@@ -61,6 +61,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const navigate = useNavigate();
 
   // Form State
@@ -178,6 +179,37 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
     return value === "true" || value === "1" || value === "on";
   };
+
+  const settingsGroups = [
+    { id: "auth", label: "Авторизация" },
+    { id: "smtp", label: "Почта (SMTP)" },
+    { id: "legal", label: "Юридические тексты" },
+    { id: "general", label: "Общие" },
+    { id: "advanced", label: "Другие ключи" }
+  ] as const;
+
+  const knownKeys = new Set([
+    "storeName",
+    "privacy_policy",
+    "user_agreement",
+    "public_offer",
+    "cookie_consent_text",
+    "auth_password_policy_enabled",
+    "auth_session_ttl_hours",
+    "auth_refresh_session_ttl_hours",
+    "auth_session_sliding_update_minutes",
+    "auth_admin_session_ttl_hours",
+    "smtp_enabled",
+    "smtp_host",
+    "smtp_port",
+    "smtp_username",
+    "smtp_password",
+    "smtp_from_email",
+    "smtp_from_name",
+    "smtp_use_ssl"
+  ]);
+
+  const advancedSettings = Object.entries(settings).filter(([key]) => !knownKeys.has(key));
 
   const buildMediaFromProduct = (product: Product) => {
     if (product.media && product.media.length > 0) return product.media;
@@ -537,152 +569,193 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
-              <div className="grid gap-4 mb-6 md:grid-cols-2">
-                <div className="space-y-3 border p-3">
-                  <h3 className="font-semibold">Авторизация</h3>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="auth-password-policy"
-                      checked={isSettingEnabled("auth_password_policy_enabled", true)}
-                      onCheckedChange={(checked) => updateSetting("auth_password_policy_enabled", checked ? "true" : "false")}
-                    />
-                    <Label htmlFor="auth-password-policy">Строгая проверка пароля (10+ символов, A-Z, a-z, цифра)</Label>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label htmlFor="auth-session-ttl-hours">Сессия пользователя (часы)</Label>
-                      <Input
-                        id="auth-session-ttl-hours"
-                        type="number"
-                        min={1}
-                        value={settings["auth_session_ttl_hours"] || "720"}
-                        onChange={(e) => updateSetting("auth_session_ttl_hours", e.target.value)}
-                      />
+
+              <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
+                <div className="order-2 space-y-4 lg:order-1">
+                  {selectedSettingsGroup === "auth" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Авторизация</h3>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="auth-password-policy"
+                          checked={isSettingEnabled("auth_password_policy_enabled", true)}
+                          onCheckedChange={(checked) => updateSetting("auth_password_policy_enabled", checked ? "true" : "false")}
+                        />
+                        <Label htmlFor="auth-password-policy">Строгая проверка пароля (10+ символов, A-Z, a-z, цифра)</Label>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="auth-session-ttl-hours">Сессия пользователя (часы)</Label>
+                          <Input id="auth-session-ttl-hours" type="number" min={1} value={settings["auth_session_ttl_hours"] || "720"} onChange={(e) => updateSetting("auth_session_ttl_hours", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="auth-refresh-ttl-hours">Refresh-сессия (часы)</Label>
+                          <Input id="auth-refresh-ttl-hours" type="number" min={1} value={settings["auth_refresh_session_ttl_hours"] || "2160"} onChange={(e) => updateSetting("auth_refresh_session_ttl_hours", e.target.value)} />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <Label htmlFor="auth-admin-session-ttl-hours">Админ-сессия (часы)</Label>
+                          <Input id="auth-admin-session-ttl-hours" type="number" min={1} value={settings["auth_admin_session_ttl_hours"] || "168"} onChange={(e) => updateSetting("auth_admin_session_ttl_hours", e.target.value)} />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
+                          <Input id="auth-session-sliding-minutes" type="number" min={1} value={settings["auth_session_sliding_update_minutes"] || "5"} onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)} />
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="auth-refresh-ttl-hours">Refresh-сессия (часы)</Label>
-                      <Input
-                        id="auth-refresh-ttl-hours"
-                        type="number"
-                        min={1}
-                        value={settings["auth_refresh_session_ttl_hours"] || "2160"}
-                        onChange={(e) => updateSetting("auth_refresh_session_ttl_hours", e.target.value)}
-                      />
+                  )}
+
+                  {selectedSettingsGroup === "smtp" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Почта (SMTP)</h3>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="smtp-enabled"
+                          checked={isSettingEnabled("smtp_enabled")}
+                          onCheckedChange={(checked) => updateSetting("smtp_enabled", checked ? "true" : "false")}
+                        />
+                        <Label htmlFor="smtp-enabled">Включить отправку email</Label>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-host">SMTP Host</Label>
+                          <Input id="smtp-host" value={settings["smtp_host"] || ""} onChange={(e) => updateSetting("smtp_host", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-port">SMTP Port</Label>
+                          <Input id="smtp-port" value={settings["smtp_port"] || "587"} onChange={(e) => updateSetting("smtp_port", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-username">SMTP Username</Label>
+                          <Input id="smtp-username" value={settings["smtp_username"] || ""} onChange={(e) => updateSetting("smtp_username", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-password">SMTP Password</Label>
+                          <Input id="smtp-password" type="password" value={settings["smtp_password"] || ""} onChange={(e) => updateSetting("smtp_password", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-from-email">From Email</Label>
+                          <Input id="smtp-from-email" value={settings["smtp_from_email"] || ""} onChange={(e) => updateSetting("smtp_from_email", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="smtp-from-name">From Name</Label>
+                          <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="smtp-use-ssl"
+                          checked={isSettingEnabled("smtp_use_ssl", true)}
+                          onCheckedChange={(checked) => updateSetting("smtp_use_ssl", checked ? "true" : "false")}
+                        />
+                        <Label htmlFor="smtp-use-ssl">Использовать SSL/TLS</Label>
+                      </div>
                     </div>
-                    <div className="space-y-1 md:col-span-2">
-                      <Label htmlFor="auth-admin-session-ttl-hours">Админ-сессия (часы)</Label>
-                      <Input
-                        id="auth-admin-session-ttl-hours"
-                        type="number"
-                        min={1}
-                        value={settings["auth_admin_session_ttl_hours"] || "168"}
-                        onChange={(e) => updateSetting("auth_admin_session_ttl_hours", e.target.value)}
-                      />
+                  )}
+
+                  {selectedSettingsGroup === "legal" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Юридические тексты</h3>
+                      {[
+                        ["privacy_policy", "Политика конфиденциальности"],
+                        ["user_agreement", "Пользовательское соглашение"],
+                        ["public_offer", "Публичная оферта"],
+                        ["cookie_consent_text", "Текст cookie-согласия"]
+                      ].map(([key, label]) => (
+                        <div key={key} className="space-y-1">
+                          <Label>{label}</Label>
+                          <Textarea
+                            value={settings[key] || ""}
+                            onChange={(e) => updateSetting(key, e.target.value)}
+                            className="min-h-[120px]"
+                          />
+                        </div>
+                      ))}
                     </div>
-                    <div className="space-y-1 md:col-span-2">
-                      <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
-                      <Input
-                        id="auth-session-sliding-minutes"
-                        type="number"
-                        min={1}
-                        value={settings["auth_session_sliding_update_minutes"] || "5"}
-                        onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)}
-                      />
+                  )}
+
+                  {selectedSettingsGroup === "general" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Общие настройки</h3>
+                      <div className="space-y-1">
+                        <Label htmlFor="store-name">Название магазина</Label>
+                        <Input id="store-name" value={settings.storeName || ""} onChange={(e) => updateSetting("storeName", e.target.value)} />
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {selectedSettingsGroup === "advanced" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Другие ключи</h3>
+                      <p className="text-sm text-muted-foreground">Сюда попадают ключи, которые не входят в преднастроенные группы.</p>
+                      {advancedSettings.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">Пока нет дополнительных ключей.</div>
+                      ) : (
+                        <div className="grid gap-3">
+                          {advancedSettings.map(([key, value]) => (
+                            <div key={key} className="space-y-1">
+                              <Label>{key}</Label>
+                              {key.includes("policy") || key.includes("agreement") || key.includes("offer") ? (
+                                <Textarea value={value} onChange={(e) => updateSetting(key, e.target.value)} className="min-h-[120px]" />
+                              ) : (
+                                <Input value={value} onChange={(e) => updateSetting(key, e.target.value)} />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="space-y-3 border p-3">
-                  <h3 className="font-semibold">Почта (SMTP)</h3>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="smtp-enabled"
-                      checked={isSettingEnabled("smtp_enabled")}
-                      onCheckedChange={(checked) => updateSetting("smtp_enabled", checked ? "true" : "false")}
-                    />
-                    <Label htmlFor="smtp-enabled">Включить отправку email</Label>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-host">SMTP Host</Label>
-                      <Input id="smtp-host" value={settings["smtp_host"] || ""} onChange={(e) => updateSetting("smtp_host", e.target.value)} />
+                <div className="order-1 lg:order-2">
+                  <div className="border p-3 space-y-2 sticky top-4">
+                    <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Группы</p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                      {settingsGroups.map((group) => (
+                        <Button
+                          key={group.id}
+                          variant={selectedSettingsGroup === group.id ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setSelectedSettingsGroup(group.id)}
+                        >
+                          {group.label}
+                        </Button>
+                      ))}
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-port">SMTP Port</Label>
-                      <Input id="smtp-port" value={settings["smtp_port"] || "587"} onChange={(e) => updateSetting("smtp_port", e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-username">SMTP Username</Label>
-                      <Input id="smtp-username" value={settings["smtp_username"] || ""} onChange={(e) => updateSetting("smtp_username", e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-password">SMTP Password</Label>
-                      <Input id="smtp-password" type="password" value={settings["smtp_password"] || ""} onChange={(e) => updateSetting("smtp_password", e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-from-email">From Email</Label>
-                      <Input id="smtp-from-email" value={settings["smtp_from_email"] || ""} onChange={(e) => updateSetting("smtp_from_email", e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="smtp-from-name">From Name</Label>
-                      <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="smtp-use-ssl"
-                      checked={isSettingEnabled("smtp_use_ssl", true)}
-                      onCheckedChange={(checked) => updateSetting("smtp_use_ssl", checked ? "true" : "false")}
-                    />
-                    <Label htmlFor="smtp-use-ssl">Использовать SSL/TLS</Label>
                   </div>
                 </div>
               </div>
-              <div className="mb-4 flex flex-wrap gap-2">
-                {[
-                  "storeName",
-                  "privacy_policy",
-                  "user_agreement",
-                  "public_offer",
-                  "cookie_consent_text",
-                  "auth_password_policy_enabled",
-                  "auth_session_ttl_hours",
-                  "auth_refresh_session_ttl_hours",
-                  "auth_session_sliding_update_minutes",
-                  "auth_admin_session_ttl_hours",
-                  "smtp_enabled",
-                  "smtp_host",
-                  "smtp_port",
-                  "smtp_username",
-                  "smtp_password",
-                  "smtp_from_email",
-                  "smtp_from_name",
-                  "smtp_use_ssl"
-                ].map((key) => (
-                  <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
-                    Добавить ключ {key}
-                  </Button>
-                ))}
+
+              <div className="mt-4 border p-3 space-y-3">
+                <h3 className="font-semibold">Быстро добавить ключ</h3>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "storeName",
+                    "privacy_policy",
+                    "user_agreement",
+                    "public_offer",
+                    "cookie_consent_text",
+                    "auth_password_policy_enabled",
+                    "auth_session_ttl_hours",
+                    "auth_refresh_session_ttl_hours",
+                    "auth_session_sliding_update_minutes",
+                    "auth_admin_session_ttl_hours",
+                    "smtp_enabled",
+                    "smtp_host",
+                    "smtp_port",
+                    "smtp_username",
+                    "smtp_password",
+                    "smtp_from_email",
+                    "smtp_from_name",
+                    "smtp_use_ssl"
+                  ].map((key) => (
+                    <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
+                      + {key}
+                    </Button>
+                  ))}
+                </div>
               </div>
-              <div className="grid gap-4">
-                {Object.entries(settings).map(([key, value]) => (
-                  <div key={key} className="space-y-1">
-                    <Label>{key}</Label>
-                    {key.includes("policy") || key.includes("agreement") || key.includes("offer") ? (
-                      <Textarea
-                        value={value}
-                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
-                        className="min-h-[180px]"
-                      />
-                    ) : (
-                      <Input
-                        value={value}
-                        onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.value }))}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
+
               <div className="mt-3 flex gap-2">
                 <Button onClick={saveSettings}>Сохранить настройки</Button>
               </div>
