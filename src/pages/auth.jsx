@@ -56,6 +56,17 @@ export default function AuthPage() {
     }
   }, [authLoading, isAuthenticated, navigate]);
 
+  const mapKnownErrorMessage = (rawMessage) => {
+    const normalized = (rawMessage || "").toLowerCase();
+    if (normalized.includes("email already in use") || normalized.includes("user already exists")) {
+      return "Этот email уже используется";
+    }
+    if (normalized.includes("password is too weak")) {
+      return "Пароль слишком простой";
+    }
+    return rawMessage;
+  };
+
   const getErrorMessage = (error, fallback) => {
     const message = error?.message || "";
     try {
@@ -64,15 +75,15 @@ export default function AuthPage() {
         if (typeof parsed.detail === "string") {
           try {
             const nested = JSON.parse(parsed.detail);
-            return nested?.message || parsed.detail;
+            return mapKnownErrorMessage(nested?.message || parsed.detail);
           } catch (innerError) {
-            return parsed.detail;
+            return mapKnownErrorMessage(parsed.detail);
           }
         }
-        return parsed.detail;
+        return mapKnownErrorMessage(parsed.detail);
       }
     } catch (e) {
-      return message || fallback;
+      return mapKnownErrorMessage(message) || fallback;
     }
     return fallback;
   };
@@ -111,10 +122,6 @@ export default function AuthPage() {
 
   const handleSignUp = async (e) => {
     e.preventDefault();
-    if (signUpPassword.length < 10 || !/[A-Z]/.test(signUpPassword) || !/[a-z]/.test(signUpPassword) || !/\d/.test(signUpPassword)) {
-      toast.error("Пароль должен быть от 10 символов и содержать A-Z, a-z и цифру");
-      return;
-    }
     setLoading(true);
     try {
       const formData = new FormData();
@@ -416,11 +423,10 @@ export default function AuthPage() {
                       <Input
                         id="signup-password"
                         type="password"
-                        placeholder="Минимум 8 символов"
+                        placeholder="Введите пароль"
                         value={signUpPassword}
                         onChange={(e) => setSignUpPassword(e.target.value)}
                         required
-                        minLength={8}
                         className="h-9"
                       />
                     </div>

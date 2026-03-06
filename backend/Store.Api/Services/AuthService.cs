@@ -35,7 +35,7 @@ public class AuthService
         var token = ExtractBearer(request);
         if (string.IsNullOrWhiteSpace(token)) return null;
 
-        var ttlHours = _configuration.GetValue<int?>("Security:SessionTtlHours") ?? 24 * 30;
+        var ttlHours = await GetIntSettingAsync("auth_session_ttl_hours", "Security:SessionTtlHours", 24 * 30);
         var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
 
         var session = await _db.Sessions.FirstOrDefaultAsync(s => s.Token == token);
@@ -58,7 +58,7 @@ public class AuthService
         var adminToken = request.Headers["X-Admin-Token"].ToString().Trim();
         if (!string.IsNullOrWhiteSpace(adminToken))
         {
-            var ttlHours = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+            var ttlHours = await GetIntSettingAsync("auth_admin_session_ttl_hours", "Security:AdminSessionTtlHours", 24 * 7);
             var minCreatedAt = DateTimeOffset.UtcNow.AddHours(-ttlHours).ToUnixTimeMilliseconds();
 
             var session = await _db.AdminSessions.FirstOrDefaultAsync(x => x.Token == adminToken);
@@ -73,7 +73,7 @@ public class AuthService
         var userToken = ExtractBearer(request);
         if (string.IsNullOrWhiteSpace(userToken)) return null;
 
-        var adminTtlHoursForUserSession = _configuration.GetValue<int?>("Security:AdminSessionTtlHours") ?? 24 * 7;
+        var adminTtlHoursForUserSession = await GetIntSettingAsync("auth_admin_session_ttl_hours", "Security:AdminSessionTtlHours", 24 * 7);
         var minUserSessionForAdmin = DateTimeOffset.UtcNow.AddHours(-adminTtlHoursForUserSession).ToUnixTimeMilliseconds();
         var userSession = await _db.Sessions.FirstOrDefaultAsync(x => x.Token == userToken);
         if (userSession is null || userSession.CreatedAt < minUserSessionForAdmin || string.IsNullOrWhiteSpace(userSession.UserId))
@@ -98,13 +98,26 @@ public class AuthService
     private async Task TouchSessionIfNeededAsync(Session session)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var slidingWindowMinutes = _configuration.GetValue<int?>("Security:SessionSlidingUpdateMinutes") ?? 5;
+        var slidingWindowMinutes = await GetIntSettingAsync("auth_session_sliding_update_minutes", "Security:SessionSlidingUpdateMinutes", 5);
         var minDeltaMs = Math.Max(1, slidingWindowMinutes) * 60L * 1000L;
         if (now - session.CreatedAt < minDeltaMs)
             return;
 
         session.CreatedAt = now;
         await _db.SaveChangesAsync();
+    }
+
+    public async Task<int> GetIntSettingAsync(string appSettingKey, string configKey, int fallback)
+    {
+        var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == appSettingKey);
+        if (row is not null && int.TryParse(row.Value, out var parsedFromDb) && parsedFromDb > 0)
+            return parsedFromDb;
+
+        var fromConfig = _configuration.GetValue<int?>(configKey);
+        if (fromConfig.HasValue && fromConfig.Value > 0)
+            return fromConfig.Value;
+
+        return fallback;
     }
 
     /// <summary>

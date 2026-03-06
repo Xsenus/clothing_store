@@ -170,6 +170,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const updateSetting = (key: string, value: string) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const isSettingEnabled = (key: string, fallback = false) => {
+    const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
+    return value === "true" || value === "1" || value === "on";
+  };
+
   const buildMediaFromProduct = (product: Product) => {
     if (product.media && product.media.length > 0) return product.media;
     const images = (product.images || []).map((url) => ({ type: "image" as const, url }));
@@ -528,13 +537,127 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
+              <div className="grid gap-4 mb-6 md:grid-cols-2">
+                <div className="space-y-3 border p-3">
+                  <h3 className="font-semibold">Авторизация</h3>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="auth-password-policy"
+                      checked={isSettingEnabled("auth_password_policy_enabled", true)}
+                      onCheckedChange={(checked) => updateSetting("auth_password_policy_enabled", checked ? "true" : "false")}
+                    />
+                    <Label htmlFor="auth-password-policy">Строгая проверка пароля (10+ символов, A-Z, a-z, цифра)</Label>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="auth-session-ttl-hours">Сессия пользователя (часы)</Label>
+                      <Input
+                        id="auth-session-ttl-hours"
+                        type="number"
+                        min={1}
+                        value={settings["auth_session_ttl_hours"] || "720"}
+                        onChange={(e) => updateSetting("auth_session_ttl_hours", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="auth-refresh-ttl-hours">Refresh-сессия (часы)</Label>
+                      <Input
+                        id="auth-refresh-ttl-hours"
+                        type="number"
+                        min={1}
+                        value={settings["auth_refresh_session_ttl_hours"] || "2160"}
+                        onChange={(e) => updateSetting("auth_refresh_session_ttl_hours", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label htmlFor="auth-admin-session-ttl-hours">Админ-сессия (часы)</Label>
+                      <Input
+                        id="auth-admin-session-ttl-hours"
+                        type="number"
+                        min={1}
+                        value={settings["auth_admin_session_ttl_hours"] || "168"}
+                        onChange={(e) => updateSetting("auth_admin_session_ttl_hours", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
+                      <Input
+                        id="auth-session-sliding-minutes"
+                        type="number"
+                        min={1}
+                        value={settings["auth_session_sliding_update_minutes"] || "5"}
+                        onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 border p-3">
+                  <h3 className="font-semibold">Почта (SMTP)</h3>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="smtp-enabled"
+                      checked={isSettingEnabled("smtp_enabled")}
+                      onCheckedChange={(checked) => updateSetting("smtp_enabled", checked ? "true" : "false")}
+                    />
+                    <Label htmlFor="smtp-enabled">Включить отправку email</Label>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-host">SMTP Host</Label>
+                      <Input id="smtp-host" value={settings["smtp_host"] || ""} onChange={(e) => updateSetting("smtp_host", e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-port">SMTP Port</Label>
+                      <Input id="smtp-port" value={settings["smtp_port"] || "587"} onChange={(e) => updateSetting("smtp_port", e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-username">SMTP Username</Label>
+                      <Input id="smtp-username" value={settings["smtp_username"] || ""} onChange={(e) => updateSetting("smtp_username", e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-password">SMTP Password</Label>
+                      <Input id="smtp-password" type="password" value={settings["smtp_password"] || ""} onChange={(e) => updateSetting("smtp_password", e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-from-email">From Email</Label>
+                      <Input id="smtp-from-email" value={settings["smtp_from_email"] || ""} onChange={(e) => updateSetting("smtp_from_email", e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="smtp-from-name">From Name</Label>
+                      <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="smtp-use-ssl"
+                      checked={isSettingEnabled("smtp_use_ssl", true)}
+                      onCheckedChange={(checked) => updateSetting("smtp_use_ssl", checked ? "true" : "false")}
+                    />
+                    <Label htmlFor="smtp-use-ssl">Использовать SSL/TLS</Label>
+                  </div>
+                </div>
+              </div>
               <div className="mb-4 flex flex-wrap gap-2">
                 {[
                   "storeName",
                   "privacy_policy",
                   "user_agreement",
                   "public_offer",
-                  "cookie_consent_text"
+                  "cookie_consent_text",
+                  "auth_password_policy_enabled",
+                  "auth_session_ttl_hours",
+                  "auth_refresh_session_ttl_hours",
+                  "auth_session_sliding_update_minutes",
+                  "auth_admin_session_ttl_hours",
+                  "smtp_enabled",
+                  "smtp_host",
+                  "smtp_port",
+                  "smtp_username",
+                  "smtp_password",
+                  "smtp_from_email",
+                  "smtp_from_name",
+                  "smtp_use_ssl"
                 ].map((key) => (
                   <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
                     Добавить ключ {key}
