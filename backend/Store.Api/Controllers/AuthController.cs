@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
+using System.Net.Mail;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -36,26 +38,44 @@ public class AuthController : ControllerBase
     {
         var email = payload.Email.Trim().ToLowerInvariant();
         if (!IsValidEmail(email)) return Results.BadRequest(new { detail = "Invalid email" });
-        if (!IsStrongPassword(payload.Password)) return Results.BadRequest(new { detail = "Password is too weak" });
-        if (await _db.Users.AnyAsync(x => x.Email == email)) return Results.BadRequest(new { detail = "User already exists" });
+
+        var strictPasswordPolicy = await IsStrictPasswordPolicyEnabledAsync();
+        if (strictPasswordPolicy && !IsStrongPassword(payload.Password))
+            return Results.BadRequest(new { detail = "Password is too weak" });
+
+        var existingUser = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+        if (existingUser is not null && existingUser.Verified)
+            return Results.BadRequest(new { detail = "Email already in use" });
 
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
         var (hash, salt) = AuthService.HashPassword(payload.Password, iterations);
-        var user = new User
+
+        if (existingUser is null)
         {
-            Id = Guid.NewGuid().ToString("N"),
-            Email = email,
-            PasswordHash = hash,
-            Salt = salt,
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-        _db.Users.Add(user);
-        _db.Profiles.Add(new Profile
+            var user = new User
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Email = email,
+                PasswordHash = hash,
+                Salt = salt,
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Verified = false
+            };
+            _db.Users.Add(user);
+            _db.Profiles.Add(new Profile
+            {
+                UserId = user.Id,
+                Email = email,
+                Name = email.Split('@')[0]
+            });
+        }
+        else
         {
-            UserId = user.Id,
-            Email = email,
-            Name = email.Split('@')[0]
-        });
+            existingUser.PasswordHash = hash;
+            existingUser.Salt = salt;
+            existingUser.Verified = false;
+        }
+
         await UpsertCodeAsync(email, "signup");
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
@@ -123,7 +143,7 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(refreshToken))
             return Results.Unauthorized();
 
-        var refreshTtlHours = _configuration.GetValue<int?>("Security:RefreshSessionTtlHours") ?? 24 * 30;
+        var refreshTtlHours = await _authService.GetIntSettingAsync("auth_refresh_session_ttl_hours", "Security:RefreshSessionTtlHours", 24 * 30);
         var minRefreshCreatedAt = DateTimeOffset.UtcNow.AddHours(-refreshTtlHours).ToUnixTimeMilliseconds();
 
         var refreshSession = await _db.RefreshSessions.FirstOrDefaultAsync(x => x.Token == refreshToken);
@@ -219,7 +239,11 @@ public class AuthController : ControllerBase
         if (code is null || code.Code != payload.Code || code.ExpiresAt < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Results.BadRequest(new { detail = "Invalid code" });
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
         if (user is null) return Results.BadRequest(new { detail = "User not found" });
-        if (!IsStrongPassword(payload.NewPassword)) return Results.BadRequest(new { detail = "Password is too weak" });
+
+        var strictPasswordPolicy = await IsStrictPasswordPolicyEnabledAsync();
+        if (strictPasswordPolicy && !IsStrongPassword(payload.NewPassword))
+            return Results.BadRequest(new { detail = "Password is too weak" });
+
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
         var (hash, salt) = AuthService.HashPassword(payload.NewPassword, iterations);
         user.PasswordHash = hash;
@@ -278,6 +302,9 @@ public class AuthController : ControllerBase
 
     private async Task UpsertCodeAsync(string email, string kind)
     {
+        if (!IsValidEmail(email))
+            return;
+
         var entity = await _db.VerificationCodes.FirstOrDefaultAsync(x => x.Email == email && x.Kind == kind);
         if (entity is null)
         {
@@ -287,5 +314,91 @@ public class AuthController : ControllerBase
 
         entity.Code = Random.Shared.Next(100000, 999999).ToString();
         entity.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15).ToUnixTimeMilliseconds();
+
+        await TrySendCodeEmailAsync(email, entity.Code, kind);
+    }
+
+    private async Task<bool> IsStrictPasswordPolicyEnabledAsync()
+    {
+        var setting = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == "auth_password_policy_enabled");
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+            return true;
+
+        return !string.Equals(setting.Value, "false", StringComparison.OrdinalIgnoreCase)
+               && !string.Equals(setting.Value, "0", StringComparison.OrdinalIgnoreCase)
+               && !string.Equals(setting.Value, "off", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task TrySendCodeEmailAsync(string email, string code, string kind)
+    {
+        var smtpEnabled = await GetAppSettingAsync("smtp_enabled")
+            ?? _configuration["Email:SmtpEnabled"]
+            ?? "false";
+
+        var isEnabled = string.Equals(smtpEnabled, "true", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(smtpEnabled, "1", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(smtpEnabled, "on", StringComparison.OrdinalIgnoreCase);
+
+        if (!isEnabled)
+        {
+            Console.WriteLine($"[Auth] SMTP disabled. Code for {email} ({kind}) = {code}");
+            return;
+        }
+
+        var host = await GetAppSettingAsync("smtp_host") ?? _configuration["Email:SmtpHost"];
+        var portRaw = await GetAppSettingAsync("smtp_port") ?? _configuration["Email:SmtpPort"];
+        var username = await GetAppSettingAsync("smtp_username") ?? _configuration["Email:SmtpUsername"];
+        var password = await GetAppSettingAsync("smtp_password") ?? _configuration["Email:SmtpPassword"];
+        var fromEmail = await GetAppSettingAsync("smtp_from_email") ?? _configuration["Email:FromEmail"];
+        var fromName = await GetAppSettingAsync("smtp_from_name") ?? _configuration["Email:FromName"] ?? "Fashion Demon";
+        var sslRaw = await GetAppSettingAsync("smtp_use_ssl") ?? _configuration["Email:SmtpUseSsl"] ?? "true";
+
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(fromEmail))
+        {
+            Console.WriteLine($"[Auth] SMTP is enabled but host/fromEmail is missing. Code for {email} ({kind}) = {code}");
+            return;
+        }
+
+        var port = int.TryParse(portRaw, out var parsedPort) ? parsedPort : 587;
+        var useSsl = string.Equals(sslRaw, "true", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(sslRaw, "1", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(sslRaw, "on", StringComparison.OrdinalIgnoreCase);
+
+        var subject = kind == "reset"
+            ? "Код для сброса пароля"
+            : "Код подтверждения регистрации";
+
+        var body = $"Ваш код: {code}. Срок действия — 15 минут.";
+
+        try
+        {
+            using var message = new MailMessage();
+            message.From = new MailAddress(fromEmail, fromName);
+            message.To.Add(email);
+            message.Subject = subject;
+            message.Body = body;
+
+            using var client = new SmtpClient(host, port)
+            {
+                EnableSsl = useSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = false
+            };
+
+            if (!string.IsNullOrWhiteSpace(username))
+                client.Credentials = new NetworkCredential(username, password ?? string.Empty);
+
+            await client.SendMailAsync(message);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Failed to send email to {email}: {ex.Message}. Code = {code}");
+        }
+    }
+
+    private async Task<string?> GetAppSettingAsync(string key)
+    {
+        var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+        return row?.Value;
     }
 }
