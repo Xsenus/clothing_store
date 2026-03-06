@@ -186,7 +186,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const saveSettings = async () => {
     try {
-      await FLOW.adminSaveSettings({ input: settings });
+      const currentRemote = await FLOW.adminGetSettings();
+      const mergedSettings = {
+        ...DEFAULT_APP_SETTINGS,
+        ...(currentRemote || {}),
+        ...settings
+      };
+
+      await FLOW.adminSaveSettings({ input: mergedSettings });
+      setSettings(mergedSettings);
       toast.success("Настройки сохранены");
     } catch (error) {
       toast.error("Не удалось сохранить настройки");
