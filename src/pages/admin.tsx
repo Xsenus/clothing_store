@@ -188,26 +188,28 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "advanced", label: "Другие ключи" }
   ] as const;
 
-  const knownKeys = new Set([
-    "storeName",
-    "privacy_policy",
-    "user_agreement",
-    "public_offer",
-    "cookie_consent_text",
-    "auth_password_policy_enabled",
-    "auth_session_ttl_hours",
-    "auth_refresh_session_ttl_hours",
-    "auth_session_sliding_update_minutes",
-    "auth_admin_session_ttl_hours",
-    "smtp_enabled",
-    "smtp_host",
-    "smtp_port",
-    "smtp_username",
-    "smtp_password",
-    "smtp_from_email",
-    "smtp_from_name",
-    "smtp_use_ssl"
-  ]);
+  const settingKeyHelp = [
+    { key: "storeName", description: "Публичное название магазина на сайте." },
+    { key: "privacy_policy", description: "Текст политики конфиденциальности." },
+    { key: "user_agreement", description: "Текст пользовательского соглашения." },
+    { key: "public_offer", description: "Текст публичной оферты." },
+    { key: "cookie_consent_text", description: "Текст плашки согласия на cookie." },
+    { key: "auth_password_policy_enabled", description: "Включает/выключает строгую проверку сложности пароля." },
+    { key: "auth_session_ttl_hours", description: "Время жизни пользовательской сессии в часах." },
+    { key: "auth_refresh_session_ttl_hours", description: "Время жизни refresh-токена в часах." },
+    { key: "auth_session_sliding_update_minutes", description: "Интервал скользящего продления активной сессии." },
+    { key: "auth_admin_session_ttl_hours", description: "Время жизни админ-сессии в часах." },
+    { key: "smtp_enabled", description: "Включает отправку email через SMTP." },
+    { key: "smtp_host", description: "SMTP сервер (host)." },
+    { key: "smtp_port", description: "Порт SMTP сервера." },
+    { key: "smtp_username", description: "Логин SMTP аккаунта." },
+    { key: "smtp_password", description: "Пароль SMTP аккаунта." },
+    { key: "smtp_from_email", description: "Email отправителя писем." },
+    { key: "smtp_from_name", description: "Имя отправителя писем." },
+    { key: "smtp_use_ssl", description: "Использовать SSL/TLS при подключении к SMTP." }
+  ] as const;
+
+  const knownKeys = new Set(settingKeyHelp.map((item) => item.key));
 
   const advancedSettings = Object.entries(settings).filter(([key]) => !knownKeys.has(key));
 
@@ -570,8 +572,26 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
 
-              <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
-                <div className="order-2 space-y-4 lg:order-1">
+              <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+                <div className="order-1 lg:order-1">
+                  <div className="border p-3 space-y-2 lg:sticky lg:top-4">
+                    <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Группы</p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                      {settingsGroups.map((group) => (
+                        <Button
+                          key={group.id}
+                          variant={selectedSettingsGroup === group.id ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setSelectedSettingsGroup(group.id)}
+                        >
+                          {group.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="order-2 space-y-4 lg:order-2">
                   {selectedSettingsGroup === "auth" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Авторизация</h3>
@@ -707,52 +727,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
                 </div>
 
-                <div className="order-1 lg:order-2">
-                  <div className="border p-3 space-y-2 sticky top-4">
-                    <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Группы</p>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-                      {settingsGroups.map((group) => (
-                        <Button
-                          key={group.id}
-                          variant={selectedSettingsGroup === group.id ? "default" : "outline"}
-                          className="justify-start"
-                          onClick={() => setSelectedSettingsGroup(group.id)}
-                        >
-                          {group.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <div className="mt-4 border p-3 space-y-3">
                 <h3 className="font-semibold">Быстро добавить ключ</h3>
                 <div className="flex flex-wrap gap-2">
-                  {[
-                    "storeName",
-                    "privacy_policy",
-                    "user_agreement",
-                    "public_offer",
-                    "cookie_consent_text",
-                    "auth_password_policy_enabled",
-                    "auth_session_ttl_hours",
-                    "auth_refresh_session_ttl_hours",
-                    "auth_session_sliding_update_minutes",
-                    "auth_admin_session_ttl_hours",
-                    "smtp_enabled",
-                    "smtp_host",
-                    "smtp_port",
-                    "smtp_username",
-                    "smtp_password",
-                    "smtp_from_email",
-                    "smtp_from_name",
-                    "smtp_use_ssl"
-                  ].map((key) => (
+                  {settingKeyHelp.map(({ key }) => (
                     <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
                       + {key}
                     </Button>
                   ))}
+                </div>
+                <div className="rounded-sm border bg-muted/20 p-3">
+                  <p className="text-sm font-medium mb-2">Что делают ключи</p>
+                  <div className="grid gap-1 text-xs text-muted-foreground">
+                    {settingKeyHelp.map(({ key, description }) => (
+                      <p key={`help-${key}`}><span className="font-semibold text-foreground">{key}</span> — {description}</p>
+                    ))}
+                  </div>
                 </div>
               </div>
 
