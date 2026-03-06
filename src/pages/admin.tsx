@@ -189,24 +189,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   ] as const;
 
   const settingKeyHelp = [
-    { key: "storeName", description: "Публичное название магазина на сайте." },
-    { key: "privacy_policy", description: "Текст политики конфиденциальности." },
-    { key: "user_agreement", description: "Текст пользовательского соглашения." },
-    { key: "public_offer", description: "Текст публичной оферты." },
-    { key: "cookie_consent_text", description: "Текст плашки согласия на cookie." },
-    { key: "auth_password_policy_enabled", description: "Включает/выключает строгую проверку сложности пароля." },
-    { key: "auth_session_ttl_hours", description: "Время жизни пользовательской сессии в часах." },
-    { key: "auth_refresh_session_ttl_hours", description: "Время жизни refresh-токена в часах." },
-    { key: "auth_session_sliding_update_minutes", description: "Интервал скользящего продления активной сессии." },
-    { key: "auth_admin_session_ttl_hours", description: "Время жизни админ-сессии в часах." },
-    { key: "smtp_enabled", description: "Включает отправку email через SMTP." },
-    { key: "smtp_host", description: "SMTP сервер (host)." },
-    { key: "smtp_port", description: "Порт SMTP сервера." },
-    { key: "smtp_username", description: "Логин SMTP аккаунта." },
-    { key: "smtp_password", description: "Пароль SMTP аккаунта." },
-    { key: "smtp_from_email", description: "Email отправителя писем." },
-    { key: "smtp_from_name", description: "Имя отправителя писем." },
-    { key: "smtp_use_ssl", description: "Использовать SSL/TLS при подключении к SMTP." }
+    { key: "storeName", title: "Название магазина", description: "Публичное название магазина на сайте." },
+    { key: "privacy_policy", title: "Политика конфиденциальности", description: "Текст политики конфиденциальности." },
+    { key: "user_agreement", title: "Пользовательское соглашение", description: "Текст пользовательского соглашения." },
+    { key: "public_offer", title: "Публичная оферта", description: "Текст публичной оферты." },
+    { key: "cookie_consent_text", title: "Текст cookie-согласия", description: "Текст плашки согласия на cookie." },
+    { key: "auth_password_policy_enabled", title: "Строгая проверка пароля", description: "Включает/выключает строгую проверку сложности пароля." },
+    { key: "auth_session_ttl_hours", title: "Срок пользовательской сессии (часы)", description: "Время жизни пользовательской сессии в часах." },
+    { key: "auth_refresh_session_ttl_hours", title: "Срок refresh-сессии (часы)", description: "Время жизни refresh-токена в часах." },
+    { key: "auth_session_sliding_update_minutes", title: "Скользящее продление (минуты)", description: "Интервал скользящего продления активной сессии." },
+    { key: "auth_admin_session_ttl_hours", title: "Срок админ-сессии (часы)", description: "Время жизни админ-сессии в часах." },
+    { key: "smtp_enabled", title: "SMTP включен", description: "Включает отправку email через SMTP." },
+    { key: "smtp_host", title: "SMTP хост", description: "SMTP сервер (host)." },
+    { key: "smtp_port", title: "SMTP порт", description: "Порт SMTP сервера." },
+    { key: "smtp_username", title: "SMTP логин", description: "Логин SMTP аккаунта." },
+    { key: "smtp_password", title: "SMTP пароль", description: "Пароль SMTP аккаунта." },
+    { key: "smtp_from_email", title: "Email отправителя", description: "Email отправителя писем." },
+    { key: "smtp_from_name", title: "Имя отправителя", description: "Имя отправителя писем." },
+    { key: "smtp_use_ssl", title: "SMTP SSL/TLS", description: "Использовать SSL/TLS при подключении к SMTP." }
   ] as const;
 
   const knownKeys = new Set(settingKeyHelp.map((item) => item.key));
@@ -732,17 +732,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <div className="mt-4 border p-3 space-y-3">
                 <h3 className="font-semibold">Быстро добавить ключ</h3>
                 <div className="flex flex-wrap gap-2">
-                  {settingKeyHelp.map(({ key }) => (
+                  {settingKeyHelp.map(({ key, title }) => (
                     <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
-                      + {key}
+                      + {title}
                     </Button>
                   ))}
                 </div>
                 <div className="rounded-sm border bg-muted/20 p-3">
                   <p className="text-sm font-medium mb-2">Что делают ключи</p>
-                  <div className="grid gap-1 text-xs text-muted-foreground">
-                    {settingKeyHelp.map(({ key, description }) => (
-                      <p key={`help-${key}`}><span className="font-semibold text-foreground">{key}</span> — {description}</p>
+                  <div className="grid gap-2 text-xs text-muted-foreground">
+                    {settingKeyHelp.map(({ key, title, description }) => (
+                      <p key={`help-${key}`}>
+                        <span className="font-semibold text-foreground">{title}</span>
+                        <span> — {description}</span>
+                        <span className="block text-[11px]">Ключ: {key}</span>
+                      </p>
                     ))}
                   </div>
                 </div>
