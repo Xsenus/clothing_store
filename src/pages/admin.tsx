@@ -214,34 +214,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "auth", label: "Авторизация" },
     { id: "smtp", label: "Почта (SMTP)" },
     { id: "legal", label: "Юридические тексты" },
-    { id: "general", label: "Общие" },
-    { id: "advanced", label: "Другие ключи" }
+    { id: "general", label: "Общие" }
   ] as const;
-
-  const settingKeyHelp = [
-    { key: "storeName", title: "Название магазина", description: "Публичное название магазина на сайте." },
-    { key: "privacy_policy", title: "Политика конфиденциальности", description: "Текст политики конфиденциальности." },
-    { key: "user_agreement", title: "Пользовательское соглашение", description: "Текст пользовательского соглашения." },
-    { key: "public_offer", title: "Публичная оферта", description: "Текст публичной оферты." },
-    { key: "cookie_consent_text", title: "Текст cookie-согласия", description: "Текст плашки согласия на cookie." },
-    { key: "auth_password_policy_enabled", title: "Строгая проверка пароля", description: "Включает/выключает строгую проверку сложности пароля." },
-    { key: "auth_session_ttl_hours", title: "Срок пользовательской сессии (часы)", description: "Время жизни пользовательской сессии в часах." },
-    { key: "auth_refresh_session_ttl_hours", title: "Срок refresh-сессии (часы)", description: "Время жизни refresh-токена в часах." },
-    { key: "auth_session_sliding_update_minutes", title: "Скользящее продление (минуты)", description: "Интервал скользящего продления активной сессии." },
-    { key: "auth_admin_session_ttl_hours", title: "Срок админ-сессии (часы)", description: "Время жизни админ-сессии в часах." },
-    { key: "smtp_enabled", title: "SMTP включен", description: "Включает отправку email через SMTP." },
-    { key: "smtp_host", title: "SMTP хост", description: "SMTP сервер (host)." },
-    { key: "smtp_port", title: "SMTP порт", description: "Порт SMTP сервера." },
-    { key: "smtp_username", title: "SMTP логин", description: "Логин SMTP аккаунта." },
-    { key: "smtp_password", title: "SMTP пароль", description: "Пароль SMTP аккаунта." },
-    { key: "smtp_from_email", title: "Email отправителя", description: "Email отправителя писем." },
-    { key: "smtp_from_name", title: "Имя отправителя", description: "Имя отправителя писем." },
-    { key: "smtp_use_ssl", title: "SMTP SSL/TLS", description: "Использовать SSL/TLS при подключении к SMTP." }
-  ] as const;
-
-  const knownKeys = new Set(settingKeyHelp.map((item) => item.key));
-
-  const advancedSettings = Object.entries(settings).filter(([key]) => !knownKeys.has(key));
 
   const buildMediaFromProduct = (product: Product) => {
     if (product.media && product.media.length > 0) return product.media;
@@ -733,44 +707,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </div>
                   )}
 
-                  {selectedSettingsGroup === "advanced" && (
-                    <div className="space-y-3 border p-3">
-                      <h3 className="font-semibold">Другие ключи</h3>
-                      <p className="text-sm text-muted-foreground">Сюда попадают ключи, которые не входят в преднастроенные группы.</p>
-                      {advancedSettings.length === 0 ? (
-                        <div className="text-sm text-muted-foreground">Пока нет дополнительных ключей.</div>
-                      ) : (
-                        <div className="grid gap-3">
-                          {advancedSettings.map(([key, value]) => (
-                            <div key={key} className="space-y-1">
-                              <Label>{key}</Label>
-                              {key.includes("policy") || key.includes("agreement") || key.includes("offer") ? (
-                                <Textarea value={value} onChange={(e) => updateSetting(key, e.target.value)} className="min-h-[120px]" />
-                              ) : (
-                                <Input value={value} onChange={(e) => updateSetting(key, e.target.value)} />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
               </div>
 
-              <div className="mt-4 rounded-sm border bg-muted/20 p-3">
-                <p className="text-sm font-medium mb-2">Справка по параметрам</p>
-                <div className="grid gap-2 text-xs text-muted-foreground">
-                  {settingKeyHelp.map(({ key, title, description }) => (
-                    <p key={`help-${key}`}>
-                      <span className="font-semibold text-foreground">{title}</span>
-                      <span> — {description}</span>
-                      <span className="block text-[11px]">Системный ключ: {key}</span>
-                    </p>
-                  ))}
-                </div>
-              </div>
 
               <div className="mt-3 flex gap-2">
                 <Button onClick={saveSettings}>Сохранить настройки</Button>
