@@ -54,6 +54,28 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
+
+const DEFAULT_APP_SETTINGS: Record<string, string> = {
+  storeName: "",
+  privacy_policy: "",
+  user_agreement: "",
+  public_offer: "",
+  cookie_consent_text: "",
+  auth_password_policy_enabled: "true",
+  auth_session_ttl_hours: "720",
+  auth_refresh_session_ttl_hours: "2160",
+  auth_session_sliding_update_minutes: "5",
+  auth_admin_session_ttl_hours: "168",
+  smtp_enabled: "false",
+  smtp_host: "",
+  smtp_port: "587",
+  smtp_username: "",
+  smtp_password: "",
+  smtp_from_email: "",
+  smtp_from_name: "Fashion Demon",
+  smtp_use_ssl: "true"
+};
+
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -128,7 +150,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
-      setSettings(settingsRes || {});
+      setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -729,26 +751,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
               </div>
 
-              <div className="mt-4 border p-3 space-y-3">
-                <h3 className="font-semibold">Быстро добавить ключ</h3>
-                <div className="flex flex-wrap gap-2">
-                  {settingKeyHelp.map(({ key, title }) => (
-                    <Button key={key} variant="outline" onClick={() => setSettings((prev) => ({ ...prev, [key]: prev[key] || "" }))}>
-                      + {title}
-                    </Button>
+              <div className="mt-4 rounded-sm border bg-muted/20 p-3">
+                <p className="text-sm font-medium mb-2">Справка по параметрам</p>
+                <div className="grid gap-2 text-xs text-muted-foreground">
+                  {settingKeyHelp.map(({ key, title, description }) => (
+                    <p key={`help-${key}`}>
+                      <span className="font-semibold text-foreground">{title}</span>
+                      <span> — {description}</span>
+                      <span className="block text-[11px]">Системный ключ: {key}</span>
+                    </p>
                   ))}
-                </div>
-                <div className="rounded-sm border bg-muted/20 p-3">
-                  <p className="text-sm font-medium mb-2">Что делают ключи</p>
-                  <div className="grid gap-2 text-xs text-muted-foreground">
-                    {settingKeyHelp.map(({ key, title, description }) => (
-                      <p key={`help-${key}`}>
-                        <span className="font-semibold text-foreground">{title}</span>
-                        <span> — {description}</span>
-                        <span className="block text-[11px]">Ключ: {key}</span>
-                      </p>
-                    ))}
-                  </div>
                 </div>
               </div>
 
