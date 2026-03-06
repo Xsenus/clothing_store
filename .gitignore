@@ -40,3 +40,6 @@ deploy/data/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# sqlite
+**/app.db
