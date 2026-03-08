@@ -4,10 +4,16 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -15,12 +21,15 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
           script: |
             set -e
-            cd /opt/clothing_store
+            APP_DIR="${{ secrets.VPS_APP_DIR || '/opt/clothing_store' }}"
+            cd "$APP_DIR"
             git fetch --all
             git reset --hard origin/main
             [ -f .env ] || cp .env.example .env
             mkdir -p deploy/data/uploads deploy/data/postgres
             docker compose pull || true
             docker compose up -d --build --remove-orphans
+            docker compose ps

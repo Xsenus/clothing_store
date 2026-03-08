@@ -148,12 +148,20 @@ Workflow: `.github/workflows/deploy-vps.yml`
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
+- `VPS_SSH_PORT` (опционально, по умолчанию `22`)
+- `VPS_APP_DIR` (опционально, по умолчанию `/opt/clothing_store`)
 
 Логика workflow:
 
 1. SSH на VPS
 2. Обновление репозитория
 3. Подъем `docker compose up -d --build --remove-orphans`
+4. Проверка состояния контейнеров через `docker compose ps`
+
+Workflow запускается:
+
+- автоматически при `push` в `main`;
+- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions).
 
 ---
 
