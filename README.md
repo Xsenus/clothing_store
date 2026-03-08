@@ -143,17 +143,258 @@ docker compose up -d --build
 
 Workflow: `.github/workflows/deploy-vps.yml`
 
-Нужные GitHub Secrets:
+Поддерживаются **2 режима деплоя**:
+
+1. `docker` — через Docker Compose (рекомендуется)
+2. `direct` — напрямую на VPS без Docker (`systemd + nginx`)
+
+Выбор режима:
+
+- По умолчанию: `docker`
+- Через GitHub Variable `DEPLOY_MODE`
+- Или вручную в `Run workflow` через input `mode`
+
+---
+
+### 1) Общая подготовка VPS (для любого режима)
+
+Установите и проверьте:
+
+```bash
+git --version
+```
+
+Создайте директорию приложения:
+
+```bash
+sudo mkdir -p /opt/clothing_store
+sudo chown -R $USER:$USER /opt/clothing_store
+cd /opt/clothing_store
+git clone <YOUR_REPO_URL> .
+cp .env.example .env
+```
+
+Заполните `.env` безопасными значениями.
+
+> Workflow не перезаписывает `.env`, если он уже существует.
+
+---
+
+### 2) SSH-ключ для GitHub Actions
+
+Сгенерируйте ключ локально:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions_deploy
+```
+
+- Публичный ключ добавьте на VPS в `~/.ssh/authorized_keys` пользователя деплоя.
+- Приватный ключ добавьте в GitHub Secret `VPS_SSH_KEY`.
+
+Проверьте вход:
+
+```bash
+ssh -i ~/.ssh/github_actions_deploy <user>@<server_ip>
+```
+
+---
+
+### 3) GitHub Secrets и Variables
+
+Repository → **Settings** → **Secrets and variables** → **Actions**.
+
+#### Обязательные Secrets
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 
-Логика workflow:
+#### Опциональные Variables
 
-1. SSH на VPS
-2. Обновление репозитория
-3. Подъем `docker compose up -d --build --remove-orphans`
+- `VPS_SSH_PORT` — SSH порт (default `22`)
+- `VPS_APP_DIR` — путь до проекта на сервере (default `/opt/clothing_store`)
+- `DEPLOY_MODE` — `docker` или `direct` (default `docker`)
+- `FRONTEND_DIST_DIR` — только для `direct`, куда выкладывать фронтенд (default `/var/www/clothing-store`)
+- `BACKEND_SERVICE` — только для `direct`, имя systemd-сервиса backend (default `clothing-store-api`)
+
+---
+
+### 4) Вариант A — деплой через Docker Compose (`DEPLOY_MODE=docker`)
+
+#### Что должно быть на VPS
+
+```bash
+docker --version
+docker compose version
+```
+
+Пользователь деплоя должен иметь доступ к Docker (например, группа `docker`).
+
+#### Что делает workflow
+
+1. `git fetch --prune --tags origin`
+2. `git reset --hard <ref>`
+3. `docker compose pull`
+4. `docker compose up -d --build --remove-orphans`
+5. `docker compose ps`
+
+#### Плюсы
+
+- изолированное окружение;
+- одинаковое поведение между серверами;
+- проще обновлять зависимости.
+
+> Важно: в `docker`-режиме PostgreSQL ставить на хост не нужно — БД запускается контейнером `postgres` из `docker-compose.yml`.
+
+---
+
+### 5) Вариант B — прямой деплой на VPS (`DEPLOY_MODE=direct`)
+
+#### Что должно быть на VPS
+
+```bash
+node -v
+npm -v
+dotnet --version
+rsync --version
+systemctl --version
+```
+
+Дополнительно:
+
+- настроенный `nginx` для раздачи `FRONTEND_DIST_DIR`;
+- созданный systemd-сервис backend (имя = `BACKEND_SERVICE`);
+- установленный PostgreSQL (рекомендуется для production).
+
+#### Установка PostgreSQL на Ubuntu 24.04 (для `direct`)
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+Создайте БД и пользователя:
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER clothing_store_user WITH ENCRYPTED PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
+CREATE DATABASE clothing_store OWNER clothing_store_user;
+GRANT ALL PRIVILEGES ON DATABASE clothing_store TO clothing_store_user;
+SQL
+```
+
+Добавьте в `/opt/clothing_store/.env` строку подключения (Npgsql формат):
+
+```bash
+DATABASE_URL=Host=127.0.0.1;Port=5432;Database=clothing_store;Username=clothing_store_user;Password=CHANGE_ME_STRONG_PASSWORD
+```
+
+Проверка подключения:
+
+```bash
+psql "host=127.0.0.1 port=5432 dbname=clothing_store user=clothing_store_user password=CHANGE_ME_STRONG_PASSWORD" -c 'SELECT 1;'
+```
+
+#### Что делает workflow
+
+1. `git fetch --prune --tags origin`
+2. `git reset --hard <ref>`
+3. `npm ci && npm run build`
+4. `rsync dist/ -> FRONTEND_DIST_DIR`
+5. `dotnet publish backend/Store.Api/Store.Api.csproj`
+6. `systemctl restart BACKEND_SERVICE`
+7. `systemctl status BACKEND_SERVICE`
+
+#### Пример systemd unit (`/etc/systemd/system/clothing-store-api.service`)
+
+```ini
+[Unit]
+Description=Clothing Store API
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/clothing_store/backend/Store.Api/publish
+ExecStart=/usr/bin/dotnet /opt/clothing_store/backend/Store.Api/publish/Store.Api.dll
+Restart=always
+RestartSec=5
+User=www-data
+Environment=ASPNETCORE_ENVIRONMENT=Production
+EnvironmentFile=/opt/clothing_store/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Применить:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable clothing-store-api
+sudo systemctl start clothing-store-api
+```
+
+#### Плюсы
+
+- меньше runtime-слоя (без Docker);
+- проще интеграция с системными сервисами.
+
+---
+
+### 6) Запуск workflow
+
+- Автоматически при `push` в `main`
+- Вручную через **Actions → Run workflow**:
+  - `ref`: branch/tag/SHA
+  - `mode`: `docker` или `direct`
+
+При `push` деплоится конкретный `github.sha`.
+
+---
+
+### 7) Проверка после деплоя
+
+#### Для `docker`
+
+```bash
+cd /opt/clothing_store
+docker compose ps
+docker compose logs backend --tail=100
+docker compose logs frontend --tail=100
+```
+
+#### Для `direct`
+
+```bash
+sudo systemctl status clothing-store-api --no-pager
+sudo journalctl -u clothing-store-api -n 100 --no-pager
+ls -la /var/www/clothing-store
+```
+
+Проверка URL:
+
+- `http://<server-ip>/`
+- `http://<server-ip>/api/products`
+
+---
+
+### 8) Частые проблемы
+
+- `Permission denied (publickey)`
+  - проверьте корректность `VPS_SSH_KEY` и `authorized_keys`
+- `Unsupported DEPLOY_MODE=...`
+  - проверьте `DEPLOY_MODE`/input `mode` (`docker` или `direct`)
+- `docker compose ... permission denied`
+  - добавьте пользователя в группу `docker`
+- `systemctl restart <service> failed` в `direct`
+  - проверьте имя `BACKEND_SERVICE`, unit-файл и `journalctl`
+- В `direct` backend не может подключиться к БД
+  - проверьте, что PostgreSQL установлен и запущен: `sudo systemctl status postgresql`
+  - проверьте `DATABASE_URL` в `/opt/clothing_store/.env`
+  - проверьте доступ `psql` командой из шага установки
+- Сайт недоступен
+  - проверьте firewall/security group и логи backend/frontend
 
 ---
 
