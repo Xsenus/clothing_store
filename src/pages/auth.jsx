@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
+import { fetchPublicSettings } from "@/lib/site-settings";
 
 
 function AuthMiniFooter() {
@@ -50,11 +51,71 @@ export default function AuthPage() {
   const [signUpPassword, setSignUpPassword] = useState("");
   const [authTab, setAuthTab] = useState("signin");
 
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramBotUsername, setTelegramBotUsername] = useState("");
+
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
       navigate("/profile", { replace: true });
     }
   }, [authLoading, isAuthenticated, navigate]);
+
+  useEffect(() => {
+    const loadTelegram = async () => {
+      const settings = await fetchPublicSettings();
+      const enabled = ["true", "1", "on"].includes(String(settings?.telegram_login_enabled || "").toLowerCase());
+      setTelegramEnabled(enabled);
+      setTelegramBotUsername(settings?.telegram_bot_username || "");
+    };
+    loadTelegram();
+  }, []);
+
+  useEffect(() => {
+    if (!telegramEnabled || !telegramBotUsername) return;
+
+    const mountNode = document.getElementById("telegram-login-widget");
+    if (!mountNode) return;
+
+    mountNode.innerHTML = "";
+    window.onTelegramAuth = async (telegramUser) => {
+      setLoading(true);
+      try {
+        const formData = new FormData();
+        formData.append("flow", "telegram");
+        formData.append("telegramPayload", JSON.stringify({
+          id: String(telegramUser.id),
+          firstName: telegramUser.first_name,
+          lastName: telegramUser.last_name,
+          username: telegramUser.username,
+          photoUrl: telegramUser.photo_url,
+          authDate: String(telegramUser.auth_date),
+          hash: telegramUser.hash,
+        }));
+        await signIn("telegram", formData);
+        toast.success("Вход через Telegram выполнен");
+        navigate("/");
+      } catch (error) {
+        toast.error("Не удалось авторизоваться через Telegram");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.async = true;
+    script.setAttribute("data-telegram-login", telegramBotUsername);
+    script.setAttribute("data-size", "large");
+    script.setAttribute("data-userpic", "false");
+    script.setAttribute("data-request-access", "write");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    mountNode.appendChild(script);
+
+    return () => {
+      delete window.onTelegramAuth;
+      mountNode.innerHTML = "";
+    };
+  }, [telegramEnabled, telegramBotUsername, navigate, signIn]);
 
   const mapKnownErrorMessage = (rawMessage) => {
     const normalized = (rawMessage || "").toLowerCase();
@@ -401,6 +462,12 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Вход..." : "Войти"}
                     </Button>
+                    {telegramEnabled && telegramBotUsername && (
+                      <div className="pt-1">
+                        <p className="text-xs text-muted-foreground">Или войдите через Telegram:</p>
+                        <div id="telegram-login-widget" className="pt-2" />
+                      </div>
+                    )}
                   </form>
                 </TabsContent>
 

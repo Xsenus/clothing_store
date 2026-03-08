@@ -73,7 +73,20 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   smtp_password: "",
   smtp_from_email: "",
   smtp_from_name: "Fashion Demon",
-  smtp_use_ssl: "true"
+  smtp_use_ssl: "true",
+  metrics_yandex_metrika_enabled: "false",
+  metrics_yandex_metrika_code: "",
+  metrics_google_analytics_enabled: "false",
+  metrics_google_analytics_code: "",
+  metrics_vk_pixel_enabled: "false",
+  metrics_vk_pixel_code: "",
+  telegram_login_enabled: "false",
+  telegram_bot_username: "",
+  telegram_bot_token: "",
+  dadata_api_key: "",
+  yandex_delivery_base_cost: "350",
+  yandex_delivery_cost_per_kg: "40",
+  yandex_delivery_markup_percent: "0"
 };
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
@@ -213,6 +226,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const settingsGroups = [
     { id: "auth", label: "Авторизация" },
     { id: "smtp", label: "Почта (SMTP)" },
+    { id: "metrics", label: "Метрики" },
+    { id: "integrations", label: "Интеграции" },
+    { id: "delivery", label: "Доставка" },
     { id: "legal", label: "Юридические тексты" },
     { id: "general", label: "Общие" }
   ] as const;
@@ -672,6 +688,88 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           onCheckedChange={(checked) => updateSetting("smtp_use_ssl", checked ? "true" : "false")}
                         />
                         <Label htmlFor="smtp-use-ssl">Использовать SSL/TLS</Label>
+                      </div>
+                    </div>
+                  )}
+
+
+                  {selectedSettingsGroup === "metrics" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Метрики</h3>
+                      {[ 
+                        ["metrics_yandex_metrika", "Яндекс Метрика"],
+                        ["metrics_google_analytics", "Google Analytics"],
+                        ["metrics_vk_pixel", "VK Pixel"]
+                      ].map(([prefix, label]) => (
+                        <div key={prefix} className="space-y-2 border p-3">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={`${prefix}-enabled`}
+                              checked={isSettingEnabled(`${prefix}_enabled`)}
+                              onCheckedChange={(checked) => updateSetting(`${prefix}_enabled`, checked ? "true" : "false")}
+                            />
+                            <Label htmlFor={`${prefix}-enabled`}>Включить {label}</Label>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`${prefix}-code`}>Код/сниппет</Label>
+                            <Textarea
+                              id={`${prefix}-code`}
+                              value={settings[`${prefix}_code`] || ""}
+                              onChange={(e) => updateSetting(`${prefix}_code`, e.target.value)}
+                              className="min-h-[120px]"
+                              placeholder="Вставьте код счётчика"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedSettingsGroup === "integrations" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Интеграции</h3>
+                      <div className="space-y-2 border p-3">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="telegram-login-enabled"
+                            checked={isSettingEnabled("telegram_login_enabled")}
+                            onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
+                          />
+                          <Label htmlFor="telegram-login-enabled">Включить авторизацию через Telegram</Label>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="telegram-bot-username">Telegram Bot Username</Label>
+                          <Input id="telegram-bot-username" value={settings["telegram_bot_username"] || ""} onChange={(e) => updateSetting("telegram_bot_username", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="telegram-bot-token">Telegram Bot Token</Label>
+                          <Input id="telegram-bot-token" type="password" value={settings["telegram_bot_token"] || ""} onChange={(e) => updateSetting("telegram_bot_token", e.target.value)} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 border p-3">
+                        <Label htmlFor="dadata-api-key">DaData API Key</Label>
+                        <Input id="dadata-api-key" type="password" value={settings["dadata_api_key"] || ""} onChange={(e) => updateSetting("dadata_api_key", e.target.value)} />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSettingsGroup === "delivery" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Яндекс Доставка (расчет)</h3>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="yandex-delivery-base-cost">Базовая стоимость (₽)</Label>
+                          <Input id="yandex-delivery-base-cost" value={settings["yandex_delivery_base_cost"] || "350"} onChange={(e) => updateSetting("yandex_delivery_base_cost", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="yandex-delivery-cost-per-kg">Стоимость за кг (₽)</Label>
+                          <Input id="yandex-delivery-cost-per-kg" value={settings["yandex_delivery_cost_per_kg"] || "40"} onChange={(e) => updateSetting("yandex_delivery_cost_per_kg", e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="yandex-delivery-markup">Наценка (%)</Label>
+                          <Input id="yandex-delivery-markup" value={settings["yandex_delivery_markup_percent"] || "0"} onChange={(e) => updateSetting("yandex_delivery_markup_percent", e.target.value)} />
+                        </div>
                       </div>
                     </div>
                   )}

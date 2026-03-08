@@ -3,7 +3,6 @@ import Footer from '@/components/Footer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
@@ -23,6 +22,9 @@ export default function CheckoutPage() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cod");
+  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+  const [shipping, setShipping] = useState(10);
+  const [shippingLoading, setShippingLoading] = useState(false);
 
   // Fetch product prices to calculate total (since cart items don't have price)
   const [products, setProducts] = useState<Record<string, any>>({});
@@ -48,8 +50,60 @@ export default function CheckoutPage() {
     return sum + (product ? product.price * item.quantity : 0);
   }, 0);
 
-  const shipping = 10; // Flat rate
   const total = subtotal + shipping;
+
+
+  useEffect(() => {
+    const q = address.trim();
+    if (q.length < 4) {
+      setAddressSuggestions([]);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await FLOW.dadataSuggestAddresses({ input: { query: q, count: 5 } });
+        const suggestions = Array.isArray(res?.suggestions)
+          ? res.suggestions.map((x: any) => x.unrestrictedValue || x.value).filter(Boolean)
+          : [];
+        setAddressSuggestions(suggestions);
+      } catch {
+        setAddressSuggestions([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [address]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!address || subtotal <= 0) {
+        setShipping(10);
+        return;
+      }
+
+      setShippingLoading(true);
+      try {
+        const res = await FLOW.yandexDeliveryCalculate({
+          input: {
+            toAddress: address,
+            weightKg: Math.max(1, Number((totalItems * 0.3).toFixed(2))),
+            declaredCost: subtotal,
+          },
+        });
+        const value = Number(res?.estimatedCost);
+        if (!Number.isNaN(value) && value > 0) {
+          setShipping(value);
+        }
+      } catch {
+        setShipping(10);
+      } finally {
+        setShippingLoading(false);
+      }
+    };
+
+    run();
+  }, [address, subtotal, totalItems]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,13 +194,32 @@ export default function CheckoutPage() {
 
                 <div className="space-y-4">
                   <h2 className="text-xl font-bold uppercase tracking-wider border-b pb-2">АДРЕС ДОСТАВКИ</h2>
-                  <Textarea 
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    required
-                    className="rounded-none border-black focus-visible:ring-black min-h-[100px]"
-                    placeholder="Полный адрес, включая индекс и страну"
-                  />
+                  <div className="space-y-2">
+                    <Input
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      required
+                      className="rounded-none border-black focus-visible:ring-black"
+                      placeholder="Начните вводить адрес"
+                    />
+                    {addressSuggestions.length > 0 && (
+                      <div className="border border-gray-200 bg-white">
+                        {addressSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                            onClick={() => {
+                              setAddress(suggestion);
+                              setAddressSuggestions([]);
+                            }}
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -199,7 +272,7 @@ export default function CheckoutPage() {
                   <span className="font-bold">${subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span>Доставка</span>
+                  <span>Доставка {shippingLoading ? "(расчет...)" : ""}</span>
                   <span className="font-bold">${shipping.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-xl font-black mt-4 pt-4 border-t border-black">
