@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
 import CookieBanner from "@/components/CookieBanner";
+import MetricsScripts from "@/components/MetricsScripts";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -20,6 +21,7 @@ createRoot(document.getElementById("root")).render(
           <BrowserRouter>
             <App />
             <CookieBanner />
+            <MetricsScripts />
           </BrowserRouter>
         </TooltipProvider>
       </CartProvider>

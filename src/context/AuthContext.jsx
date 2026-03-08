@@ -39,6 +39,13 @@ export function AuthProvider({ children }) {
     const password = formData.get ? formData.get("password") : formData.password;
     const flow = formData.get ? formData.get("flow") : formData.flow;
 
+    if (flow === "telegram") {
+      const telegramPayload = formData.get ? JSON.parse(formData.get("telegramPayload") || "{}") : formData.telegramPayload;
+      const result = await FLOW.telegramLogin({ input: telegramPayload });
+      setUser(result.user);
+      return { signingIn: true };
+    }
+
     if (flow === "signUp") {
       await FLOW.signUp({ input: { email, password } });
       return { signingIn: false };

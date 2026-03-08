@@ -293,6 +293,29 @@ export const FLOW = {
     return { ok: true };
   },
 
+
+  telegramLogin: async ({ input }) => {
+    const result = await request("/auth/telegram/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    saveAuthTokens(result || {});
+    return result;
+  },
+
+  dadataSuggestAddresses: async ({ input }) => request("/integrations/dadata/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: input.query, count: input.count || 5 }),
+  }),
+
+  yandexDeliveryCalculate: async ({ input }) => request("/integrations/yandex/delivery/calculate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   signOut: async () => {
     const refreshToken = getRefreshToken();
     try {

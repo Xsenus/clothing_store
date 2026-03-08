@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -133,6 +135,56 @@ public class AuthController : ControllerBase
         return Results.Ok(new { token, refreshToken });
     }
 
+
+    [HttpPost("telegram/login")]
+    public async Task<IResult> TelegramLogin([FromBody] TelegramAuthPayload payload)
+    {
+        var botToken = await GetSettingOrConfigAsync("telegram_bot_token", "Integrations:Telegram:BotToken");
+        if (string.IsNullOrWhiteSpace(botToken))
+            return Results.BadRequest(new { detail = "Telegram bot token is not configured" });
+
+        if (!ValidateTelegramPayload(payload, botToken))
+            return Results.BadRequest(new { detail = "Invalid telegram auth payload" });
+
+        var email = $"telegram_{payload.Id}@telegram.local";
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+
+        if (user is null)
+        {
+            user = new User
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Email = email,
+                PasswordHash = string.Empty,
+                Salt = string.Empty,
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Verified = true
+            };
+            _db.Users.Add(user);
+            _db.Profiles.Add(new Profile
+            {
+                UserId = user.Id,
+                Email = email,
+                Name = string.Join(" ", new[] { payload.FirstName, payload.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim(),
+                Nickname = payload.Username
+            });
+        }
+        else if (!user.Verified)
+        {
+            user.Verified = true;
+        }
+
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        await _db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            token,
+            refreshToken,
+            user = new { id = user.Id, email = user.Email }
+        });
+    }
+
     /// <summary>
     /// Обновляет пользовательскую сессию по refresh-токену.
     /// </summary>
@@ -253,6 +305,43 @@ public class AuthController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
+
+
+    private async Task<string?> GetSettingOrConfigAsync(string key, string configPath)
+    {
+        var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Value))
+            return row.Value;
+
+        return _configuration[configPath];
+    }
+
+    private static bool ValidateTelegramPayload(TelegramAuthPayload payload, string botToken)
+    {
+        if (string.IsNullOrWhiteSpace(payload.Id) || string.IsNullOrWhiteSpace(payload.AuthDate) || string.IsNullOrWhiteSpace(payload.Hash))
+            return false;
+
+        var entries = new List<string>
+        {
+            $"auth_date={payload.AuthDate}",
+            $"id={payload.Id}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(payload.FirstName)) entries.Add($"first_name={payload.FirstName}");
+        if (!string.IsNullOrWhiteSpace(payload.LastName)) entries.Add($"last_name={payload.LastName}");
+        if (!string.IsNullOrWhiteSpace(payload.PhotoUrl)) entries.Add($"photo_url={payload.PhotoUrl}");
+        if (!string.IsNullOrWhiteSpace(payload.Username)) entries.Add($"username={payload.Username}");
+
+        entries.Sort(StringComparer.Ordinal);
+        var dataCheckString = string.Join("\n", entries);
+
+        var secretKey = SHA256.HashData(Encoding.UTF8.GetBytes(botToken));
+        using var hmac = new HMACSHA256(secretKey);
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(dataCheckString));
+        var expected = Convert.ToHexString(hash).ToLowerInvariant();
+
+        return expected == payload.Hash.Trim().ToLowerInvariant();
+    }
 
     private async Task<(string token, string refreshToken)> CreateSessionPairAsync(string userId)
     {

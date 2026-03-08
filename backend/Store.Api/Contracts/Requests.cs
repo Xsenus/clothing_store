@@ -54,3 +54,25 @@ public record ReviewPayload(string Text, List<string>? Media);
 /// Данные для создания заказа.
 /// </summary>
 public record OrderPayload(List<Dictionary<string, object>> Items, double TotalAmount, string? Status);
+
+/// <summary>
+/// Данные авторизации Telegram Login Widget.
+/// </summary>
+public record TelegramAuthPayload(
+    string Id,
+    string? FirstName,
+    string? LastName,
+    string? Username,
+    string? PhotoUrl,
+    string AuthDate,
+    string Hash);
+
+/// <summary>
+/// Параметры поиска адреса через DaData.
+/// </summary>
+public record AddressSuggestPayload(string Query, int? Count);
+
+/// <summary>
+/// Параметры расчёта стоимости доставки Яндекс.
+/// </summary>
+public record YandexDeliveryCalculatePayload(string ToAddress, decimal? WeightKg, decimal? DeclaredCost);
