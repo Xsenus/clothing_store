@@ -148,20 +148,25 @@ Workflow: `.github/workflows/deploy-vps.yml`
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
-- `VPS_SSH_PORT` (опционально, по умолчанию `22`)
-- `VPS_APP_DIR` (опционально, по умолчанию `/opt/clothing_store`)
+
+Опциональные GitHub Variables (Repository → Settings → Secrets and variables → Actions → Variables):
+
+- `VPS_SSH_PORT` (по умолчанию `22`)
+- `VPS_APP_DIR` (по умолчанию `/opt/clothing_store`)
 
 Логика workflow:
 
-1. SSH на VPS
-2. Обновление репозитория
-3. Подъем `docker compose up -d --build --remove-orphans`
-4. Проверка состояния контейнеров через `docker compose ps`
+1. Проверка обязательных secrets на стороне GitHub Actions
+2. SSH на VPS
+3. `git fetch --prune --tags origin` + деплой конкретного `ref` (`github.sha` для push, input `ref` для ручного запуска)
+4. Подъем `docker compose up -d --build --remove-orphans`
+5. Проверка состояния контейнеров через `docker compose ps`
+6. При ошибке автоматически выводятся `docker compose ps` и `docker compose logs --tail=100`
 
 Workflow запускается:
 
 - автоматически при `push` в `main`;
-- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions).
+- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions) с параметром `ref`.
 
 ---
 

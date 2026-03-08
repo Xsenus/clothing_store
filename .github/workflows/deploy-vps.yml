@@ -5,31 +5,54 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch, tag or SHA)"
+        required: false
+        default: "main"
 
 concurrency:
   group: deploy-production
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Validate required secrets
+        run: |
+          test -n "${{ secrets.VPS_HOST }}"
+          test -n "${{ secrets.VPS_USER }}"
+          test -n "${{ secrets.VPS_SSH_KEY }}"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ vars.VPS_APP_DIR != '' && vars.VPS_APP_DIR || '/opt/clothing_store' }}
+          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          port: ${{ vars.VPS_SSH_PORT != '' && vars.VPS_SSH_PORT || '22' }}
+          script_stop: true
+          envs: APP_DIR,DEPLOY_REF
           script: |
-            set -e
-            APP_DIR="${{ secrets.VPS_APP_DIR || '/opt/clothing_store' }}"
+            set -Eeuo pipefail
+            trap 'echo "❌ Deploy failed"; docker compose ps || true; docker compose logs --tail=100 || true' ERR
+
             cd "$APP_DIR"
-            git fetch --all
-            git reset --hard origin/main
+            git fetch --prune --tags origin
+            git reset --hard "$DEPLOY_REF"
+            git submodule update --init --recursive
+
             [ -f .env ] || cp .env.example .env
             mkdir -p deploy/data/uploads deploy/data/postgres
-            docker compose pull || true
+
+            docker compose pull
             docker compose up -d --build --remove-orphans
             docker compose ps
