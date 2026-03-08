@@ -10,6 +10,14 @@ on:
         description: "Git ref to deploy (branch, tag or SHA)"
         required: false
         default: "main"
+      mode:
+        description: "Deploy mode"
+        required: false
+        default: "docker"
+        type: choice
+        options:
+          - docker
+          - direct
 
 concurrency:
   group: deploy-production
@@ -21,7 +29,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Validate required secrets
         run: |
@@ -34,16 +42,29 @@ jobs:
         env:
           APP_DIR: ${{ vars.VPS_APP_DIR != '' && vars.VPS_APP_DIR || '/opt/clothing_store' }}
           DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+          DEPLOY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (vars.DEPLOY_MODE != '' && vars.DEPLOY_MODE || 'docker') }}
+          FRONTEND_DIST_DIR: ${{ vars.FRONTEND_DIST_DIR != '' && vars.FRONTEND_DIST_DIR || '/var/www/clothing-store' }}
+          BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE != '' && vars.BACKEND_SERVICE || 'clothing-store-api' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_SSH_PORT != '' && vars.VPS_SSH_PORT || '22' }}
           script_stop: true
-          envs: APP_DIR,DEPLOY_REF
+          envs: APP_DIR,DEPLOY_REF,DEPLOY_MODE,FRONTEND_DIST_DIR,BACKEND_SERVICE
           script: |
             set -Eeuo pipefail
-            trap 'echo "❌ Deploy failed"; docker compose ps || true; docker compose logs --tail=100 || true' ERR
+
+            on_error() {
+              echo "❌ Deploy failed (mode=$DEPLOY_MODE)"
+              if [ "$DEPLOY_MODE" = "docker" ]; then
+                docker compose ps || true
+                docker compose logs --tail=100 || true
+              else
+                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+              fi
+            }
+            trap on_error ERR
 
             cd "$APP_DIR"
             git fetch --prune --tags origin
@@ -51,8 +72,27 @@ jobs:
             git submodule update --init --recursive
 
             [ -f .env ] || cp .env.example .env
-            mkdir -p deploy/data/uploads deploy/data/postgres
 
-            docker compose pull
-            docker compose up -d --build --remove-orphans
-            docker compose ps
+            if [ "$DEPLOY_MODE" = "docker" ]; then
+              mkdir -p deploy/data/uploads deploy/data/postgres
+              docker compose pull
+              docker compose up -d --build --remove-orphans
+              docker compose ps
+            elif [ "$DEPLOY_MODE" = "direct" ]; then
+              command -v dotnet >/dev/null
+              command -v npm >/dev/null
+              command -v rsync >/dev/null
+
+              npm ci
+              npm run build
+
+              sudo mkdir -p "$FRONTEND_DIST_DIR"
+              sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
+
+              dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o backend/Store.Api/publish
+              sudo systemctl restart "$BACKEND_SERVICE"
+              sudo systemctl status "$BACKEND_SERVICE" --no-pager
+            else
+              echo "Unsupported DEPLOY_MODE=$DEPLOY_MODE"
+              exit 1
+            fi

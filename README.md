@@ -143,57 +143,53 @@ docker compose up -d --build
 
 Workflow: `.github/workflows/deploy-vps.yml`
 
-### 1) Подготовить VPS (один раз)
+Поддерживаются **2 режима деплоя**:
 
-На сервере должны быть установлены:
+1. `docker` — через Docker Compose (рекомендуется)
+2. `direct` — напрямую на VPS без Docker (`systemd + nginx`)
 
-- `git`
-- `docker` + `docker compose` plugin
-- доступ пользователя деплоя к Docker (обычно через группу `docker`)
+Выбор режима:
 
-Проверка:
+- По умолчанию: `docker`
+- Через GitHub Variable `DEPLOY_MODE`
+- Или вручную в `Run workflow` через input `mode`
+
+---
+
+### 1) Общая подготовка VPS (для любого режима)
+
+Установите и проверьте:
 
 ```bash
 git --version
-docker --version
-docker compose version
 ```
 
-Создайте директорию проекта (или используйте свою):
+Создайте директорию приложения:
 
 ```bash
 sudo mkdir -p /opt/clothing_store
 sudo chown -R $USER:$USER /opt/clothing_store
-```
-
-Клонируйте репозиторий:
-
-```bash
 cd /opt/clothing_store
 git clone <YOUR_REPO_URL> .
-```
-
-Создайте production env:
-
-```bash
 cp .env.example .env
 ```
 
-Заполните `.env` безопасными значениями (`POSTGRES_PASSWORD`, `ADMIN_PASSWORD` и т.д.).
+Заполните `.env` безопасными значениями.
 
-> Важно: workflow не перезаписывает `.env`, если файл уже существует.
+> Workflow не перезаписывает `.env`, если он уже существует.
 
 ---
 
-### 2) Подготовить SSH-ключ для GitHub Actions
+### 2) SSH-ключ для GitHub Actions
 
-На локальной машине сгенерируйте отдельный ключ для деплоя (если ещё нет):
+Сгенерируйте ключ локально:
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions_deploy
 ```
 
-Добавьте **публичный** ключ на VPS в `~/.ssh/authorized_keys` пользователя деплоя.
+- Публичный ключ добавьте на VPS в `~/.ssh/authorized_keys` пользователя деплоя.
+- Приватный ключ добавьте в GitHub Secret `VPS_SSH_KEY`.
 
 Проверьте вход:
 
@@ -203,57 +199,129 @@ ssh -i ~/.ssh/github_actions_deploy <user>@<server_ip>
 
 ---
 
-### 3) Настроить Secrets и Variables в GitHub
+### 3) GitHub Secrets и Variables
 
 Repository → **Settings** → **Secrets and variables** → **Actions**.
 
-#### Secrets (обязательные)
+#### Обязательные Secrets
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 
-`VPS_SSH_KEY` — это **приватный** ключ целиком (включая `-----BEGIN ...` и `-----END ...`).
+#### Опциональные Variables
 
-#### Variables (опциональные)
-
-- `VPS_SSH_PORT` (по умолчанию `22`)
-- `VPS_APP_DIR` (по умолчанию `/opt/clothing_store`)
-
-Если `VPS_APP_DIR` не задан, workflow деплоит в `/opt/clothing_store`.
-
----
-
-### 4) Как запускается деплой
-
-Workflow запускается:
-
-- автоматически при `push` в `main`;
-- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions) с параметром `ref`.
-
-Для `push` деплоится конкретный `github.sha` (коммит, который вызвал workflow).
-Для ручного запуска можно передать branch/tag/SHA через `ref`.
+- `VPS_SSH_PORT` — SSH порт (default `22`)
+- `VPS_APP_DIR` — путь до проекта на сервере (default `/opt/clothing_store`)
+- `DEPLOY_MODE` — `docker` или `direct` (default `docker`)
+- `FRONTEND_DIST_DIR` — только для `direct`, куда выкладывать фронтенд (default `/var/www/clothing-store`)
+- `BACKEND_SERVICE` — только для `direct`, имя systemd-сервиса backend (default `clothing-store-api`)
 
 ---
 
-### 5) Что делает workflow (по шагам)
+### 4) Вариант A — деплой через Docker Compose (`DEPLOY_MODE=docker`)
 
-Логика workflow:
+#### Что должно быть на VPS
 
-1. Проверка обязательных secrets на стороне GitHub Actions
-2. SSH на VPS
-3. `git fetch --prune --tags origin` + деплой конкретного `ref` (`github.sha` для push, input `ref` для ручного запуска)
-4. Подъем `docker compose up -d --build --remove-orphans`
-5. Проверка состояния контейнеров через `docker compose ps`
-6. При ошибке автоматически выводятся `docker compose ps` и `docker compose logs --tail=100`
+```bash
+docker --version
+docker compose version
+```
+
+Пользователь деплоя должен иметь доступ к Docker (например, группа `docker`).
+
+#### Что делает workflow
+
+1. `git fetch --prune --tags origin`
+2. `git reset --hard <ref>`
+3. `docker compose pull`
+4. `docker compose up -d --build --remove-orphans`
+5. `docker compose ps`
+
+#### Плюсы
+
+- изолированное окружение;
+- одинаковое поведение между серверами;
+- проще обновлять зависимости.
 
 ---
 
-### 6) Первая проверка после настройки
+### 5) Вариант B — прямой деплой на VPS (`DEPLOY_MODE=direct`)
 
-1. Сделайте небольшой commit в `main` (или запустите workflow вручную через **Run workflow**).
-2. Дождитесь статуса `Success` в GitHub Actions.
-3. На VPS проверьте:
+#### Что должно быть на VPS
+
+```bash
+node -v
+npm -v
+dotnet --version
+rsync --version
+systemctl --version
+```
+
+Дополнительно:
+
+- настроенный `nginx` для раздачи `FRONTEND_DIST_DIR`;
+- созданный systemd-сервис backend (имя = `BACKEND_SERVICE`).
+
+#### Что делает workflow
+
+1. `git fetch --prune --tags origin`
+2. `git reset --hard <ref>`
+3. `npm ci && npm run build`
+4. `rsync dist/ -> FRONTEND_DIST_DIR`
+5. `dotnet publish backend/Store.Api/Store.Api.csproj`
+6. `systemctl restart BACKEND_SERVICE`
+7. `systemctl status BACKEND_SERVICE`
+
+#### Пример systemd unit (`/etc/systemd/system/clothing-store-api.service`)
+
+```ini
+[Unit]
+Description=Clothing Store API
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/clothing_store/backend/Store.Api/publish
+ExecStart=/usr/bin/dotnet /opt/clothing_store/backend/Store.Api/publish/Store.Api.dll
+Restart=always
+RestartSec=5
+User=www-data
+Environment=ASPNETCORE_ENVIRONMENT=Production
+EnvironmentFile=/opt/clothing_store/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Применить:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable clothing-store-api
+sudo systemctl start clothing-store-api
+```
+
+#### Плюсы
+
+- меньше runtime-слоя (без Docker);
+- проще интеграция с системными сервисами.
+
+---
+
+### 6) Запуск workflow
+
+- Автоматически при `push` в `main`
+- Вручную через **Actions → Run workflow**:
+  - `ref`: branch/tag/SHA
+  - `mode`: `docker` или `direct`
+
+При `push` деплоится конкретный `github.sha`.
+
+---
+
+### 7) Проверка после деплоя
+
+#### Для `docker`
 
 ```bash
 cd /opt/clothing_store
@@ -262,28 +330,33 @@ docker compose logs backend --tail=100
 docker compose logs frontend --tail=100
 ```
 
-4. Проверьте в браузере:
+#### Для `direct`
+
+```bash
+sudo systemctl status clothing-store-api --no-pager
+sudo journalctl -u clothing-store-api -n 100 --no-pager
+ls -la /var/www/clothing-store
+```
+
+Проверка URL:
 
 - `http://<server-ip>/`
 - `http://<server-ip>/api/products`
 
 ---
 
-### 7) Частые проблемы и решения
+### 8) Частые проблемы
 
 - `Permission denied (publickey)`
-  - проверьте, что в `VPS_SSH_KEY` лежит приватный ключ без искажений;
-  - проверьте, что публичный ключ добавлен в `authorized_keys` нужного пользователя.
-
-- `cd: /opt/clothing_store: No such file or directory`
-  - создайте директорию на VPS или задайте корректный `VPS_APP_DIR` в GitHub Variables.
-
-- Ошибка `docker compose ... permission denied`
-  - добавьте пользователя деплоя в группу `docker` и перезайдите в сессию.
-
-- Контейнеры поднялись, но сайт не открывается
-  - проверьте, что порт `80` открыт в firewall/cloud security group;
-  - проверьте `docker compose ps` и логи `frontend`/`backend`.
+  - проверьте корректность `VPS_SSH_KEY` и `authorized_keys`
+- `Unsupported DEPLOY_MODE=...`
+  - проверьте `DEPLOY_MODE`/input `mode` (`docker` или `direct`)
+- `docker compose ... permission denied`
+  - добавьте пользователя в группу `docker`
+- `systemctl restart <service> failed` в `direct`
+  - проверьте имя `BACKEND_SERVICE`, unit-файл и `journalctl`
+- Сайт недоступен
+  - проверьте firewall/security group и логи backend/frontend
 
 ---
 
