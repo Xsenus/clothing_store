@@ -244,6 +244,8 @@ docker compose version
 - одинаковое поведение между серверами;
 - проще обновлять зависимости.
 
+> Важно: в `docker`-режиме PostgreSQL ставить на хост не нужно — БД запускается контейнером `postgres` из `docker-compose.yml`.
+
 ---
 
 ### 5) Вариант B — прямой деплой на VPS (`DEPLOY_MODE=direct`)
@@ -261,7 +263,39 @@ systemctl --version
 Дополнительно:
 
 - настроенный `nginx` для раздачи `FRONTEND_DIST_DIR`;
-- созданный systemd-сервис backend (имя = `BACKEND_SERVICE`).
+- созданный systemd-сервис backend (имя = `BACKEND_SERVICE`);
+- установленный PostgreSQL (рекомендуется для production).
+
+#### Установка PostgreSQL на Ubuntu 24.04 (для `direct`)
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+Создайте БД и пользователя:
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER clothing_store_user WITH ENCRYPTED PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
+CREATE DATABASE clothing_store OWNER clothing_store_user;
+GRANT ALL PRIVILEGES ON DATABASE clothing_store TO clothing_store_user;
+SQL
+```
+
+Добавьте в `/opt/clothing_store/.env` строку подключения (Npgsql формат):
+
+```bash
+DATABASE_URL=Host=127.0.0.1;Port=5432;Database=clothing_store;Username=clothing_store_user;Password=CHANGE_ME_STRONG_PASSWORD
+```
+
+Проверка подключения:
+
+```bash
+psql "host=127.0.0.1 port=5432 dbname=clothing_store user=clothing_store_user password=CHANGE_ME_STRONG_PASSWORD" -c 'SELECT 1;'
+```
 
 #### Что делает workflow
 
@@ -355,6 +389,10 @@ ls -la /var/www/clothing-store
   - добавьте пользователя в группу `docker`
 - `systemctl restart <service> failed` в `direct`
   - проверьте имя `BACKEND_SERVICE`, unit-файл и `journalctl`
+- В `direct` backend не может подключиться к БД
+  - проверьте, что PostgreSQL установлен и запущен: `sudo systemctl status postgresql`
+  - проверьте `DATABASE_URL` в `/opt/clothing_store/.env`
+  - проверьте доступ `psql` командой из шага установки
 - Сайт недоступен
   - проверьте firewall/security group и логи backend/frontend
 
