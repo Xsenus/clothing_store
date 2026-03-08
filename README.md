@@ -143,16 +143,100 @@ docker compose up -d --build
 
 Workflow: `.github/workflows/deploy-vps.yml`
 
-Нужные GitHub Secrets:
+### 1) Подготовить VPS (один раз)
+
+На сервере должны быть установлены:
+
+- `git`
+- `docker` + `docker compose` plugin
+- доступ пользователя деплоя к Docker (обычно через группу `docker`)
+
+Проверка:
+
+```bash
+git --version
+docker --version
+docker compose version
+```
+
+Создайте директорию проекта (или используйте свою):
+
+```bash
+sudo mkdir -p /opt/clothing_store
+sudo chown -R $USER:$USER /opt/clothing_store
+```
+
+Клонируйте репозиторий:
+
+```bash
+cd /opt/clothing_store
+git clone <YOUR_REPO_URL> .
+```
+
+Создайте production env:
+
+```bash
+cp .env.example .env
+```
+
+Заполните `.env` безопасными значениями (`POSTGRES_PASSWORD`, `ADMIN_PASSWORD` и т.д.).
+
+> Важно: workflow не перезаписывает `.env`, если файл уже существует.
+
+---
+
+### 2) Подготовить SSH-ключ для GitHub Actions
+
+На локальной машине сгенерируйте отдельный ключ для деплоя (если ещё нет):
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions_deploy
+```
+
+Добавьте **публичный** ключ на VPS в `~/.ssh/authorized_keys` пользователя деплоя.
+
+Проверьте вход:
+
+```bash
+ssh -i ~/.ssh/github_actions_deploy <user>@<server_ip>
+```
+
+---
+
+### 3) Настроить Secrets и Variables в GitHub
+
+Repository → **Settings** → **Secrets and variables** → **Actions**.
+
+#### Secrets (обязательные)
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 
-Опциональные GitHub Variables (Repository → Settings → Secrets and variables → Actions → Variables):
+`VPS_SSH_KEY` — это **приватный** ключ целиком (включая `-----BEGIN ...` и `-----END ...`).
+
+#### Variables (опциональные)
 
 - `VPS_SSH_PORT` (по умолчанию `22`)
 - `VPS_APP_DIR` (по умолчанию `/opt/clothing_store`)
+
+Если `VPS_APP_DIR` не задан, workflow деплоит в `/opt/clothing_store`.
+
+---
+
+### 4) Как запускается деплой
+
+Workflow запускается:
+
+- автоматически при `push` в `main`;
+- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions) с параметром `ref`.
+
+Для `push` деплоится конкретный `github.sha` (коммит, который вызвал workflow).
+Для ручного запуска можно передать branch/tag/SHA через `ref`.
+
+---
+
+### 5) Что делает workflow (по шагам)
 
 Логика workflow:
 
@@ -163,10 +247,43 @@ Workflow: `.github/workflows/deploy-vps.yml`
 5. Проверка состояния контейнеров через `docker compose ps`
 6. При ошибке автоматически выводятся `docker compose ps` и `docker compose logs --tail=100`
 
-Workflow запускается:
+---
 
-- автоматически при `push` в `main`;
-- вручную через `workflow_dispatch` (кнопка **Run workflow** в GitHub Actions) с параметром `ref`.
+### 6) Первая проверка после настройки
+
+1. Сделайте небольшой commit в `main` (или запустите workflow вручную через **Run workflow**).
+2. Дождитесь статуса `Success` в GitHub Actions.
+3. На VPS проверьте:
+
+```bash
+cd /opt/clothing_store
+docker compose ps
+docker compose logs backend --tail=100
+docker compose logs frontend --tail=100
+```
+
+4. Проверьте в браузере:
+
+- `http://<server-ip>/`
+- `http://<server-ip>/api/products`
+
+---
+
+### 7) Частые проблемы и решения
+
+- `Permission denied (publickey)`
+  - проверьте, что в `VPS_SSH_KEY` лежит приватный ключ без искажений;
+  - проверьте, что публичный ключ добавлен в `authorized_keys` нужного пользователя.
+
+- `cd: /opt/clothing_store: No such file or directory`
+  - создайте директорию на VPS или задайте корректный `VPS_APP_DIR` в GitHub Variables.
+
+- Ошибка `docker compose ... permission denied`
+  - добавьте пользователя деплоя в группу `docker` и перезайдите в сессию.
+
+- Контейнеры поднялись, но сайт не открывается
+  - проверьте, что порт `80` открыт в firewall/cloud security group;
+  - проверьте `docker compose ps` и логи `frontend`/`backend`.
 
 ---
 
