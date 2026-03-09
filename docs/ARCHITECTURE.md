@@ -52,6 +52,13 @@
 - admin token: таблица `admin_sessions`
 - password hash: PBKDF2 SHA-256
 - email-коды: `verification_codes`
+- Telegram Login Widget: `POST /auth/telegram/login` (проверка подписи + авто-создание пользователя)
+
+### Telegram auth (кратко)
+
+Подробный сценарий и таблицы см. в `docs/TELEGRAM_AUTH.md`.
+
+Ключевой принцип текущей реализации: отдельного поля `telegram_id` в профиле нет, идентификация Telegram-пользователя выполняется по техническому email формата `telegram_<id>@telegram.local`.
 
 ## Upload strategy
 
