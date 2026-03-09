@@ -316,7 +316,7 @@ export default function CatalogPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Header />
       
-      <main className="flex-1 container mx-auto px-4 py-8">
+      <main className="flex-1 container mx-auto px-4 py-8 pt-28">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl md:text-6xl font-black uppercase tracking-tighter">КАТАЛОГ</h1>
           
