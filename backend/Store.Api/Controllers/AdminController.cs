@@ -17,15 +17,17 @@ public class AdminController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
+    private readonly AdminDataSeeder _adminDataSeeder;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
     /// </summary>
-    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth)
+    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder)
     {
         _configuration = configuration;
         _db = db;
         _auth = auth;
+        _adminDataSeeder = adminDataSeeder;
     }
 
     /// <summary>
@@ -162,6 +164,32 @@ public class AdminController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
+    }
+
+
+    [HttpPost("operations/seed-demo-data")]
+    public async Task<IResult> SeedDemoData()
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _adminDataSeeder.SeedDemoDataAsync();
+            return Results.Ok(new
+            {
+                ok = true,
+                message = "Demo data seeded",
+                products = result.Products,
+                users = result.Users,
+                cartItems = result.CartItems,
+                orders = result.Orders,
+                likes = result.Likes
+            });
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpGet("settings")]
