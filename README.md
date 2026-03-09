@@ -114,28 +114,22 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 
 ---
 
-## Production (Docker Compose)
+## Production / VPS deploy
 
-1. Создать env:
+По умолчанию поддерживаются 2 режима:
 
-```bash
-cp .env.example .env
-```
+- `direct` (**рекомендуется**) — без Docker: `Nginx + systemd + PostgreSQL` на Ubuntu
+- `docker` — через Docker Compose
 
-2. Заполнить безопасные значения в `.env`.
-
-3. Запуск:
+Кратко (direct):
 
 ```bash
-docker compose up -d --build
+# 1) one-time setup сервера (Ubuntu + PostgreSQL + Node + .NET + Nginx)
+# 2) настройка /etc/clothing-store/api.env
+# 3) npm run build + dotnet publish + systemctl restart clothing-store-api
 ```
 
-4. Проверка:
-
-- frontend: `http://<server-ip>/`
-- API: `http://<server-ip>/api/products`
-
-Подробности: `docs/DEPLOYMENT.md`.
+Полная инструкция (сценарий с нуля, private repo, автодеплой, rollback): `docs/DEPLOYMENT.md`.
 
 ---
 
