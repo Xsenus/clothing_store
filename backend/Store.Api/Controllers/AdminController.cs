@@ -168,6 +168,7 @@ public class AdminController : ControllerBase
 
 
     [HttpPost("operations/seed-demo-data")]
+    [HttpPost("seed-demo-data")]
     public async Task<IResult> SeedDemoData()
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();

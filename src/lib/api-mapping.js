@@ -108,7 +108,9 @@ const request = async (path, options = {}, retry = true) => {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Request failed: ${res.status}`);
+    const error = new Error(text || `Request failed: ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
 
   if (res.status === 204) {
@@ -402,8 +404,12 @@ export const FLOW = {
         method: "POST",
       });
     } catch (error) {
+      const status = typeof error === "object" && error !== null && "status" in error
+        ? Number(error.status)
+        : null;
       const message = error instanceof Error ? error.message : String(error || "");
-      if (!message.includes("404")) {
+      const isNotFound = status === 404 || message.includes("404") || message.includes("Not Found");
+      if (!isNotFound) {
         throw error;
       }
 
