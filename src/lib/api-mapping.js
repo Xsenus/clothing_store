@@ -396,6 +396,10 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  adminRunSeedDemoData: async () => request("/admin/operations/seed-demo-data", {
+    method: "POST",
+  }),
+
   getPublicSettings: async () => request("/settings/public"),
 
   adminLogout: async () => {

@@ -97,6 +97,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
+  const [operationsLoading, setOperationsLoading] = useState(false);
   const navigate = useNavigate();
 
   // Form State
@@ -436,6 +437,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
+  const runSeedDemoData = async () => {
+    if (!confirm("Преднаполнить БД демо-данными? Текущие товары, пользователи, корзины, заказы и лайки (кроме системного администратора) будут заменены.")) {
+      return;
+    }
+
+    setOperationsLoading(true);
+    try {
+      const result = await FLOW.adminRunSeedDemoData();
+      toast.success(`Преднаполнение выполнено: товаров ${result?.products ?? 0}, пользователей ${result?.users ?? 0}, заказов ${result?.orders ?? 0}`);
+      await Promise.all([fetchProducts(), fetchAdminData()]);
+    } catch (error) {
+      toast.error("Не удалось выполнить преднаполнение базы данных");
+    } finally {
+      setOperationsLoading(false);
+    }
+  };
+
   const handleDeleteReview = async (reviewId: string) => {
     if (!editingProduct) return;
     try {
@@ -477,6 +495,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
+              <TabsTrigger value="operations" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">РЕГЛАМЕНТНЫЕ ОПЕРАЦИИ</TabsTrigger>
             </TabsList>
 
           <TabsContent value="products" className="mt-0">
@@ -585,6 +604,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="operations" className="mt-0">
+            <div className="border border-gray-200 p-4 space-y-4">
+              <h2 className="text-2xl font-black uppercase">Регламентные операции</h2>
+              <p className="text-sm text-muted-foreground max-w-3xl">
+                Здесь находятся сервисные действия для быстрого запуска полностью рабочего демо-магазина:
+                предзаполненные товары, пользователи, корзины, лайки, заказы и отзывы.
+              </p>
+              <div className="border border-dashed p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h3 className="font-bold uppercase tracking-wide">Преднаполнение БД</h3>
+                  <p className="text-sm text-muted-foreground">Создает 50 товаров и связанный демо-набор пользователей, заказов, корзин, лайков, комментариев и отзывов.</p>
+                </div>
+                <Button onClick={runSeedDemoData} disabled={operationsLoading} className="rounded-none font-bold uppercase tracking-widest">
+                  {operationsLoading ? "ВЫПОЛНЯЕТСЯ..." : "ЗАПУСТИТЬ ПРЕДНАПОЛНЕНИЕ"}
+                </Button>
+              </div>
             </div>
           </TabsContent>
 

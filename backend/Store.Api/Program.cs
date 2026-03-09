@@ -47,6 +47,7 @@ else
 }
 
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AdminDataSeeder>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddControllers();
