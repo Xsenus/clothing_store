@@ -396,9 +396,22 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
-  adminRunSeedDemoData: async () => request("/admin/operations/seed-demo-data", {
-    method: "POST",
-  }),
+  adminRunSeedDemoData: async () => {
+    try {
+      return await request("/admin/operations/seed-demo-data", {
+        method: "POST",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("404")) {
+        throw error;
+      }
+
+      return request("/admin/seed-demo-data", {
+        method: "POST",
+      });
+    }
+  },
 
   getPublicSettings: async () => request("/settings/public"),
 
