@@ -1,4 +1,34 @@
 const API_URL = import.meta.env.VITE_API_URL || "/api";
+const WINDOW_ORIGIN = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+const API_ORIGIN = (() => {
+  try {
+    return new URL(API_URL, WINDOW_ORIGIN).origin;
+  } catch {
+    return WINDOW_ORIGIN;
+  }
+})();
+
+const toAbsoluteMediaUrl = (url) => {
+  if (!url) return url;
+  const normalizedUrl = String(url).trim();
+  if (!normalizedUrl) return normalizedUrl;
+
+  if (
+    normalizedUrl.startsWith("http://")
+    || normalizedUrl.startsWith("https://")
+    || normalizedUrl.startsWith("//")
+    || normalizedUrl.startsWith("data:")
+    || normalizedUrl.startsWith("blob:")
+  ) {
+    return normalizedUrl;
+  }
+
+  if (normalizedUrl.startsWith("/")) {
+    return `${API_ORIGIN}${normalizedUrl}`;
+  }
+
+  return `${API_ORIGIN}/${normalizedUrl}`;
+};
 
 const getToken = () => localStorage.getItem("authToken");
 const getRefreshToken = () => localStorage.getItem("refreshToken");
@@ -187,7 +217,7 @@ export const FLOW = {
       body: input,
     });
     const urls = Array.isArray(res?.urls) ? res.urls : [];
-    return { urls: urls.map((u) => (u.startsWith("http") ? u : `${API_URL}${u}`)) };
+    return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
   uploadMedia: async ({ input }) => {
@@ -196,7 +226,7 @@ export const FLOW = {
       body: input,
     });
     const urls = Array.isArray(res?.urls) ? res.urls : [];
-    return { urls: urls.map((u) => (u.startsWith("http") ? u : `${API_URL}${u}`)) };
+    return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
   createOrder: async ({ input }) => request("/orders", {
@@ -324,6 +354,8 @@ export const FLOW = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
       });
+    } catch {
+      // Не блокируем выход пользователя, если backend недоступен.
     } finally {
       clearAuthTokens();
     }
@@ -367,8 +399,13 @@ export const FLOW = {
   getPublicSettings: async () => request("/settings/public"),
 
   adminLogout: async () => {
-    await request("/admin/logout", { method: "POST" });
-    localStorage.removeItem("adminToken");
+    try {
+      await request("/admin/logout", { method: "POST" });
+    } catch {
+      // Не блокируем локальный logout при сетевых ошибках.
+    } finally {
+      localStorage.removeItem("adminToken");
+    }
     return true;
   },
 };
