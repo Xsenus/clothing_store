@@ -124,6 +124,13 @@ public class AdminDataSeeder
                 });
             }
 
+            var sizeStock = new JsonObject(
+                productSizes.ToDictionary(
+                    size => size,
+                    _ => (JsonNode?)JsonValue.Create(random.Next(2, 25))
+                )
+            );
+
             var data = new JsonObject
             {
                 ["id"] = id,
@@ -135,7 +142,7 @@ public class AdminDataSeeder
                 ["images"] = new JsonArray($"https://picsum.photos/seed/{id}/800/1000"),
                 ["videos"] = new JsonArray(),
                 ["media"] = new JsonArray(new JsonObject { ["type"] = "image", ["url"] = $"https://picsum.photos/seed/{id}/800/1000" }),
-                ["sizes"] = new JsonArray(productSizes.Select(JsonValue.Create).ToArray()),
+                ["sizes"] = new JsonArray(productSizes.Select(size => JsonValue.Create(size)).ToArray()),
                 ["isNew"] = i <= 10,
                 ["isPopular"] = i % 3 == 0,
                 ["likesCount"] = random.Next(0, 180),
@@ -143,7 +150,7 @@ public class AdminDataSeeder
                 ["sku"] = $"SKU-{i:000}",
                 ["material"] = materials[random.Next(materials.Length)],
                 ["color"] = colors[random.Next(colors.Length)],
-                ["sizeStock"] = new JsonObject(productSizes.ToDictionary(s => s, _ => (JsonNode)JsonValue.Create(random.Next(2, 25))!)),
+                ["sizeStock"] = sizeStock,
                 ["reviews"] = reviews,
                 ["comments"] = comments
             };
