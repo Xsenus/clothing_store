@@ -98,6 +98,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const [operationsLoading, setOperationsLoading] = useState(false);
+  const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
   const navigate = useNavigate();
 
   // Form State
@@ -226,6 +227,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const settingsGroups = [
     { id: "auth", label: "Авторизация" },
+    { id: "operations", label: "Регламентные операции" },
     { id: "smtp", label: "Почта (SMTP)" },
     { id: "metrics", label: "Метрики" },
     { id: "integrations", label: "Интеграции" },
@@ -438,17 +440,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const runSeedDemoData = async () => {
-    if (!confirm("Преднаполнить БД демо-данными? Текущие товары, пользователи, корзины, заказы и лайки (кроме системного администратора) будут заменены.")) {
-      return;
-    }
-
     setOperationsLoading(true);
     try {
       const result = await FLOW.adminRunSeedDemoData();
+      setIsSeedDialogOpen(false);
       toast.success(`Преднаполнение выполнено: товаров ${result?.products ?? 0}, пользователей ${result?.users ?? 0}, заказов ${result?.orders ?? 0}`);
       await Promise.all([fetchProducts(), fetchAdminData()]);
     } catch (error) {
-      toast.error("Не удалось выполнить преднаполнение базы данных");
+      let errorMessage = "Не удалось выполнить преднаполнение базы данных";
+      if (error instanceof Error && error.message) {
+        try {
+          const parsedError = JSON.parse(error.message);
+          if (parsedError?.detail) {
+            errorMessage = `Преднаполнение не выполнено: ${parsedError.detail}`;
+          }
+        } catch {
+          errorMessage = `Преднаполнение не выполнено: ${error.message}`;
+        }
+      }
+      toast.error(errorMessage);
     } finally {
       setOperationsLoading(false);
     }
@@ -495,7 +505,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
-              <TabsTrigger value="operations" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">РЕГЛАМЕНТНЫЕ ОПЕРАЦИИ</TabsTrigger>
             </TabsList>
 
           <TabsContent value="products" className="mt-0">
@@ -607,25 +616,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </TabsContent>
 
-          <TabsContent value="operations" className="mt-0">
-            <div className="border border-gray-200 p-4 space-y-4">
-              <h2 className="text-2xl font-black uppercase">Регламентные операции</h2>
-              <p className="text-sm text-muted-foreground max-w-3xl">
-                Здесь находятся сервисные действия для быстрого запуска полностью рабочего демо-магазина:
-                предзаполненные товары, пользователи, корзины, лайки, заказы и отзывы.
-              </p>
-              <div className="border border-dashed p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                  <h3 className="font-bold uppercase tracking-wide">Преднаполнение БД</h3>
-                  <p className="text-sm text-muted-foreground">Создает 50 товаров и связанный демо-набор пользователей, заказов, корзин, лайков, комментариев и отзывов.</p>
-                </div>
-                <Button onClick={runSeedDemoData} disabled={operationsLoading} className="rounded-none font-bold uppercase tracking-widest">
-                  {operationsLoading ? "ВЫПОЛНЯЕТСЯ..." : "ЗАПУСТИТЬ ПРЕДНАПОЛНЕНИЕ"}
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-
           <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
@@ -678,6 +668,41 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
                           <Input id="auth-session-sliding-minutes" type="number" min={1} value={settings["auth_session_sliding_update_minutes"] || "5"} onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)} />
                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSettingsGroup === "operations" && (
+                    <div className="space-y-3 border p-3">
+                      <h3 className="font-semibold">Регламентные операции</h3>
+                      <p className="text-sm text-muted-foreground max-w-3xl">
+                        Сервисные действия для быстрого запуска полностью рабочего демо-магазина:
+                        предзаполненные товары, пользователи, корзины, лайки, заказы и отзывы.
+                      </p>
+                      <div className="border border-dashed p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold uppercase tracking-wide">Преднаполнение БД</h4>
+                          <p className="text-sm text-muted-foreground">Создает 50 товаров и связанный демо-набор пользователей, заказов, корзин, лайков, комментариев и отзывов.</p>
+                        </div>
+                        <Dialog open={isSeedDialogOpen} onOpenChange={setIsSeedDialogOpen}>
+                          <DialogTrigger asChild>
+                            <Button disabled={operationsLoading} className="rounded-none font-bold uppercase tracking-widest">
+                              {operationsLoading ? "ВЫПОЛНЯЕТСЯ..." : "ЗАПУСТИТЬ ПРЕДНАПОЛНЕНИЕ"}
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Подтвердите преднаполнение БД</DialogTitle>
+                            </DialogHeader>
+                            <p className="text-sm text-muted-foreground">
+                              Текущие товары, пользователи, корзины, заказы и лайки (кроме системного администратора) будут заменены.
+                            </p>
+                            <DialogFooter>
+                              <Button variant="outline" onClick={() => setIsSeedDialogOpen(false)} disabled={operationsLoading}>Отмена</Button>
+                              <Button onClick={runSeedDemoData} disabled={operationsLoading}>Подтвердить</Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
                       </div>
                     </div>
                   )}
