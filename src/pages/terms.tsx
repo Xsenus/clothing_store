@@ -22,10 +22,10 @@ export default function TermsPage() {
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-12 md:py-24 max-w-4xl">
-        <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter mb-12">
+        <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tighter mb-12 break-words [overflow-wrap:anywhere]">
           Пользовательское соглашение
         </h1>
-        <div className="text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-muted-foreground">
           {text}
         </div>
       </main>

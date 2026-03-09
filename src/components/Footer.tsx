@@ -34,8 +34,8 @@ export default function Footer() {
         </div>
         
         <div className="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500 uppercase tracking-wider">
-          <p>&copy; {new Date().getFullYear()} FASHION_DEMON. Все права защищены.</p>
-          <div className="flex gap-6">
+          <p className="text-center md:text-left">&copy; {new Date().getFullYear()} FASHION_DEMON. Все права защищены.</p>
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-6 text-center md:text-left">
             <Link to="/privacy" className="hover:text-white transition-colors">Политика конфиденциальности</Link>
             <Link to="/terms" className="hover:text-white transition-colors">Пользовательское соглашение</Link>
             <Link to="/offer" className="hover:text-white transition-colors">Публичная оферта</Link>
