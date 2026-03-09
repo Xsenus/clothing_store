@@ -81,7 +81,7 @@ jobs:
             sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
 
             echo "==> Publishing backend"
-            dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o backend/Store.Api/publish
+            dotnet publish backend/Store.Api/Store.Api.csproj -c Release
 
             echo "==> Restarting backend service"
             sudo systemctl restart "$BACKEND_SERVICE"
