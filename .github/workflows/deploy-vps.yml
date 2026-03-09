@@ -10,14 +10,6 @@ on:
         description: "Git ref to deploy (branch, tag or SHA)"
         required: false
         default: "main"
-      mode:
-        description: "Deploy mode"
-        required: false
-        default: "docker"
-        type: choice
-        options:
-          - docker
-          - direct
 
 concurrency:
   group: deploy-production
@@ -30,6 +22,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      APP_DIR: ${{ vars.VPS_APP_DIR != '' && vars.VPS_APP_DIR || '/opt/clothing_store' }}
+      FRONTEND_DIST_DIR: ${{ vars.FRONTEND_DIST_DIR != '' && vars.FRONTEND_DIST_DIR || '/var/www/clothing-store' }}
+      BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE != '' && vars.BACKEND_SERVICE || 'clothing-store-api' }}
+      DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+      BACKEND_HEALTHCHECK_URL: ${{ vars.BACKEND_HEALTHCHECK_URL != '' && vars.BACKEND_HEALTHCHECK_URL || 'http://127.0.0.1:3001/products' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -37,62 +35,59 @@ jobs:
           test -n "${{ secrets.VPS_USER }}"
           test -n "${{ secrets.VPS_SSH_KEY }}"
 
-      - name: Deploy via SSH
+      - name: Deploy via SSH (direct mode only)
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          APP_DIR: ${{ vars.VPS_APP_DIR != '' && vars.VPS_APP_DIR || '/opt/clothing_store' }}
-          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
-          DEPLOY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (vars.DEPLOY_MODE != '' && vars.DEPLOY_MODE || 'docker') }}
-          FRONTEND_DIST_DIR: ${{ vars.FRONTEND_DIST_DIR != '' && vars.FRONTEND_DIST_DIR || '/var/www/clothing-store' }}
-          BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE != '' && vars.BACKEND_SERVICE || 'clothing-store-api' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_SSH_PORT != '' && vars.VPS_SSH_PORT || '22' }}
           script_stop: true
-          envs: APP_DIR,DEPLOY_REF,DEPLOY_MODE,FRONTEND_DIST_DIR,BACKEND_SERVICE
+          envs: APP_DIR,FRONTEND_DIST_DIR,BACKEND_SERVICE,DEPLOY_REF,BACKEND_HEALTHCHECK_URL
           script: |
             set -Eeuo pipefail
 
             on_error() {
-              echo "❌ Deploy failed (mode=$DEPLOY_MODE)"
-              if [ "$DEPLOY_MODE" = "docker" ]; then
-                docker compose ps || true
-                docker compose logs --tail=100 || true
-              else
-                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
-              fi
+              echo "❌ Direct deploy failed"
+              sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+              sudo journalctl -u "$BACKEND_SERVICE" -n 100 --no-pager || true
             }
             trap on_error ERR
 
+            echo "==> Starting direct deploy"
+            echo "APP_DIR=$APP_DIR"
+            echo "DEPLOY_REF=$DEPLOY_REF"
+            echo "FRONTEND_DIST_DIR=$FRONTEND_DIST_DIR"
+            echo "BACKEND_SERVICE=$BACKEND_SERVICE"
+
+            echo "==> Updating source code"
             cd "$APP_DIR"
             git fetch --prune --tags origin
             git reset --hard "$DEPLOY_REF"
             git submodule update --init --recursive
 
-            [ -f .env ] || cp .env.example .env
+            echo "==> Checking required tools"
+            command -v dotnet >/dev/null
+            command -v npm >/dev/null
+            command -v rsync >/dev/null
+            command -v curl >/dev/null
 
-            if [ "$DEPLOY_MODE" = "docker" ]; then
-              mkdir -p deploy/data/uploads deploy/data/postgres
-              docker compose pull
-              docker compose up -d --build --remove-orphans
-              docker compose ps
-            elif [ "$DEPLOY_MODE" = "direct" ]; then
-              command -v dotnet >/dev/null
-              command -v npm >/dev/null
-              command -v rsync >/dev/null
+            echo "==> Building frontend"
+            npm ci
+            npm run build
 
-              npm ci
-              npm run build
+            echo "==> Syncing frontend dist to Nginx directory"
+            sudo mkdir -p "$FRONTEND_DIST_DIR"
+            sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
 
-              sudo mkdir -p "$FRONTEND_DIST_DIR"
-              sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
+            echo "==> Publishing backend"
+            dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o backend/Store.Api/publish
 
-              dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o backend/Store.Api/publish
-              sudo systemctl restart "$BACKEND_SERVICE"
-              sudo systemctl status "$BACKEND_SERVICE" --no-pager
-            else
-              echo "Unsupported DEPLOY_MODE=$DEPLOY_MODE"
-              exit 1
-            fi
+            echo "==> Restarting backend service"
+            sudo systemctl restart "$BACKEND_SERVICE"
+            sleep 5
+
+            echo "==> Running backend health check: $BACKEND_HEALTHCHECK_URL"
+            curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" >/dev/null
+
+            echo "✅ Direct deploy completed successfully"
