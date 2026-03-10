@@ -155,8 +155,8 @@
 Типичный локальный сбой: backend ожидает PostgreSQL по умолчанию, и если БД не поднята — приложение завершается на старте.
 
 Решение в этом репозитории:
-- backend теперь автоматически использует SQLite (`backend/app.db`) если не задан `DATABASE_URL`;
-- PostgreSQL включается автоматически, когда `DATABASE_URL` передан явно;
+- backend выбирает БД по `ConnectionStrings:DefaultConnection` (SQLite при `Data Source=...`, PostgreSQL при `Host=...;Port=...`);
+- для dev/prod используются `appsettings.Development.json` и `appsettings.Production.json`.
 - добавлен явный лог активного провайдера БД при старте.
 
 Это позволяет разработчику запускать API «из коробки» без обязательного локального PostgreSQL.

@@ -5,7 +5,7 @@
 - Frontend: React + Vite
 - Backend: ASP.NET Core Minimal API (.NET 8)
 - DB: PostgreSQL
-- Reverse proxy: Nginx (frontend container)
+- Reverse proxy: Nginx (static frontend + reverse proxy to backend)
 
 ## Data model (high level)
 
