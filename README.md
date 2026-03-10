@@ -36,8 +36,8 @@
 ## Архитектура backend
 
 - `backend/Store.Api/Program.cs` — маршруты API + бизнес-логика
-- `backend/Store.Api/Migrations/*.sql` — SQL-миграции
-- Миграции применяются автоматически при старте backend
+- `backend/Store.Api/Migrations/*.cs` — EF Core миграции
+- При старте backend выполняется проверка `pending` миграций и автоматическое применение через EF Core (`Database.MigrateAsync`)
 - Рабочая БД — PostgreSQL (runtime-хранилище)
 - Seed продуктов при пустой таблице:
   1) `backend/products.json`
