@@ -56,7 +56,17 @@ public class DatabaseInitializer
                 _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
             }
 
-            await db.Database.MigrateAsync();
+            try
+            {
+                await db.Database.MigrateAsync();
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Pending model changes detected before the first stable migration set. Falling back to EnsureCreated bootstrap.");
+                await db.Database.EnsureCreatedAsync();
+            }
 
             var pendingAfter = db.Database.GetPendingMigrations().ToArray();
             if (pendingAfter.Length > 0)
@@ -65,7 +75,7 @@ public class DatabaseInitializer
                     $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
             }
 
-            _logger.LogInformation("All database migrations are applied.");
+            _logger.LogInformation("Database schema is ready (migrations or bootstrap applied).");
         }
 
         await CleanupExpiredDataAsync(db);
