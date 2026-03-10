@@ -74,7 +74,7 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
 Backend при старте автоматически выполняет миграции (`Database.MigrateAsync()`).
-Если миграции ещё не созданы (или EF сообщает `PendingModelChangesWarning`), backend делает bootstrap через `EnsureCreated()` и пишет предупреждение в лог.
+Если миграции ещё не созданы (или EF сообщает `PendingModelChangesWarning`), backend делает bootstrap через `EnsureCreated()`; при этом migration-файлы могут оставаться pending до создания/применения корректного baseline migration.
 
 ---
 

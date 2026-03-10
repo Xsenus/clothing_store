@@ -34,6 +34,7 @@ public class DatabaseInitializer
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
+        var bootstrapSchemaUsed = false;
 
         var knownMigrations = db.Database.GetMigrations().ToArray();
         if (knownMigrations.Length == 0)
@@ -41,6 +42,7 @@ public class DatabaseInitializer
             _logger.LogWarning(
                 "No EF Core migrations found. Falling back to EnsureCreated for bootstrap schema creation.");
             await db.Database.EnsureCreatedAsync();
+            bootstrapSchemaUsed = true;
         }
         else
         {
@@ -66,16 +68,26 @@ public class DatabaseInitializer
                     ex,
                     "Pending model changes detected before the first stable migration set. Falling back to EnsureCreated bootstrap.");
                 await db.Database.EnsureCreatedAsync();
+                bootstrapSchemaUsed = true;
             }
 
             var pendingAfter = db.Database.GetPendingMigrations().ToArray();
-            if (pendingAfter.Length > 0)
+            if (pendingAfter.Length > 0 && !bootstrapSchemaUsed)
             {
                 throw new InvalidOperationException(
                     $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
             }
 
-            _logger.LogInformation("Database schema is ready (migrations or bootstrap applied).");
+            if (bootstrapSchemaUsed)
+            {
+                _logger.LogWarning(
+                    "Database schema bootstrapped via EnsureCreated. Pending migrations remain: {Migrations}",
+                    string.Join(", ", pendingAfter));
+            }
+            else
+            {
+                _logger.LogInformation("Database schema is ready (migrations applied).");
+            }
         }
 
         await CleanupExpiredDataAsync(db);
