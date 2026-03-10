@@ -74,6 +74,7 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
 Backend при старте автоматически выполняет миграции (`Database.MigrateAsync()`).
+Для `dotnet ef` из Visual Studio/PMC можно дополнительно задать `STORE_API_DIR` (путь к `backend/Store.Api`), если команда запускается не из корня репозитория.
 Если миграции ещё не созданы (или EF сообщает `PendingModelChangesWarning`), backend делает bootstrap через `EnsureCreated()`; при этом migration-файлы могут оставаться pending до создания/применения корректного baseline migration.
 
 ---
