@@ -2,7 +2,6 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Store.Api.Data;
 using Store.Api.Models;
-using Npgsql;
 
 namespace Store.Api.Services;
 
@@ -35,68 +34,36 @@ public class DatabaseInitializer
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
-        var bootstrapSchemaUsed = false;
 
         var knownMigrations = db.Database.GetMigrations().ToArray();
         if (knownMigrations.Length == 0)
         {
-            _logger.LogWarning(
-                "No EF Core migrations found. Falling back to EnsureCreated for bootstrap schema creation.");
-            await db.Database.EnsureCreatedAsync();
-            bootstrapSchemaUsed = true;
+            throw new InvalidOperationException(
+                "No EF Core migrations found. Create and apply a baseline migration before starting the application.");
         }
-        else
+
+        var pendingBefore = db.Database.GetPendingMigrations().ToArray();
+        var appliedBefore = db.Database.GetAppliedMigrations().ToArray();
+        _logger.LogInformation(
+            "Migration check before startup: applied={AppliedCount}, pending={PendingCount}",
+            appliedBefore.Length,
+            pendingBefore.Length);
+
+        if (pendingBefore.Length > 0)
         {
-            var pendingBefore = db.Database.GetPendingMigrations().ToArray();
-            var appliedBefore = db.Database.GetAppliedMigrations().ToArray();
-            _logger.LogInformation(
-                "Migration check before startup: applied={AppliedCount}, pending={PendingCount}",
-                appliedBefore.Length,
-                pendingBefore.Length);
-
-            if (pendingBefore.Length > 0)
-            {
-                _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
-            }
-
-            try
-            {
-                await db.Database.MigrateAsync();
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Pending model changes detected before the first stable migration set. Falling back to EnsureCreated bootstrap.");
-                await db.Database.EnsureCreatedAsync();
-                bootstrapSchemaUsed = true;
-            }
-            catch (PostgresException ex) when (ex.SqlState == "42P07" && appliedBefore.Length == 0 && pendingBefore.Length > 0)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Detected existing schema with empty EF migration history. Marking pending migrations as applied in __EFMigrationsHistory.");
-                await MarkMigrationsAsAppliedAsync(db, pendingBefore);
-            }
-
-            var pendingAfter = db.Database.GetPendingMigrations().ToArray();
-            if (pendingAfter.Length > 0 && !bootstrapSchemaUsed)
-            {
-                throw new InvalidOperationException(
-                    $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
-            }
-
-            if (bootstrapSchemaUsed && pendingAfter.Length > 0)
-            {
-                _logger.LogWarning(
-                    "Database schema bootstrapped via EnsureCreated. Pending migrations remain: {Migrations}",
-                    string.Join(", ", pendingAfter));
-            }
-            else
-            {
-                _logger.LogInformation("Database schema is ready (migrations applied).");
-            }
+            _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
         }
+
+        await db.Database.MigrateAsync();
+
+        var pendingAfter = db.Database.GetPendingMigrations().ToArray();
+        if (pendingAfter.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
+        }
+
+        _logger.LogInformation("Database schema is ready (migrations applied).");
 
         await CleanupExpiredDataAsync(db);
 
@@ -331,48 +298,5 @@ public class DatabaseInitializer
         db.RefreshSessions.RemoveRange(await db.RefreshSessions.Where(x => x.CreatedAt < minRefreshSessionTime).ToListAsync());
         db.VerificationCodes.RemoveRange(await db.VerificationCodes.Where(x => x.ExpiresAt < now).ToListAsync());
         await db.SaveChangesAsync();
-    }
-
-    private static async Task MarkMigrationsAsAppliedAsync(StoreDbContext db, IReadOnlyCollection<string> migrationIds)
-    {
-        if (migrationIds.Count == 0)
-            return;
-
-        if (db.Database.IsNpgsql())
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                """
-                CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
-                    "MigrationId" character varying(150) NOT NULL,
-                    "ProductVersion" character varying(32) NOT NULL,
-                    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
-                );
-                """);
-
-            foreach (var migrationId in migrationIds)
-            {
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ({migrationId}, {"9.0.13"}) ON CONFLICT (\"MigrationId\") DO NOTHING;");
-            }
-
-            return;
-        }
-
-        if (db.Database.IsSqlite())
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                """
-                CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
-                    "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
-                    "ProductVersion" TEXT NOT NULL
-                );
-                """);
-
-            foreach (var migrationId in migrationIds)
-            {
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"INSERT OR IGNORE INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ({migrationId}, {"9.0.13"});");
-            }
-        }
     }
 }
