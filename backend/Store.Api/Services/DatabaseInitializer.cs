@@ -58,6 +58,14 @@ public class DatabaseInitializer
                 _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
             }
 
+            if (appliedBefore.Length == 0)
+            {
+                _logger.LogInformation(
+                    "No applied migrations in database yet. Ensuring schema exists before applying baseline migration history.");
+                await db.Database.EnsureCreatedAsync();
+                bootstrapSchemaUsed = true;
+            }
+
             try
             {
                 await db.Database.MigrateAsync();
@@ -78,7 +86,7 @@ public class DatabaseInitializer
                     $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
             }
 
-            if (bootstrapSchemaUsed)
+            if (bootstrapSchemaUsed && pendingAfter.Length > 0)
             {
                 _logger.LogWarning(
                     "Database schema bootstrapped via EnsureCreated. Pending migrations remain: {Migrations}",
