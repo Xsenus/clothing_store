@@ -2,13 +2,22 @@ using Microsoft.EntityFrameworkCore;
 using Store.Api.Data;
 using Store.Api.Services;
 
+var bootstrapProjectRoot = Environment.GetEnvironmentVariable("STORE_ROOT")
+    ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
+LoadEnvironmentVariablesFromFileIfExists(Path.Combine(bootstrapProjectRoot, ".env"));
+LoadEnvironmentVariablesFromFileIfExists("/etc/clothing-store/api.env");
+var explicitEnvFile = Environment.GetEnvironmentVariable("STORE_ENV_FILE");
+if (!string.IsNullOrWhiteSpace(explicitEnvFile))
+{
+    LoadEnvironmentVariablesFromFileIfExists(explicitEnvFile);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
-var projectRoot = Environment.GetEnvironmentVariable("STORE_ROOT")
-    ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
+var projectRoot = bootstrapProjectRoot;
 var seedDir = Environment.GetEnvironmentVariable("STORE_SEED_DIR")
     ?? Path.Combine(projectRoot, "seed");
 var seedProductsPath = Environment.GetEnvironmentVariable("STORE_SEED_PRODUCTS_PATH")
@@ -184,4 +193,34 @@ else
 {
     app.Logger.LogInformation("Store API starting with default ASP.NET Core bindings");
     app.Run();
+}
+
+
+static void LoadEnvironmentVariablesFromFileIfExists(string filePath)
+{
+    if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        return;
+
+    foreach (var line in File.ReadAllLines(filePath))
+    {
+        var trimmed = line.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#'))
+            continue;
+
+        var separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex <= 0)
+            continue;
+
+        var key = trimmed[..separatorIndex].Trim();
+        if (string.IsNullOrWhiteSpace(key) || Environment.GetEnvironmentVariable(key) is not null)
+            continue;
+
+        var value = trimmed[(separatorIndex + 1)..].Trim();
+        if ((value.StartsWith("\"") && value.EndsWith("\"")) || (value.StartsWith("'") && value.EndsWith("'")))
+        {
+            value = value[1..^1];
+        }
+
+        Environment.SetEnvironmentVariable(key, value);
+    }
 }

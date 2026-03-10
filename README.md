@@ -71,6 +71,7 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 
 - `DATABASE_URL`
 - `ASPNETCORE_URLS` (опционально: только если нужно переопределить порт/хост)
+- `STORE_ENV_FILE` (опционально: путь к env-файлу для backend; по умолчанию backend также пробует `.env` в корне проекта и `/etc/clothing-store/api.env`)
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 - `STORE_UPLOADS_DIR`
@@ -95,6 +96,8 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 
 Если `DATABASE_URL` не задана, приложение автоматически вернётся к SQLite.
 
+
+Если backend запускается как systemd-сервис, убедитесь, что env-файл указан в `EnvironmentFile=...` и содержит реальные переносы строк (а не символы `\n`).
 
 Данные инициализации по умолчанию:
 
