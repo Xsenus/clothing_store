@@ -35,28 +35,38 @@ public class DatabaseInitializer
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
 
-        var pendingBefore = (await db.Database.GetPendingMigrationsAsync()).ToArray();
-        var appliedBefore = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
-        _logger.LogInformation(
-            "Migration check before startup: applied={AppliedCount}, pending={PendingCount}",
-            appliedBefore.Length,
-            pendingBefore.Length);
-
-        if (pendingBefore.Length > 0)
+        var knownMigrations = (await db.Database.GetMigrationsAsync()).ToArray();
+        if (knownMigrations.Length == 0)
         {
-            _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
+            _logger.LogWarning(
+                "No EF Core migrations found. Falling back to EnsureCreated for bootstrap schema creation.");
+            await db.Database.EnsureCreatedAsync();
         }
-
-        await db.Database.MigrateAsync();
-
-        var pendingAfter = (await db.Database.GetPendingMigrationsAsync()).ToArray();
-        if (pendingAfter.Length > 0)
+        else
         {
-            throw new InvalidOperationException(
-                $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
-        }
+            var pendingBefore = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+            var appliedBefore = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
+            _logger.LogInformation(
+                "Migration check before startup: applied={AppliedCount}, pending={PendingCount}",
+                appliedBefore.Length,
+                pendingBefore.Length);
 
-        _logger.LogInformation("All database migrations are applied.");
+            if (pendingBefore.Length > 0)
+            {
+                _logger.LogInformation("Pending migrations: {Migrations}", string.Join(", ", pendingBefore));
+            }
+
+            await db.Database.MigrateAsync();
+
+            var pendingAfter = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+            if (pendingAfter.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Some migrations are still pending after startup migration: {string.Join(", ", pendingAfter)}");
+            }
+
+            _logger.LogInformation("All database migrations are applied.");
+        }
 
         await CleanupExpiredDataAsync(db);
 

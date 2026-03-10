@@ -74,6 +74,7 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
 Backend при старте автоматически выполняет миграции (`Database.MigrateAsync()`).
+Если миграции ещё не созданы, backend делает bootstrap через `EnsureCreated()` и пишет предупреждение в лог.
 
 ---
 
