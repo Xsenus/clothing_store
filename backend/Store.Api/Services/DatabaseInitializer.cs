@@ -35,7 +35,7 @@ public class DatabaseInitializer
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
 
-        var knownMigrations = (await db.Database.GetMigrationsAsync()).ToArray();
+        var knownMigrations = db.Database.GetMigrations().ToArray();
         if (knownMigrations.Length == 0)
         {
             _logger.LogWarning(
@@ -44,8 +44,8 @@ public class DatabaseInitializer
         }
         else
         {
-            var pendingBefore = (await db.Database.GetPendingMigrationsAsync()).ToArray();
-            var appliedBefore = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
+            var pendingBefore = db.Database.GetPendingMigrations().ToArray();
+            var appliedBefore = db.Database.GetAppliedMigrations().ToArray();
             _logger.LogInformation(
                 "Migration check before startup: applied={AppliedCount}, pending={PendingCount}",
                 appliedBefore.Length,
@@ -58,7 +58,7 @@ public class DatabaseInitializer
 
             await db.Database.MigrateAsync();
 
-            var pendingAfter = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+            var pendingAfter = db.Database.GetPendingMigrations().ToArray();
             if (pendingAfter.Length > 0)
             {
                 throw new InvalidOperationException(
