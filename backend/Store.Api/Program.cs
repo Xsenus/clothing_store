@@ -19,8 +19,7 @@ Directory.CreateDirectory(uploadsDir);
 
 var sqlitePath = Environment.GetEnvironmentVariable("STORE_SQLITE_PATH")
     ?? Path.Combine(projectRoot, "backend", "app.db");
-var databaseUrl = builder.Configuration["DATABASE_URL"]
-    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+var databaseUrl = builder.Configuration.GetConnectionString("DefaultConnection");
 var useSqlite = string.IsNullOrWhiteSpace(databaseUrl)
     || databaseUrl.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)
     || databaseUrl.StartsWith("Filename=", StringComparison.OrdinalIgnoreCase)
