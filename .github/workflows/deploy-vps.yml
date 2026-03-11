@@ -117,9 +117,53 @@ jobs:
 
             echo "==> Starting backend service"
             sudo systemctl start "$BACKEND_SERVICE"
-            sleep 5
+
+            echo "==> Waiting for systemd service to become active"
+            for attempt in $(seq 1 30); do
+              if sudo systemctl is-active --quiet "$BACKEND_SERVICE"; then
+                echo "✅ Service is active"
+                break
+              fi
+
+              if sudo systemctl is-failed --quiet "$BACKEND_SERVICE"; then
+                echo "❌ Backend service entered failed state while starting"
+                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+                sudo journalctl -u "$BACKEND_SERVICE" -n 50 --no-pager || true
+                exit 1
+              fi
+
+              if [[ "$attempt" -eq 30 ]]; then
+                echo "❌ Backend service did not become active in time"
+                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+                exit 1
+              fi
+
+              echo "... waiting for service activation ($attempt/30)"
+              sleep 1
+            done
 
             echo "==> Running backend health check: $BACKEND_HEALTHCHECK_URL"
-            curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" >/dev/null
+            for attempt in $(seq 1 15); do
+              if curl --fail --silent --show-error --max-time 5 "$BACKEND_HEALTHCHECK_URL" >/dev/null; then
+                echo "✅ Backend health check passed"
+                break
+              fi
+
+              echo "... health check attempt $attempt/15 failed"
+              if ! sudo systemctl is-active --quiet "$BACKEND_SERVICE"; then
+                echo "❌ Backend service is no longer active during health checks"
+                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+                sudo journalctl -u "$BACKEND_SERVICE" -n 50 --no-pager || true
+                exit 1
+              fi
+
+              if [[ "$attempt" -eq 15 ]]; then
+                echo "❌ Backend health check did not pass in time"
+                sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
+                exit 1
+              fi
+
+              sleep 2
+            done
 
             echo "✅ Direct deploy completed successfully"
