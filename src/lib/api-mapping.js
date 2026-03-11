@@ -259,6 +259,15 @@ export const FLOW = {
     return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
+  adminUploadFavicon: async ({ input }) => {
+    const res = await request("/admin/upload/favicon", {
+      method: "POST",
+      body: input,
+    });
+
+    return { url: toAbsoluteMediaUrl(res?.url) };
+  },
+
   uploadMedia: async ({ input }) => {
     const res = await request("/upload", {
       method: "POST",

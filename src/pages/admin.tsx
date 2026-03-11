@@ -346,8 +346,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
-  const [isFaviconGalleryPickerOpen, setIsFaviconGalleryPickerOpen] = useState(false);
-  const [faviconGallerySearch, setFaviconGallerySearch] = useState("");
   const faviconUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFaviconFileName, setSelectedFaviconFileName] = useState("");
   const [galleryUploading, setGalleryUploading] = useState(false);
@@ -467,8 +465,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     try {
       const formDataUpload = new FormData();
       formDataUpload.append("files", file);
-      const res = await FLOW.adminUpload({ input: formDataUpload });
-      const uploadedUrl = res?.urls?.[0];
+      const res = await FLOW.adminUploadFavicon({ input: formDataUpload });
+      const uploadedUrl = res?.url;
       if (!uploadedUrl) {
         toast.error("Не удалось получить URL загруженной иконки");
         return;
@@ -1136,12 +1134,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const filteredGalleryPickerImages = galleryImages.filter((image) => {
     const q = mediaGallerySearch.trim().toLowerCase();
-    if (!q) return true;
-    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
-  });
-
-  const filteredFaviconGalleryImages = galleryImages.filter((image) => {
-    const q = faviconGallerySearch.trim().toLowerCase();
     if (!q) return true;
     return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
   });
@@ -1865,7 +1857,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <input
                             ref={faviconUploadInputRef}
                             type="file"
-                            accept="image/png,image/x-icon,image/svg+xml,image/webp,image/jpeg"
+                            accept=".ico,image/x-icon"
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0] || null;
@@ -1887,16 +1879,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             type="button"
                             variant="outline"
                             className="rounded-none"
-                            onClick={() => setIsFaviconGalleryPickerOpen(true)}
+                            onClick={() => faviconUploadInputRef.current?.click()}
+                            disabled={faviconUploading}
                           >
-                            <Images className="w-4 h-4 mr-2" /> Выбрать из галереи
+                            <Images className="w-4 h-4 mr-2" /> Заменить favicon.ico
                           </Button>
                           {faviconUploading && (
                             <span className="text-sm text-muted-foreground">Загрузка...</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Можно вставить внешний URL или загрузить файл. Рекомендуемый размер: 32x32 или 48x48 px.
+                          Для этого поля поддерживается прямая загрузка только файла <b>favicon.ico</b>. Файл используется только как иконка вкладки.
                         </p>
                       </div>
                     </div>
@@ -1913,41 +1906,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </TabsContent>
           </Tabs>
-
-          <Dialog open={isFaviconGalleryPickerOpen} onOpenChange={setIsFaviconGalleryPickerOpen}>
-            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-black uppercase">Выбрать favicon из галереи</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3">
-                <Input
-                  placeholder="Поиск по имени/описанию"
-                  value={faviconGallerySearch}
-                  onChange={(e) => setFaviconGallerySearch(e.target.value)}
-                  className="rounded-none"
-                />
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  {filteredFaviconGalleryImages.map((image) => (
-                    <button
-                      type="button"
-                      key={`favicon-gallery-${image.id}`}
-                      className="border border-gray-200 text-left hover:border-black transition-colors"
-                      onClick={() => {
-                        updateSetting("site_favicon_url", image.url);
-                        setIsFaviconGalleryPickerOpen(false);
-                        setFaviconGallerySearch("");
-                      }}
-                    >
-                      <img src={image.url} alt={image.name} className="w-full h-24 object-cover bg-gray-100" />
-                      <div className="p-2">
-                        <div className="text-xs font-semibold truncate">{image.name}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
 
           <Dialog
             open={isTelegramBotDialogOpen}

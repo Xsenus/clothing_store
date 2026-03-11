@@ -17,6 +17,7 @@ public class UploadController : ControllerBase
     private readonly AuthService _auth;
     private readonly string _uploadsDir;
     private readonly long _maxFileSizeBytes;
+    private readonly long _maxFaviconSizeBytes;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="UploadController"/>.
@@ -28,6 +29,7 @@ public class UploadController : ControllerBase
             ?? configuration["Storage:UploadsDir"]
             ?? Path.Combine(env.ContentRootPath, "..", "uploads");
         _maxFileSizeBytes = configuration.GetValue<long?>("Storage:MaxUploadFileSizeBytes") ?? 10 * 1024 * 1024;
+        _maxFaviconSizeBytes = configuration.GetValue<long?>("Storage:MaxFaviconUploadFileSizeBytes") ?? 2 * 1024 * 1024;
         Directory.CreateDirectory(_uploadsDir);
     }
 
@@ -49,6 +51,35 @@ public class UploadController : ControllerBase
     {
         if (await _auth.RequireUserAsync(Request) is null) return Results.Unauthorized();
         return await SaveAndRespondAsync(Request.Form.Files);
+    }
+
+    /// <summary>
+    /// Загружает favicon.ico от имени администратора.
+    /// </summary>
+    [HttpPost("admin/upload/favicon")]
+    public async Task<IResult> UploadFavicon()
+    {
+        if (!await _auth.RequireAdminAsync(Request)) return Results.Unauthorized();
+        var files = Request.Form.Files;
+        if (files.Count == 0) return Results.BadRequest(new { detail = "No files attached" });
+
+        var file = files[0];
+        if (file.Length <= 0) return Results.BadRequest(new { detail = "Empty file is not allowed" });
+        if (file.Length > _maxFaviconSizeBytes) return Results.BadRequest(new { detail = "Favicon is too large" });
+
+        var ext = Path.GetExtension(file.FileName);
+        if (!string.Equals(ext, ".ico", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { detail = "Only .ico files are allowed for favicon" });
+
+        var faviconsDir = Path.Combine(_uploadsDir, "favicons");
+        Directory.CreateDirectory(faviconsDir);
+
+        var name = $"favicon-{Guid.NewGuid():N}.ico";
+        var path = Path.Combine(faviconsDir, name);
+        await using var stream = System.IO.File.Create(path);
+        await file.CopyToAsync(stream);
+
+        return Results.Ok(new { url = $"/uploads/favicons/{name}" });
     }
 
     private async Task<IResult> SaveAndRespondAsync(IFormFileCollection files)
