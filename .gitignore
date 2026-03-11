@@ -43,3 +43,6 @@ Thumbs.db
 
 # sqlite
 **/app.db
+
+# runtime uploads cache
+backend/uploads/

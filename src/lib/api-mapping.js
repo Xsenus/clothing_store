@@ -35,7 +35,7 @@ const toAbsoluteMediaUrl = (url) => {
   }
 
   if (normalizedUrl.startsWith("/")) {
-    if (API_PATH_BASE && normalizedUrl.startsWith("/uploads/")) {
+    if (API_PATH_BASE && (normalizedUrl.startsWith("/uploads/") || normalizedUrl.startsWith("/media/"))) {
       return `${API_ORIGIN}${API_PATH_BASE}${normalizedUrl}`;
     }
 
@@ -316,67 +316,6 @@ export const FLOW = {
     method: "DELETE",
   }),
 
-  copyAdminGalleryImageToDisk: async ({ input }) => {
-    const image = await request(`/admin/gallery/${input.id}/copy-to-disk`, {
-      method: "POST",
-    });
-
-    return {
-      ...image,
-      url: toAbsoluteMediaUrl(image?.url),
-    };
-  },
-
-  restoreMissingAdminGalleryImages: async () => request("/admin/gallery/restore-missing", {
-    method: "POST",
-  }),
-
-  createOrder: async ({ input }) => request("/orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }),
-
-  getCart: async () => request("/cart"),
-
-  addToCart: async ({ input }) => request("/cart", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }),
-
-  updateCartQuantity: async ({ input }) => request(`/cart/${input.cartItemId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ quantity: input.quantity }),
-  }),
-
-  removeCartItem: async ({ input }) => request(`/cart/${input.cartItemId}`, {
-    method: "DELETE",
-  }),
-
-  clearCart: async () => request("/cart", { method: "DELETE" }),
-
-  addProductReview: async ({ input }) => request(`/products/${input.productId}/reviews`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: input.text, media: input.media || [] }),
-  }),
-
-  deleteProductReview: async ({ input }) =>
-    request(`/products/${input.productId}/reviews/${input.reviewId}`, {
-      method: "DELETE",
-    }),
-
-  signIn: async ({ input }) => {
-    const result = await request("/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    saveAuthTokens(result || {});
-    return result;
-  },
 
   signUp: async ({ input }) => {
     const result = await request("/auth/signup", {

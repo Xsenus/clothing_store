@@ -84,32 +84,7 @@ public class DatabaseInitializer
         if (!string.Equals(seedMode, "EnsureSeeded", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!await db.Products.AnyAsync() && File.Exists(seedProductsPath))
-        {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            foreach (var line in await File.ReadAllLinesAsync(seedProductsPath))
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var json = JsonNode.Parse(line)?.AsObject();
-                if (json is null) continue;
-                var id = json["id"]?.ToString();
-                var slug = json["slug"]?.ToString();
-                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(slug)) continue;
-                db.Products.Add(new Product
-                {
-                    Id = id,
-                    Slug = slug,
-                    Category = json["category"]?.ToString(),
-                    IsNew = json["isNew"]?.GetValue<bool>() ?? false,
-                    IsPopular = json["isPopular"]?.GetValue<bool>() ?? false,
-                    LikesCount = json["likesCount"]?.GetValue<int>() ?? 0,
-                    CreationTime = json["creationTime"]?.GetValue<long>() ?? now,
-                    Data = json.ToJsonString()
-                });
-            }
-
-            await db.SaveChangesAsync();
-        }
+        await EnsurePreparedProductsSeededAsync(db, seedProductsPath);
 
         await EnsureDefaultUserAsync(db);
         await EnsureAdminUserAsync(db);
@@ -120,28 +95,6 @@ public class DatabaseInitializer
 
     private static async Task EnsureGalleryTableAsync(StoreDbContext db)
     {
-        if (db.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            await db.Database.ExecuteSqlRawAsync(@"
-                CREATE TABLE IF NOT EXISTS gallery_images (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT NULL,
-                    content_type TEXT NOT NULL,
-                    file_extension TEXT NOT NULL,
-                    file_name TEXT NOT NULL,
-                    disk_path TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    binary_data BLOB NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS IX_gallery_images_name ON gallery_images (name);
-            ");
-
-            return;
-        }
-
         await db.Database.ExecuteSqlRawAsync(@"
             CREATE TABLE IF NOT EXISTS gallery_images (
                 id text NOT NULL PRIMARY KEY,
@@ -283,6 +236,74 @@ public class DatabaseInitializer
         }
 
         await db.SaveChangesAsync();
+    }
+
+
+    private async Task EnsurePreparedProductsSeededAsync(StoreDbContext db, string seedProductsPath)
+    {
+        if (await db.Products.AnyAsync())
+            return;
+
+        if (!File.Exists(seedProductsPath))
+        {
+            _logger.LogWarning("Prepared product seed file was not found at {SeedProductsPath}.", seedProductsPath);
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var lines = await File.ReadAllLinesAsync(seedProductsPath);
+        var products = new List<Product>();
+        var slugSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            var json = JsonNode.Parse(line)?.AsObject();
+            if (json is null)
+                continue;
+
+            var slug = json["slug"]?.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(slug))
+                continue;
+
+            if (!slugSet.Add(slug))
+                continue;
+
+            var id = json["id"]?.ToString();
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                id = Guid.NewGuid().ToString("N");
+                json["id"] = id;
+            }
+
+            var creationTime = json["creationTime"]?.GetValue<long?>() ?? now;
+            json["creationTime"] = creationTime;
+            json["slug"] = slug;
+
+            products.Add(new Product
+            {
+                Id = id,
+                Slug = slug,
+                Category = json["category"]?.ToString(),
+                IsNew = json["isNew"]?.GetValue<bool>() ?? false,
+                IsPopular = json["isPopular"]?.GetValue<bool>() ?? false,
+                LikesCount = json["likesCount"]?.GetValue<int>() ?? 0,
+                CreationTime = creationTime,
+                Data = json.ToJsonString()
+            });
+        }
+
+        if (products.Count == 0)
+        {
+            _logger.LogWarning("Prepared product seed file {SeedProductsPath} did not contain valid products.", seedProductsPath);
+            return;
+        }
+
+        db.Products.AddRange(products);
+        await db.SaveChangesAsync();
+        _logger.LogInformation("Seeded {Count} prepared products from {SeedProductsPath}.", products.Count, seedProductsPath);
     }
 
 

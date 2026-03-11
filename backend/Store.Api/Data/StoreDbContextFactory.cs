@@ -19,25 +19,11 @@ public class StoreDbContextFactory : IDesignTimeDbContextFactory<StoreDbContext>
 
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
 
-        var optionsBuilder = new DbContextOptionsBuilder<StoreDbContext>();
-        if (connectionString.StartsWith("Host=", StringComparison.OrdinalIgnoreCase)
-            || connectionString.Contains(";Port=", StringComparison.OrdinalIgnoreCase))
-        {
-            optionsBuilder.UseNpgsql(connectionString);
-        }
-        else
-        {
-            var projectRoot = ResolveProjectRoot(apiDirectory);
-            var sqlitePath = Environment.GetEnvironmentVariable("STORE_SQLITE_PATH")
-                ?? Path.Combine(projectRoot, "backend", "app.db");
-            var sqliteDir = Path.GetDirectoryName(sqlitePath);
-            if (!string.IsNullOrWhiteSpace(sqliteDir))
-            {
-                Directory.CreateDirectory(sqliteDir);
-            }
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException("ConnectionStrings:DefaultConnection must be configured for PostgreSQL.");
 
-            optionsBuilder.UseSqlite($"Data Source={sqlitePath}");
-        }
+        var optionsBuilder = new DbContextOptionsBuilder<StoreDbContext>();
+        optionsBuilder.UseNpgsql(connectionString);
 
         return new StoreDbContext(optionsBuilder.Options);
     }
@@ -95,15 +81,4 @@ public class StoreDbContextFactory : IDesignTimeDbContextFactory<StoreDbContext>
         return null;
     }
 
-    private static string ResolveProjectRoot(string apiDirectory)
-    {
-        var explicitRoot = Environment.GetEnvironmentVariable("STORE_ROOT");
-        if (!string.IsNullOrWhiteSpace(explicitRoot) && Directory.Exists(explicitRoot))
-        {
-            return explicitRoot;
-        }
-
-        var candidate = new DirectoryInfo(apiDirectory).Parent?.Parent;
-        return candidate?.FullName ?? Path.GetFullPath(Path.Combine(apiDirectory, "../.."));
-    }
 }
