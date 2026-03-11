@@ -142,6 +142,88 @@ public class AppSetting
     public string Value { get; set; } = string.Empty;
 }
 
+[Table("telegram_bots")]
+public class TelegramBot
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [Column("short_description")]
+    public string? ShortDescription { get; set; }
+
+    [Column("image_url")]
+    public string? ImageUrl { get; set; }
+
+    [Column("token")]
+    public string Token { get; set; } = string.Empty;
+
+    [Column("username")]
+    public string? Username { get; set; }
+
+    [Column("commands_json")]
+    public string CommandsJson { get; set; } = "[]";
+
+    [Column("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [Column("use_for_login")]
+    public bool UseForLogin { get; set; }
+
+    [Column("auto_replies_enabled")]
+    public bool AutoRepliesEnabled { get; set; } = true;
+
+    [Column("reply_templates_json")]
+    public string ReplyTemplatesJson { get; set; } = "[]";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
+
+    [Column("last_checked_at")]
+    public long? LastCheckedAt { get; set; }
+
+    [Column("last_bot_info_json")]
+    public string? LastBotInfoJson { get; set; }
+}
+
+[Table("telegram_bot_subscribers")]
+public class TelegramBotSubscriber
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("bot_id")]
+    public string BotId { get; set; } = string.Empty;
+
+    [Column("chat_id")]
+    public long ChatId { get; set; }
+
+    [Column("username")]
+    public string? Username { get; set; }
+
+    [Column("first_name")]
+    public string? FirstName { get; set; }
+
+    [Column("last_name")]
+    public string? LastName { get; set; }
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// Представляет код подтверждения или сброса.
 /// </summary>

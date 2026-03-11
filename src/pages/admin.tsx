@@ -21,14 +21,207 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
+import { useEffect, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
-import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause } from 'lucide-react';
 import { useNavigate } from 'react-router';
+
+interface TelegramBotCommand {
+  command: string;
+  description: string;
+}
+
+interface TelegramBotReplyTemplate {
+  key: string;
+  label: string;
+  description?: string | null;
+  enabled: boolean;
+  text: string;
+}
+
+interface TelegramBot {
+  id: string;
+  name: string;
+  description: string;
+  shortDescription?: string | null;
+  imageUrl?: string | null;
+  username?: string | null;
+  tokenMasked?: string;
+  hasToken?: boolean;
+  enabled: boolean;
+  useForLogin?: boolean;
+  autoRepliesEnabled?: boolean;
+  commands: TelegramBotCommand[];
+  replyTemplates?: TelegramBotReplyTemplate[];
+  botInfo?: any;
+}
+
+const TELEGRAM_BOT_LIMITS = {
+  name: 64,
+  description: 512,
+  shortDescription: 120,
+  maxCommands: 100,
+  command: 32,
+  commandDescription: 256,
+  replyText: 4096,
+  imageUploadBytes: 10 * 1024 * 1024
+} as const;
+
+const DEFAULT_TELEGRAM_BOT_REPLY_TEMPLATES: TelegramBotReplyTemplate[] = [
+  {
+    key: "welcome",
+    label: "Приветствие",
+    description: "Отправляется при первом сообщении пользователю.",
+    enabled: true,
+    text: "Привет! Я бот {bot_name}. Используйте команды из меню."
+  },
+  {
+    key: "known_command",
+    label: "Ответ на известную команду",
+    description: "Срабатывает для настроенной команды без отдельной логики.",
+    enabled: false,
+    text: "Команда {command} получена. Скоро здесь появится отдельное действие."
+  },
+  {
+    key: "unknown_command",
+    label: "Неизвестная команда",
+    description: "Срабатывает, если пользователь вызвал несуществующую команду.",
+    enabled: true,
+    text: "Команда не распознана. Используйте меню Telegram или /check."
+  },
+  {
+    key: "auth_only",
+    label: "Бот только для авторизации",
+    description: "Ответ на обычное сообщение, если бот используется для Telegram Login.",
+    enabled: true,
+    text: "Этот бот используется для авторизации через Telegram. Для входа откройте сайт и нажмите кнопку \"Войти через Telegram\"."
+  },
+  {
+    key: "text_fallback",
+    label: "Ответ на обычный текст",
+    description: "Ответ на произвольное сообщение без команды у обычного бота.",
+    enabled: false,
+    text: "Сейчас я понимаю только системные и настроенные команды."
+  },
+  {
+    key: "order_created",
+    label: "Шаблон: новый заказ",
+    description: "Заготовка для будущих уведомлений о создании заказа.",
+    enabled: false,
+    text: "Заказ {order_number} создан. Мы сообщим, когда начнем его собирать."
+  },
+  {
+    key: "order_status_changed",
+    label: "Шаблон: статус заказа",
+    description: "Заготовка для будущих уведомлений о смене статуса заказа.",
+    enabled: false,
+    text: "Статус заказа {order_number} изменился: {status}."
+  },
+  {
+    key: "discount_broadcast",
+    label: "Шаблон: скидки и акции",
+    description: "Заготовка для будущих массовых уведомлений о скидках.",
+    enabled: false,
+    text: "Для вас есть новое предложение: {discount_name}."
+  }
+];
+
+const createEmptyTelegramBotCommand = (): TelegramBotCommand => ({
+  command: "",
+  description: ""
+});
+
+const cloneTelegramBotReplyTemplates = (templates?: TelegramBotReplyTemplate[]) => {
+  const templateMap = new Map((templates || []).map((item) => [item.key, item]));
+  return DEFAULT_TELEGRAM_BOT_REPLY_TEMPLATES.map((template) => {
+    const existing = templateMap.get(template.key);
+    return {
+      ...template,
+      enabled: existing?.enabled ?? template.enabled,
+      text: existing?.text ?? template.text
+    };
+  });
+};
+
+const getInitialTelegramBotForm = () => ({
+  name: "",
+  description: "",
+  shortDescription: "",
+  imageUrl: "",
+  token: "",
+  username: "",
+  tokenMasked: "",
+  enabled: true,
+  useForLogin: false,
+  autoRepliesEnabled: true,
+  commands: [createEmptyTelegramBotCommand()],
+  replyTemplates: cloneTelegramBotReplyTemplates()
+});
+
+const normalizeTelegramCommandForValidation = (command: string) => command.trim().replace(/^\//, "");
+
+const getTelegramBotFormErrors = (form: ReturnType<typeof getInitialTelegramBotForm>) => {
+  const errors: string[] = [];
+  const trimmedName = form.name.trim();
+  const trimmedDescription = form.description.trim();
+  const trimmedShortDescription = form.shortDescription.trim();
+  const populatedCommands = form.commands.filter((item) => item.command.trim() || item.description.trim());
+
+  if (!trimmedName) {
+    errors.push("Название бота обязательно.");
+  } else if (trimmedName.length > TELEGRAM_BOT_LIMITS.name) {
+    errors.push(`Название бота должно быть не длиннее ${TELEGRAM_BOT_LIMITS.name} символов.`);
+  }
+
+  if (trimmedDescription.length > TELEGRAM_BOT_LIMITS.description) {
+    errors.push(`Описание должно быть не длиннее ${TELEGRAM_BOT_LIMITS.description} символов.`);
+  }
+
+  if (trimmedShortDescription.length > TELEGRAM_BOT_LIMITS.shortDescription) {
+    errors.push(`Краткое описание должно быть не длиннее ${TELEGRAM_BOT_LIMITS.shortDescription} символов.`);
+  }
+
+  if (populatedCommands.length > TELEGRAM_BOT_LIMITS.maxCommands) {
+    errors.push(`Telegram поддерживает не более ${TELEGRAM_BOT_LIMITS.maxCommands} команд.`);
+  }
+
+  populatedCommands.forEach((item, index) => {
+    const command = normalizeTelegramCommandForValidation(item.command);
+    const description = item.description.trim();
+    if (!command) {
+      errors.push(`Команда #${index + 1}: укажите название команды.`);
+      return;
+    }
+
+    if (!/^[a-z0-9_]{1,32}$/.test(command)) {
+      errors.push(`Команда #${index + 1}: используйте только строчные латинские буквы, цифры и _.`);
+    }
+
+    if (!description) {
+      errors.push(`Команда #${index + 1}: укажите описание.`);
+    } else if (description.length > TELEGRAM_BOT_LIMITS.commandDescription) {
+      errors.push(`Команда #${index + 1}: описание должно быть не длиннее ${TELEGRAM_BOT_LIMITS.commandDescription} символов.`);
+    }
+  });
+
+  form.replyTemplates.forEach((template) => {
+    const text = template.text.trim();
+    if (template.enabled && !text) {
+      errors.push(`Шаблон «${template.label}» включен, но текст пустой.`);
+    }
+
+    if (text.length > TELEGRAM_BOT_LIMITS.replyText) {
+      errors.push(`Шаблон «${template.label}» должен быть не длиннее ${TELEGRAM_BOT_LIMITS.replyText} символов.`);
+    }
+  });
+
+  return errors;
+};
 
 interface Product {
   _id: string;
@@ -58,7 +251,7 @@ interface Product {
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
-  site_title: "",
+  site_title: "Fashiondemon",
   site_favicon_url: "",
   privacy_policy: "",
   user_agreement: "",
@@ -96,12 +289,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
+  const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
+  const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
+  const [telegramBotForm, setTelegramBotForm] = useState(getInitialTelegramBotForm);
+  const [isTelegramBotDialogOpen, setIsTelegramBotDialogOpen] = useState(false);
+  const [editingTelegramBotId, setEditingTelegramBotId] = useState<string | null>(null);
+  const [telegramBotSaving, setTelegramBotSaving] = useState(false);
+  const [telegramBotChecking, setTelegramBotChecking] = useState(false);
+  const [telegramBotCheckInfo, setTelegramBotCheckInfo] = useState<any | null>(null);
+  const [telegramBotValidationError, setTelegramBotValidationError] = useState("");
+  const [telegramBotTokenVisible, setTelegramBotTokenVisible] = useState(false);
+  const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
 
   // Form State
@@ -162,14 +366,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
-        FLOW.adminGetSettings()
+        FLOW.adminGetSettings(),
+        FLOW.adminGetTelegramBots()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
+      setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -252,13 +458,284 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return value === "true" || value === "1" || value === "on";
   };
 
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+
+    if (typeof error === "string" && error.trim()) {
+      return error;
+    }
+
+    return fallback;
+  };
+
+  const maskTokenPreview = (token: string) => {
+    const value = token.trim();
+    if (!value) return "";
+    if (value.length <= 4) return "*".repeat(value.length);
+    if (value.length <= 8) return `${value.slice(0, 2)}****${value.slice(-2)}`;
+    return `${value.slice(0, 4)}****${value.slice(-4)}`;
+  };
+
+  const getMaskedTokenInputValue = () => {
+    if (!telegramBotForm.token.trim()) {
+      return "";
+    }
+
+    return telegramBotTokenVisible
+      ? telegramBotForm.token
+      : maskTokenPreview(telegramBotForm.token);
+  };
+
+  const resetTelegramBotForm = () => {
+    setTelegramBotForm(getInitialTelegramBotForm());
+    setEditingTelegramBotId(null);
+    setTelegramBotCheckInfo(null);
+    setTelegramBotValidationError("");
+    setTelegramBotTokenVisible(false);
+  };
+
+  const addTelegramBotCommand = () => {
+    setTelegramBotForm((prev) => {
+      if (prev.commands.length >= TELEGRAM_BOT_LIMITS.maxCommands) {
+        toast.error(`Telegram поддерживает не более ${TELEGRAM_BOT_LIMITS.maxCommands} команд.`);
+        return prev;
+      }
+
+      return {
+        ...prev,
+        commands: [...prev.commands, createEmptyTelegramBotCommand()]
+      };
+    });
+  };
+
+  const updateTelegramBotCommand = (index: number, field: keyof TelegramBotCommand, value: string) => {
+    setTelegramBotForm((prev) => ({
+      ...prev,
+      commands: prev.commands.map((command, commandIndex) =>
+        commandIndex === index ? { ...command, [field]: value } : command
+      )
+    }));
+  };
+
+  const removeTelegramBotCommand = (index: number) => {
+    setTelegramBotForm((prev) => {
+      const nextCommands = prev.commands.filter((_, commandIndex) => commandIndex !== index);
+      return {
+        ...prev,
+        commands: nextCommands.length > 0 ? nextCommands : [createEmptyTelegramBotCommand()]
+      };
+    });
+  };
+
+  const updateTelegramBotReplyTemplate = (
+    key: string,
+    field: "enabled" | "text",
+    value: boolean | string
+  ) => {
+    setTelegramBotForm((prev) => ({
+      ...prev,
+      replyTemplates: prev.replyTemplates.map((template) =>
+        template.key === key ? { ...template, [field]: value } : template
+      )
+    }));
+  };
+
+  const openCreateTelegramBotDialog = () => {
+    resetTelegramBotForm();
+    setIsTelegramBotDialogOpen(true);
+  };
+
+  const openEditTelegramBotDialog = (bot: TelegramBot) => {
+    setEditingTelegramBotId(bot.id);
+    setTelegramBotCheckInfo(bot.botInfo || null);
+    setTelegramBotValidationError("");
+    setTelegramBotTokenVisible(false);
+    setTelegramBotForm({
+      name: bot.name || "",
+      description: bot.description || "",
+      shortDescription: bot.shortDescription || "",
+      imageUrl: bot.imageUrl || "",
+      token: "",
+      username: bot.username || "",
+      tokenMasked: bot.tokenMasked || "",
+      enabled: bot.enabled,
+      useForLogin: !!bot.useForLogin,
+      autoRepliesEnabled: bot.autoRepliesEnabled ?? true,
+      commands: Array.isArray(bot.commands) && bot.commands.length > 0 ? bot.commands : [createEmptyTelegramBotCommand()],
+      replyTemplates: cloneTelegramBotReplyTemplates(bot.replyTemplates)
+    });
+    setIsTelegramBotDialogOpen(true);
+  };
+
+  const validateTelegramToken = async (tokenInput?: string) => {
+    const token = (tokenInput ?? telegramBotForm.token).trim();
+    if (!token) {
+      const message = "Токен бота обязателен";
+      setTelegramBotValidationError(message);
+      toast.error(message);
+      return null;
+    }
+
+    setTelegramBotValidationError("");
+    setTelegramBotCheckInfo(null);
+    setTelegramBotChecking(true);
+    try {
+      const info = await FLOW.adminValidateTelegramBot({ input: { token } });
+      setTelegramBotCheckInfo(info || null);
+      setTelegramBotValidationError("");
+      if (info?.username) {
+        setTelegramBotForm((prev) => ({ ...prev, username: info.username }));
+      }
+      if (!telegramBotForm.name && info?.first_name) {
+        setTelegramBotForm((prev) => ({ ...prev, name: info.first_name }));
+      }
+      toast.success("Токен подтверждён через getMe");
+      return info;
+    } catch (error) {
+      const message = getErrorMessage(error, "Проверка getMe не прошла");
+      setTelegramBotValidationError(message);
+      toast.error(message);
+      return null;
+    } finally {
+      setTelegramBotChecking(false);
+    }
+  };
+
+  const uploadTelegramBotImage = async (file?: File) => {
+    if (!file) return;
+
+    const normalizedType = file.type.toLowerCase();
+    const isJpeg = normalizedType === "image/jpeg" || normalizedType === "image/jpg";
+    if (!isJpeg) {
+      toast.error("Для фото профиля Telegram используйте JPG/JPEG.");
+      return;
+    }
+
+    if (file.size > TELEGRAM_BOT_LIMITS.imageUploadBytes) {
+      toast.error("Файл слишком большой для безопасной загрузки в Telegram.");
+      return;
+    }
+
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append("files", file);
+      const res = await FLOW.adminUpload({ input: formDataUpload });
+      const first = Array.isArray(res?.urls) ? res.urls[0] : null;
+      if (!first) {
+        toast.error("Не удалось загрузить изображение");
+        return;
+      }
+
+      setTelegramBotForm((prev) => ({ ...prev, imageUrl: first }));
+      toast.success("Изображение загружено");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Ошибка загрузки изображения"));
+    }
+  };
+
+  const saveTelegramBot = async () => {
+    const enteredToken = telegramBotForm.token.trim();
+    const formErrors = getTelegramBotFormErrors(telegramBotForm);
+
+    if (!enteredToken && !editingTelegramBotId) {
+      toast.error("Токен бота обязателен");
+      return;
+    }
+
+    if (formErrors.length > 0) {
+      toast.error(formErrors[0]);
+      return;
+    }
+
+    setTelegramBotSaving(true);
+    try {
+      if (enteredToken) {
+        const preCheck = await validateTelegramToken(enteredToken);
+        if (!preCheck) return;
+      }
+
+      const payload = {
+        name: telegramBotForm.name.trim(),
+        description: telegramBotForm.description.trim(),
+        shortDescription: telegramBotForm.shortDescription.trim(),
+        imageUrl: telegramBotForm.imageUrl.trim(),
+        token: enteredToken || undefined,
+        enabled: telegramBotForm.enabled,
+        useForLogin: telegramBotForm.useForLogin,
+        autoRepliesEnabled: telegramBotForm.autoRepliesEnabled,
+        commands: telegramBotForm.commands
+          .filter((item) => item.command.trim() || item.description.trim())
+          .map((item) => ({
+            command: item.command.trim(),
+            description: item.description.trim()
+          })),
+        replyTemplates: telegramBotForm.replyTemplates.map((template) => ({
+          key: template.key,
+          label: template.label,
+          description: template.description || "",
+          enabled: template.enabled,
+          text: template.text
+        }))
+      };
+
+      let savedBot: any;
+      if (editingTelegramBotId) {
+        savedBot = await FLOW.adminUpdateTelegramBot({ input: { id: editingTelegramBotId, payload } });
+      } else {
+        savedBot = await FLOW.adminCreateTelegramBot({ input: { ...payload, token: enteredToken } });
+      }
+
+      toast.success(editingTelegramBotId ? "Бот обновлён и запущен" : "Бот добавлен и запущен");
+      setIsTelegramBotDialogOpen(false);
+      resetTelegramBotForm();
+      await fetchAdminData();
+      setTelegramBotCheckInfo(savedBot?.botInfo || null);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось сохранить Telegram-бота"));
+    } finally {
+      setTelegramBotSaving(false);
+    }
+  };
+
+  const toggleTelegramBot = async (bot: TelegramBot) => {
+    try {
+      await FLOW.adminUpdateTelegramBot({ input: { id: bot.id, payload: { enabled: !bot.enabled } } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось изменить состояние бота"));
+    }
+  };
+
+  const checkTelegramBot = async (bot: TelegramBot) => {
+    try {
+      await FLOW.adminCheckTelegramBot({ input: { id: bot.id } });
+      toast.success("Проверка бота выполнена");
+      await fetchAdminData();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось проверить бота"));
+    }
+  };
+
+  const deleteTelegramBot = async (bot: TelegramBot) => {
+    if (!confirm(`Удалить бота ${bot.name}?`)) return;
+    try {
+      await FLOW.adminDeleteTelegramBot({ input: { id: bot.id } });
+      await fetchAdminData();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось удалить бота"));
+    }
+  };
+
+  const telegramBotFormErrors = getTelegramBotFormErrors(telegramBotForm);
+
   const settingsGroups = [
     { id: "auth", label: "Авторизация" },
     { id: "operations", label: "Регламентные операции" },
     { id: "smtp", label: "Почта (SMTP)" },
     { id: "metrics", label: "Метрики" },
     { id: "integrations", label: "Интеграции" },
-    { id: "delivery", label: "Доставка" },
     { id: "legal", label: "Юридические тексты" },
     { id: "general", label: "Общие" }
   ] as const;
@@ -818,49 +1295,137 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "integrations" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Интеграции</h3>
-                      <div className="space-y-2 border p-3">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id="telegram-login-enabled"
-                            checked={isSettingEnabled("telegram_login_enabled")}
-                            onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
-                          />
-                          <Label htmlFor="telegram-login-enabled">Включить авторизацию через Telegram</Label>
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="telegram-bot-username">Telegram Bot Username</Label>
-                          <Input id="telegram-bot-username" value={settings["telegram_bot_username"] || ""} onChange={(e) => updateSetting("telegram_bot_username", e.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="telegram-bot-token">Telegram Bot Token</Label>
-                          <Input id="telegram-bot-token" type="password" value={settings["telegram_bot_token"] || ""} onChange={(e) => updateSetting("telegram_bot_token", e.target.value)} />
-                        </div>
-                      </div>
+                      <p className="text-sm text-muted-foreground">Разделены по каталогам, чтобы Telegram, DaData и Яндекс.Доставка можно было независимо обновлять и настраивать.</p>
 
-                      <div className="space-y-1 border p-3">
-                        <Label htmlFor="dadata-api-key">DaData API Key</Label>
-                        <Input id="dadata-api-key" type="password" value={settings["dadata_api_key"] || ""} onChange={(e) => updateSetting("dadata_api_key", e.target.value)} />
-                      </div>
-                    </div>
-                  )}
+                      <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="w-full">
+                        <TabsList className="w-full justify-start gap-2 rounded-none border-b bg-transparent p-0">
+                          <TabsTrigger value="telegram" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Telegram</TabsTrigger>
+                          <TabsTrigger value="dadata" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">DaData</TabsTrigger>
+                          <TabsTrigger value="yandex" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Яндекс.Доставка</TabsTrigger>
+                        </TabsList>
 
-                  {selectedSettingsGroup === "delivery" && (
-                    <div className="space-y-3 border p-3">
-                      <h3 className="font-semibold">Яндекс Доставка (расчет)</h3>
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                        <div className="space-y-1">
-                          <Label htmlFor="yandex-delivery-base-cost">Базовая стоимость (₽)</Label>
-                          <Input id="yandex-delivery-base-cost" value={settings["yandex_delivery_base_cost"] || "350"} onChange={(e) => updateSetting("yandex_delivery_base_cost", e.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="yandex-delivery-cost-per-kg">Стоимость за кг (₽)</Label>
-                          <Input id="yandex-delivery-cost-per-kg" value={settings["yandex_delivery_cost_per_kg"] || "40"} onChange={(e) => updateSetting("yandex_delivery_cost_per_kg", e.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="yandex-delivery-markup">Наценка (%)</Label>
-                          <Input id="yandex-delivery-markup" value={settings["yandex_delivery_markup_percent"] || "0"} onChange={(e) => updateSetting("yandex_delivery_markup_percent", e.target.value)} />
-                        </div>
-                      </div>
+                        <TabsContent value="telegram" className="mt-3 space-y-3">
+                          <div className="space-y-3 border p-3">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="telegram-login-enabled"
+                                checked={isSettingEnabled("telegram_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
+                              />
+                              <Label htmlFor="telegram-login-enabled">Включить авторизацию через Telegram</Label>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="telegram-bot-username">Username бота для Telegram Login</Label>
+                              <Input id="telegram-bot-username" value={settings["telegram_bot_username"] || ""} onChange={(e) => updateSetting("telegram_bot_username", e.target.value)} />
+                              <p className="text-xs text-muted-foreground">
+                                Необязательное поле. Если оставить пустым, для кнопки входа через Telegram будет использован username последнего активного бота из списка ниже.
+                              </p>
+                            </div>
+
+                            <TooltipProvider delayDuration={150}>
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                {telegramBots.map((bot) => (
+                                  <div key={bot.id} className="rounded-lg border border-slate-700 bg-slate-900/80 text-slate-100 overflow-hidden">
+                                    <div className="h-28 border-b border-slate-700/80 bg-slate-800/80 flex items-center justify-center text-slate-400 text-xs">
+                                      {bot.imageUrl ? <img src={bot.imageUrl} alt={bot.name} className="h-full w-full object-cover" /> : "TELEGRAM BOT"}
+                                    </div>
+                                    <div className="p-3 space-y-2">
+                                      <div>
+                                        <div className="font-semibold truncate">{bot.name}</div>
+                                        <div className="text-xs text-slate-400 truncate">{bot.username ? `@${bot.username}` : "username не задан"}</div>
+                                        <div className="text-xs text-slate-500">ID: {bot.botInfo?.id || bot.id}</div>
+                                        <div className="text-xs text-slate-400">Токен: {bot.tokenMasked || "********"}</div>
+                                        {bot.useForLogin && (
+                                          <div className="mt-1 inline-flex rounded border border-emerald-500 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300">
+                                            Используется для авторизации
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className={`text-xs ${bot.enabled ? "text-emerald-400" : "text-amber-300"}`}>{bot.enabled ? "Активен" : "Остановлен"}</span>
+                                        <div className="flex gap-2">
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Button type="button" size="icon" className="h-8 w-8 border border-slate-500 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => openEditTelegramBotDialog(bot)}>
+                                                <Pencil className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Редактировать бота</TooltipContent>
+                                          </Tooltip>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Button type="button" size="icon" className="h-8 w-8 border border-emerald-500 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/50" onClick={() => checkTelegramBot(bot)}>
+                                                <ShieldCheck className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Проверить и синхронизировать с Telegram</TooltipContent>
+                                          </Tooltip>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Button type="button" size="icon" className="h-8 w-8 border border-sky-500 bg-sky-900/30 text-sky-300 hover:bg-sky-800/50" onClick={() => toggleTelegramBot(bot)}>
+                                                {bot.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                                              </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>{bot.enabled ? "Остановить бота" : "Запустить бота"}</TooltipContent>
+                                          </Tooltip>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Button type="button" size="icon" className="h-8 w-8 border border-red-500 bg-red-900/30 text-red-300 hover:bg-red-800/50" onClick={() => deleteTelegramBot(bot)}>
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Удалить бота</TooltipContent>
+                                          </Tooltip>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={openCreateTelegramBotDialog}
+                                      className="rounded-lg border border-slate-700 bg-slate-950/80 min-h-[184px] flex items-center justify-center text-slate-300 hover:text-white hover:border-slate-500 transition"
+                                    >
+                                      <Plus className="h-10 w-10" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Добавить нового Telegram-бота</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </TooltipProvider>
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="dadata" className="mt-3">
+                          <div className="space-y-1 border p-3">
+                            <Label htmlFor="dadata-api-key">DaData API Key</Label>
+                            <Input id="dadata-api-key" type="password" value={settings["dadata_api_key"] || ""} onChange={(e) => updateSetting("dadata_api_key", e.target.value)} />
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="yandex" className="mt-3">
+                          <div className="space-y-3 border p-3">
+                            <h4 className="font-semibold">Яндекс Доставка (расчёт)</h4>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <Label htmlFor="yandex-delivery-base-cost">Базовая стоимость (₽)</Label>
+                                <Input id="yandex-delivery-base-cost" value={settings["yandex_delivery_base_cost"] || "350"} onChange={(e) => updateSetting("yandex_delivery_base_cost", e.target.value)} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="yandex-delivery-cost-per-kg">Стоимость за кг (₽)</Label>
+                                <Input id="yandex-delivery-cost-per-kg" value={settings["yandex_delivery_cost_per_kg"] || "40"} onChange={(e) => updateSetting("yandex_delivery_cost_per_kg", e.target.value)} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="yandex-delivery-markup">Наценка (%)</Label>
+                                <Input id="yandex-delivery-markup" value={settings["yandex_delivery_markup_percent"] || "0"} onChange={(e) => updateSetting("yandex_delivery_markup_percent", e.target.value)} />
+                              </div>
+                            </div>
+                          </div>
+                        </TabsContent>
+                      </Tabs>
                     </div>
                   )}
 
@@ -939,6 +1504,316 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </TabsContent>
           </Tabs>
+
+          <Dialog
+            open={isTelegramBotDialogOpen}
+            onOpenChange={(open) => {
+              setIsTelegramBotDialogOpen(open);
+              if (!open) resetTelegramBotForm();
+            }}
+          >
+            <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase tracking-wide">
+                  {editingTelegramBotId ? "Редактирование Telegram-бота" : "Добавление Telegram-бота"}
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>Название бота *</Label>
+                      <span className="text-xs text-muted-foreground">
+                        {telegramBotForm.name.trim().length}/{TELEGRAM_BOT_LIMITS.name}
+                      </span>
+                    </div>
+                    <Input
+                      value={telegramBotForm.name}
+                      onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="Например: Fashion Demon Bot"
+                      maxLength={TELEGRAM_BOT_LIMITS.name}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Username</Label>
+                    <Input
+                      value={telegramBotForm.username}
+                      placeholder="@my_bot"
+                      readOnly
+                      className="bg-muted"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>URL картинки</Label>
+                  <Input
+                    type="url"
+                    value={telegramBotForm.imageUrl}
+                    onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, imageUrl: e.target.value }))}
+                    placeholder="https://..."
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Telegram для фото профиля бота ожидает статичную JPG-картинку. Если укажете URL, сервер проверит формат при сохранении.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={() => telegramBotImageInputRef.current?.click()}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Загрузить на сайт
+                    </Button>
+                    <input
+                      ref={telegramBotImageInputRef}
+                      type="file"
+                      accept=".jpg,.jpeg,image/jpeg"
+                      className="hidden"
+                      onChange={(e) => uploadTelegramBotImage(e.target.files?.[0])}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Токен бота *</Label>
+                  <Input
+                    type="text"
+                    value={getMaskedTokenInputValue()}
+                    onChange={(e) => {
+                      setTelegramBotForm((prev) => ({ ...prev, token: e.target.value }));
+                      setTelegramBotValidationError("");
+                    }}
+                    onFocus={() => setTelegramBotTokenVisible(true)}
+                    onBlur={() => setTelegramBotTokenVisible(false)}
+                    placeholder={editingTelegramBotId ? (telegramBotForm.tokenMasked || "Оставьте пустым, чтобы не менять токен") : "12345:AA..."}
+                    required={!editingTelegramBotId}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="font-mono"
+                  />
+                  <div className="min-h-5 text-xs text-muted-foreground">
+                    {!telegramBotForm.token.trim() && editingTelegramBotId && telegramBotForm.tokenMasked && (
+                      <span>
+                        Текущий токен: <span className="font-mono">{telegramBotForm.tokenMasked}</span>
+                      </span>
+                    )}
+                    {telegramBotForm.token.trim() && !telegramBotTokenVisible && (
+                      <span>Токен замаскирован. Нажмите на поле, чтобы изменить его.</span>
+                    )}
+                    {telegramBotForm.token.trim() && telegramBotTokenVisible && (
+                      <span>Режим редактирования токена.</span>
+                    )}
+                  </div>
+                  {editingTelegramBotId && (
+                    <p className="text-xs text-muted-foreground">Если токен не меняли, оставьте поле пустым — сохранится текущий токен.</p>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void validateTelegramToken();
+                    }}
+                    disabled={telegramBotChecking}
+                  >
+                    {telegramBotChecking ? "Проверка..." : "Проверить (getMe)"}
+                  </Button>
+                  {telegramBotValidationError && (
+                    <div className="border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+                      {telegramBotValidationError}
+                    </div>
+                  )}
+                </div>
+
+                {telegramBotCheckInfo && (
+                  <div className="border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-800">
+                    ID: {telegramBotCheckInfo.id || "—"}, username: {telegramBotCheckInfo.username || "—"}, name: {telegramBotCheckInfo.first_name || telegramBotCheckInfo.last_name || "—"}
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Описание</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {telegramBotForm.description.trim().length}/{TELEGRAM_BOT_LIMITS.description}
+                    </span>
+                  </div>
+                  <Textarea
+                    value={telegramBotForm.description}
+                    onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder="Описание бота (setMyDescription)"
+                    maxLength={TELEGRAM_BOT_LIMITS.description}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Краткое описание</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {telegramBotForm.shortDescription.trim().length}/{TELEGRAM_BOT_LIMITS.shortDescription}
+                    </span>
+                  </div>
+                  <Input
+                    value={telegramBotForm.shortDescription}
+                    onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, shortDescription: e.target.value }))}
+                    placeholder="Краткое описание (setMyShortDescription)"
+                    maxLength={TELEGRAM_BOT_LIMITS.shortDescription}
+                  />
+                </div>
+
+                <div className="space-y-3 rounded border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">Команды</div>
+                      <p className="text-xs text-muted-foreground">
+                        В Telegram можно задать до {TELEGRAM_BOT_LIMITS.maxCommands} команд. Служебная команда <span className="font-mono">/check</span> работает всегда и в меню не добавляется.
+                      </p>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {telegramBotForm.commands.filter((item) => item.command.trim() || item.description.trim()).length}/{TELEGRAM_BOT_LIMITS.maxCommands}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {telegramBotForm.commands.map((command, index) => (
+                      <div key={`command-${index}`} className="grid grid-cols-1 gap-3 rounded border p-3 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto]">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <Label>Команда</Label>
+                            <span className="text-xs text-muted-foreground">
+                              {normalizeTelegramCommandForValidation(command.command).length}/{TELEGRAM_BOT_LIMITS.command}
+                            </span>
+                          </div>
+                          <Input
+                            value={command.command}
+                            onChange={(e) => updateTelegramBotCommand(index, "command", e.target.value.toLowerCase())}
+                            placeholder="/start"
+                            maxLength={TELEGRAM_BOT_LIMITS.command + 1}
+                            className="font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <Label>Описание</Label>
+                            <span className="text-xs text-muted-foreground">
+                              {command.description.trim().length}/{TELEGRAM_BOT_LIMITS.commandDescription}
+                            </span>
+                          </div>
+                          <Input
+                            value={command.description}
+                            onChange={(e) => updateTelegramBotCommand(index, "description", e.target.value)}
+                            placeholder="Например: Начать работу"
+                            maxLength={TELEGRAM_BOT_LIMITS.commandDescription}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full border-red-200 text-red-700 hover:border-red-300 hover:bg-red-50 md:w-auto"
+                            onClick={() => removeTelegramBotCommand(index)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Удалить
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="outline" onClick={addTelegramBotCommand}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Добавить команду
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="telegram-bot-enabled"
+                    checked={telegramBotForm.enabled}
+                    onCheckedChange={(checked) => setTelegramBotForm((prev) => ({ ...prev, enabled: !!checked }))}
+                  />
+                  <Label htmlFor="telegram-bot-enabled">Запустить бота сразу после сохранения</Label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="telegram-bot-use-for-login"
+                    checked={telegramBotForm.useForLogin}
+                    onCheckedChange={(checked) => setTelegramBotForm((prev) => ({ ...prev, useForLogin: !!checked }))}
+                  />
+                  <Label htmlFor="telegram-bot-use-for-login">Использовать этого бота для авторизации через Telegram</Label>
+                </div>
+
+                <div className="space-y-3 rounded border p-3">
+                  <div>
+                    <div className="font-medium">Автоответы и шаблоны</div>
+                    <p className="text-xs text-muted-foreground">
+                      Поддерживаются переменные: <span className="font-mono">{`{bot_name}`}</span>, <span className="font-mono">{`{command}`}</span>, <span className="font-mono">{`{username}`}</span>, <span className="font-mono">{`{first_name}`}</span>, <span className="font-mono">{`{order_number}`}</span>, <span className="font-mono">{`{status}`}</span>, <span className="font-mono">{`{discount_name}`}</span>.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="telegram-bot-auto-replies"
+                      checked={telegramBotForm.autoRepliesEnabled}
+                      onCheckedChange={(checked) => setTelegramBotForm((prev) => ({ ...prev, autoRepliesEnabled: !!checked }))}
+                    />
+                    <Label htmlFor="telegram-bot-auto-replies">Включить автоответы бота</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Если выключить автоответы, бот продолжит отвечать только на служебную проверку <span className="font-mono">/check</span>.
+                  </p>
+                  <div className="space-y-3">
+                    {telegramBotForm.replyTemplates.map((template) => (
+                      <div key={template.key} className="space-y-2 rounded border p-3">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div className="space-y-1">
+                            <div className="font-medium">{template.label}</div>
+                            {template.description && (
+                              <p className="text-xs text-muted-foreground">{template.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={`telegram-template-${template.key}`}
+                              checked={template.enabled}
+                              onCheckedChange={(checked) => updateTelegramBotReplyTemplate(template.key, "enabled", !!checked)}
+                            />
+                            <Label htmlFor={`telegram-template-${template.key}`}>Включен</Label>
+                          </div>
+                        </div>
+                        <Textarea
+                          value={template.text}
+                          onChange={(e) => updateTelegramBotReplyTemplate(template.key, "text", e.target.value)}
+                          maxLength={TELEGRAM_BOT_LIMITS.replyText}
+                          disabled={!telegramBotForm.autoRepliesEnabled}
+                          className="min-h-[100px]"
+                        />
+                        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                          <span>Ключ шаблона: <span className="font-mono">{template.key}</span></span>
+                          <span>{template.text.trim().length}/{TELEGRAM_BOT_LIMITS.replyText}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {telegramBotFormErrors.length > 0 && (
+                  <div className="space-y-1 border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+                    {telegramBotFormErrors.slice(0, 6).map((error) => (
+                      <div key={error}>• {error}</div>
+                    ))}
+                    {telegramBotFormErrors.length > 6 && (
+                      <div>• И еще {telegramBotFormErrors.length - 6} ошибок.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsTelegramBotDialogOpen(false)} disabled={telegramBotSaving || telegramBotChecking}>Отмена</Button>
+                <Button type="button" onClick={saveTelegramBot} disabled={telegramBotSaving || telegramBotChecking || telegramBotFormErrors.length > 0}>
+                  {telegramBotSaving ? "Сохранение..." : "Сохранить"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-none border-black">

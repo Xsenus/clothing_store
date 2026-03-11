@@ -5,7 +5,7 @@ import {
   SITE_BRANDING_UPDATED_EVENT,
 } from "@/lib/site-settings";
 
-const DEFAULT_TITLE = "VibeFlow";
+const DEFAULT_TITLE = "Fashiondemon";
 
 const ensureFaviconElement = () => {
   const existing = document.querySelector('link[rel="icon"]');

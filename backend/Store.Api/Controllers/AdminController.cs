@@ -18,16 +18,18 @@ public class AdminController : ControllerBase
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
     private readonly AdminDataSeeder _adminDataSeeder;
+    private readonly ITelegramBotManager _telegramBotManager;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
     /// </summary>
-    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder)
+    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder, ITelegramBotManager telegramBotManager)
     {
         _configuration = configuration;
         _db = db;
         _auth = auth;
         _adminDataSeeder = adminDataSeeder;
+        _telegramBotManager = telegramBotManager;
     }
 
     /// <summary>
@@ -186,6 +188,101 @@ public class AdminController : ControllerBase
                 orders = result.Orders,
                 likes = result.Likes
             });
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+
+    [HttpPost("telegram-bots/validate")]
+    public async Task<IResult> ValidateTelegramBot([FromBody] TelegramBotValidatePayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var info = await _telegramBotManager.ValidateTokenAsync(payload.Token);
+            return Results.Ok(info);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpGet("telegram-bots")]
+    public async Task<IResult> TelegramBots()
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        return Results.Ok(await _telegramBotManager.GetBotsAsync());
+    }
+
+    [HttpPost("telegram-bots")]
+    public async Task<IResult> CreateTelegramBot([FromBody] TelegramBotPayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            return Results.Ok(await _telegramBotManager.CreateBotAsync(payload));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPatch("telegram-bots/{id}")]
+    public async Task<IResult> UpdateTelegramBot(string id, [FromBody] TelegramBotPatchPayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var bot = await _telegramBotManager.UpdateBotAsync(id, payload);
+            return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpDelete("telegram-bots/{id}")]
+    public async Task<IResult> DeleteTelegramBot(string id)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        await _telegramBotManager.DeleteBotAsync(id);
+        return Results.Ok(new { ok = true });
+    }
+
+    [HttpPost("telegram-bots/{id}/check")]
+    public async Task<IResult> CheckTelegramBot(string id)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var bot = await _telegramBotManager.CheckBotAsync(id);
+            return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
         }
         catch (Exception ex)
         {
