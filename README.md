@@ -158,7 +158,7 @@ sudo -u postgres psql -d clothing_store -c "select now();"
 cd /opt/clothing_store
 git pull
 npm ci && npm run build
-dotnet publish backend/Store.Api/Store.Api.csproj -c Release
+dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store/backend/Store.Api/publish
 sudo systemctl restart clothing-store-api
 sudo systemctl status clothing-store-api --no-pager
 ```
