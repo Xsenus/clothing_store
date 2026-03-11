@@ -1536,7 +1536,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label>Username</Label>
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>Username</Label>
+                      <span className="text-xs text-muted-foreground">
+                        {telegramBotForm.username.trim().length}/{TELEGRAM_BOT_LIMITS.username}
+                      </span>
+                    </div>
                     <Input
                       value={telegramBotForm.username}
                       placeholder="@my_bot"
