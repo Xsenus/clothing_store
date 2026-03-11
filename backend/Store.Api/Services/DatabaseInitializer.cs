@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -40,6 +42,15 @@ public class DatabaseInitializer
         {
             throw new InvalidOperationException(
                 "No EF Core migrations found. Create and apply a baseline migration before starting the application.");
+        }
+
+        var databaseCreator = db.GetService<IRelationalDatabaseCreator>();
+        if (!await databaseCreator.ExistsAsync())
+        {
+            var provider = db.Database.ProviderName ?? "unknown";
+            throw new InvalidOperationException(
+                $"Database does not exist or is inaccessible for provider '{provider}'. " +
+                "Create the target database and grant connect/migration permissions to the application user before startup.");
         }
 
         var pendingBefore = db.Database.GetPendingMigrations().ToArray();

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Store.Api.Data;
 using Store.Api.Services;
 
@@ -36,7 +37,11 @@ if (useSqlite)
     var sqliteConnection = $"Data Source={sqlitePath}";
     builder.Configuration["ResolvedDatabase:Provider"] = "sqlite";
     builder.Configuration["ResolvedDatabase:ConnectionString"] = sqliteConnection;
-    builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseSqlite(sqliteConnection));
+    builder.Services.AddDbContext<StoreDbContext>(opt =>
+    {
+        opt.UseSqlite(sqliteConnection);
+        opt.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+    });
 }
 else
 {
