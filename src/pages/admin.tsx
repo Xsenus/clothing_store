@@ -346,6 +346,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
+  const [isFaviconGalleryPickerOpen, setIsFaviconGalleryPickerOpen] = useState(false);
+  const [faviconGallerySearch, setFaviconGallerySearch] = useState("");
+  const faviconUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFaviconFileName, setSelectedFaviconFileName] = useState("");
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [galleryName, setGalleryName] = useState("");
   const [galleryDescription, setGalleryDescription] = useState("");
@@ -471,6 +475,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       }
 
       updateSetting("site_favicon_url", uploadedUrl);
+      setSelectedFaviconFileName("");
+      if (faviconUploadInputRef.current) {
+        faviconUploadInputRef.current.value = "";
+      }
       toast.success("Иконка вкладки загружена");
     } catch (error) {
       toast.error("Не удалось загрузить иконку");
@@ -1128,6 +1136,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const filteredGalleryPickerImages = galleryImages.filter((image) => {
     const q = mediaGallerySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
+  });
+
+  const filteredFaviconGalleryImages = galleryImages.filter((image) => {
+    const q = faviconGallerySearch.trim().toLowerCase();
     if (!q) return true;
     return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
   });
@@ -1837,14 +1851,46 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           onChange={(e) => updateSetting("site_favicon_url", e.target.value)}
                           placeholder="https://cdn.example.com/favicon.ico"
                         />
+                        {!!settings.site_favicon_url && (
+                          <div className="flex items-center gap-3 border border-gray-200 p-2 max-w-md">
+                            <img
+                              src={settings.site_favicon_url}
+                              alt="favicon preview"
+                              className="w-8 h-8 object-contain bg-gray-50"
+                            />
+                            <span className="text-xs text-muted-foreground truncate">{settings.site_favicon_url}</span>
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2">
-                          <Input
+                          <input
+                            ref={faviconUploadInputRef}
                             type="file"
                             accept="image/png,image/x-icon,image/svg+xml,image/webp,image/jpeg"
-                            onChange={(e) => handleFaviconUpload(e.target.files?.[0] || null)}
-                            disabled={faviconUploading}
-                            className="max-w-sm"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setSelectedFaviconFileName(file?.name || "");
+                              handleFaviconUpload(file);
+                            }}
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-none"
+                            onClick={() => faviconUploadInputRef.current?.click()}
+                            disabled={faviconUploading}
+                          >
+                            <Upload className="w-4 h-4 mr-2" />
+                            {faviconUploading ? "Загрузка..." : (selectedFaviconFileName ? `Файл: ${selectedFaviconFileName}` : "Загрузить файл")}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-none"
+                            onClick={() => setIsFaviconGalleryPickerOpen(true)}
+                          >
+                            <Images className="w-4 h-4 mr-2" /> Выбрать из галереи
+                          </Button>
                           {faviconUploading && (
                             <span className="text-sm text-muted-foreground">Загрузка...</span>
                           )}
@@ -1867,6 +1913,41 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </TabsContent>
           </Tabs>
+
+          <Dialog open={isFaviconGalleryPickerOpen} onOpenChange={setIsFaviconGalleryPickerOpen}>
+            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Выбрать favicon из галереи</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <Input
+                  placeholder="Поиск по имени/описанию"
+                  value={faviconGallerySearch}
+                  onChange={(e) => setFaviconGallerySearch(e.target.value)}
+                  className="rounded-none"
+                />
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {filteredFaviconGalleryImages.map((image) => (
+                    <button
+                      type="button"
+                      key={`favicon-gallery-${image.id}`}
+                      className="border border-gray-200 text-left hover:border-black transition-colors"
+                      onClick={() => {
+                        updateSetting("site_favicon_url", image.url);
+                        setIsFaviconGalleryPickerOpen(false);
+                        setFaviconGallerySearch("");
+                      }}
+                    >
+                      <img src={image.url} alt={image.name} className="w-full h-24 object-cover bg-gray-100" />
+                      <div className="p-2">
+                        <div className="text-xs font-semibold truncate">{image.name}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <Dialog
             open={isTelegramBotDialogOpen}
