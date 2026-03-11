@@ -255,6 +255,7 @@ interface GalleryImage {
   url: string;
   fileSize: number;
   existsOnDisk: boolean;
+  createdAt?: number;
 }
 
 
@@ -348,6 +349,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [galleryName, setGalleryName] = useState("");
   const [galleryDescription, setGalleryDescription] = useState("");
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryViewMode, setGalleryViewMode] = useState<"grid" | "table">("grid");
+  const [editingGalleryImageId, setEditingGalleryImageId] = useState<string | null>(null);
+  const [editingGalleryName, setEditingGalleryName] = useState("");
+  const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
   const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
 
   useEffect(() => {
@@ -532,6 +538,42 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       toast.error("Не удалось восстановить изображения");
     }
   };
+
+  const startEditGalleryImage = (image: GalleryImage) => {
+    setEditingGalleryImageId(image.id);
+    setEditingGalleryName(image.name || "");
+    setEditingGalleryDescription(image.description || "");
+  };
+
+  const cancelEditGalleryImage = () => {
+    setEditingGalleryImageId(null);
+    setEditingGalleryName("");
+    setEditingGalleryDescription("");
+  };
+
+  const saveGalleryImageMeta = async () => {
+    if (!editingGalleryImageId) return;
+    try {
+      await FLOW.updateAdminGalleryImage({
+        input: {
+          id: editingGalleryImageId,
+          name: editingGalleryName,
+          description: editingGalleryDescription
+        }
+      });
+      await fetchAdminData();
+      toast.success("Изображение обновлено");
+      cancelEditGalleryImage();
+    } catch {
+      toast.error("Не удалось обновить метаданные изображения");
+    }
+  };
+
+  const filteredGalleryImages = galleryImages.filter((image) => {
+    const q = gallerySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
+  });
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message.trim()) {
@@ -1138,7 +1180,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             <div className="space-y-4">
               <div className="border border-gray-200 p-4 space-y-3">
                 <h2 className="text-2xl font-black uppercase">Галерея изображений</h2>
-                <div className="grid md:grid-cols-3 gap-3">
+                <div className="grid md:grid-cols-4 gap-3">
                   <Input
                     placeholder="Наименование"
                     value={galleryName}
@@ -1149,6 +1191,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     placeholder="Описание"
                     value={galleryDescription}
                     onChange={(e) => setGalleryDescription(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <Input
+                    placeholder="Поиск по имени/описанию"
+                    value={gallerySearch}
+                    onChange={(e) => setGallerySearch(e.target.value)}
                     className="rounded-none"
                   />
                   <div className="flex gap-2 items-center">
@@ -1165,16 +1213,54 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </Button>
                   </div>
                 </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={galleryViewMode === "grid" ? "default" : "outline"}
+                    className="rounded-none"
+                    onClick={() => setGalleryViewMode("grid")}
+                  >
+                    Плитка
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={galleryViewMode === "table" ? "default" : "outline"}
+                    className="rounded-none"
+                    onClick={() => setGalleryViewMode("table")}
+                  >
+                    Таблица
+                  </Button>
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-3 gap-4">
-                {galleryImages.map((image) => (
+              {galleryViewMode === "grid" ? (
+                <div className="grid md:grid-cols-3 gap-4">
+                  {filteredGalleryImages.map((image) => (
                   <div key={image.id} className="border border-gray-200 p-3 space-y-2">
                     <img src={image.url} alt={image.name} className="w-full h-52 object-cover bg-gray-100" />
-                    <div className="font-semibold">{image.name}</div>
-                    <div className="text-sm text-muted-foreground">{image.description || "Без описания"}</div>
+                    {editingGalleryImageId === image.id ? (
+                      <div className="space-y-2">
+                        <Input value={editingGalleryName} onChange={(e) => setEditingGalleryName(e.target.value)} className="rounded-none" />
+                        <Textarea value={editingGalleryDescription} onChange={(e) => setEditingGalleryDescription(e.target.value)} className="rounded-none min-h-20" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="font-semibold">{image.name}</div>
+                        <div className="text-sm text-muted-foreground">{image.description || "Без описания"}</div>
+                      </>
+                    )}
                     <div className="text-xs text-muted-foreground">{formatBytes(image.fileSize)} · {image.existsOnDisk ? "На диске" : "Только в БД"}</div>
                     <div className="flex gap-2">
+                      {editingGalleryImageId === image.id ? (
+                        <>
+                          <Button size="sm" variant="default" className="rounded-none" onClick={saveGalleryImageMeta}>Сохранить</Button>
+                          <Button size="sm" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage}>Отмена</Button>
+                        </>
+                      ) : (
+                        <Button size="sm" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)}>
+                          <Pencil className="w-3 h-3 mr-1" /> Изменить
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)}>
                         <Copy className="w-3 h-3 mr-1" /> Копировать
                       </Button>
@@ -1183,8 +1269,61 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </Button>
                     </div>
                   </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-gray-200 overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Превью</TableHead>
+                        <TableHead>Файл</TableHead>
+                        <TableHead>Описание</TableHead>
+                        <TableHead>Размер</TableHead>
+                        <TableHead>Статус</TableHead>
+                        <TableHead className="text-right">Действия</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredGalleryImages.map((image) => (
+                        <TableRow key={image.id}>
+                          <TableCell><img src={image.url} alt={image.name} className="w-16 h-12 object-cover bg-gray-100" /></TableCell>
+                          <TableCell className="font-semibold">
+                            {editingGalleryImageId === image.id ? (
+                              <Input value={editingGalleryName} onChange={(e) => setEditingGalleryName(e.target.value)} className="rounded-none" />
+                            ) : image.name}
+                          </TableCell>
+                          <TableCell>
+                            {editingGalleryImageId === image.id ? (
+                              <Textarea value={editingGalleryDescription} onChange={(e) => setEditingGalleryDescription(e.target.value)} className="rounded-none min-h-20" />
+                            ) : (image.description || "—")}
+                          </TableCell>
+                          <TableCell>{formatBytes(image.fileSize)}</TableCell>
+                          <TableCell>{image.existsOnDisk ? "На диске" : "Только в БД"}</TableCell>
+                          <TableCell className="text-right space-x-2">
+                            {editingGalleryImageId === image.id ? (
+                              <>
+                                <Button size="sm" variant="default" className="rounded-none" onClick={saveGalleryImageMeta}>Сохранить</Button>
+                                <Button size="sm" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage}>Отмена</Button>
+                              </>
+                            ) : (
+                              <Button size="sm" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)}>
+                                <Pencil className="w-3 h-3 mr-1" /> Изменить
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)}>
+                              <Copy className="w-3 h-3 mr-1" /> Копировать
+                            </Button>
+                            <Button size="sm" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)}>
+                              <Trash2 className="w-3 h-3 mr-1" /> Удалить
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           </TabsContent>
 

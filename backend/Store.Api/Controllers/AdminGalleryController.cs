@@ -32,7 +32,7 @@ public class AdminGalleryController : ControllerBase
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 
-        return Results.Ok(images.Select(MapGalleryImage));
+        return Results.Ok(images.Select(image => MapGalleryImage(image, Request.PathBase)));
     }
 
     [HttpPost]
@@ -76,7 +76,7 @@ public class AdminGalleryController : ControllerBase
 
         _db.GalleryImages.Add(image);
         await _db.SaveChangesAsync();
-        return Results.Ok(MapGalleryImage(image));
+        return Results.Ok(MapGalleryImage(image, Request.PathBase));
     }
 
     [HttpPatch("{id}")]
@@ -93,7 +93,7 @@ public class AdminGalleryController : ControllerBase
 
         image.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await _db.SaveChangesAsync();
-        return Results.Ok(MapGalleryImage(image));
+        return Results.Ok(MapGalleryImage(image, Request.PathBase));
     }
 
     [HttpDelete("{id}")]
@@ -120,7 +120,7 @@ public class AdminGalleryController : ControllerBase
         if (image is null) return Results.NotFound(new { detail = "Изображение не найдено." });
 
         await _galleryStorage.WriteImageToDiskAsync(image);
-        return Results.Ok(MapGalleryImage(image));
+        return Results.Ok(MapGalleryImage(image, Request.PathBase));
     }
 
     [HttpPost("restore-missing")]
@@ -131,9 +131,14 @@ public class AdminGalleryController : ControllerBase
         return Results.Ok(new { restored });
     }
 
-    private object MapGalleryImage(GalleryImage image)
+    private object MapGalleryImage(GalleryImage image, PathString pathBase)
     {
         var fullPath = _galleryStorage.BuildAbsolutePath(image.DiskPath);
+        var relativeUrl = _galleryStorage.BuildPublicUrl(image.DiskPath);
+        var url = string.IsNullOrWhiteSpace(pathBase.Value)
+            ? relativeUrl
+            : $"{pathBase.Value}{relativeUrl}";
+
         return new
         {
             image.Id,
@@ -146,7 +151,7 @@ public class AdminGalleryController : ControllerBase
             image.CreatedAt,
             image.UpdatedAt,
             diskPath = image.DiskPath,
-            url = _galleryStorage.BuildPublicUrl(image.DiskPath),
+            url,
             existsOnDisk = System.IO.File.Exists(fullPath)
         };
     }
