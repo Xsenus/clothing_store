@@ -1,5 +1,9 @@
 import { useEffect } from "react";
-import { fetchPublicSettings, getCachedPublicSettings } from "@/lib/site-settings";
+import {
+  fetchPublicSettings,
+  getCachedPublicSettings,
+  SITE_BRANDING_UPDATED_EVENT,
+} from "@/lib/site-settings";
 
 const DEFAULT_TITLE = "VibeFlow";
 
@@ -13,32 +17,38 @@ const ensureFaviconElement = () => {
   return link;
 };
 
-const applyBranding = (settings) => {
+const applyBranding = (settings, defaultFaviconUrl) => {
   const nextTitle = settings?.site_title?.trim() || DEFAULT_TITLE;
   document.title = nextTitle;
 
-  const faviconUrl = settings?.site_favicon_url?.trim();
-  if (!faviconUrl) return;
-
   const faviconLink = ensureFaviconElement();
-  faviconLink.setAttribute("href", faviconUrl);
+  const faviconUrl = settings?.site_favicon_url?.trim();
+  faviconLink.setAttribute("href", faviconUrl || defaultFaviconUrl || "/favicon.ico");
 };
 
 export default function SiteBranding() {
   useEffect(() => {
-    applyBranding(getCachedPublicSettings());
+    const defaultFaviconUrl = ensureFaviconElement().getAttribute("href") || "/favicon.ico";
+
+    applyBranding(getCachedPublicSettings(), defaultFaviconUrl);
 
     let mounted = true;
     const sync = async () => {
       const settings = await fetchPublicSettings();
       if (!mounted) return;
-      applyBranding(settings);
+      applyBranding(settings, defaultFaviconUrl);
     };
 
+    const handleBrandingUpdate = (event) => {
+      applyBranding(event?.detail || getCachedPublicSettings(), defaultFaviconUrl);
+    };
+
+    window.addEventListener(SITE_BRANDING_UPDATED_EVENT, handleBrandingUpdate);
     sync();
 
     return () => {
       mounted = false;
+      window.removeEventListener(SITE_BRANDING_UPDATED_EVENT, handleBrandingUpdate);
     };
   }, []);
 
