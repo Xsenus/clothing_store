@@ -25,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useRef, useState } from 'react';
+import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause } from 'lucide-react';
@@ -333,6 +334,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   });
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [faviconUploading, setFaviconUploading] = useState(false);
   const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
 
   useEffect(() => {
@@ -418,6 +420,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
       await FLOW.adminSaveSettings({ input: mergedSettings });
       setSettings(mergedSettings);
+      setCachedPublicSettings(mergedSettings);
       toast.success("Настройки сохранены");
     } catch (error) {
       toast.error("Не удалось сохранить настройки");
@@ -426,6 +429,28 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleFaviconUpload = async (file: File | null) => {
+    if (!file) return;
+    setFaviconUploading(true);
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append("files", file);
+      const res = await FLOW.adminUpload({ input: formDataUpload });
+      const uploadedUrl = res?.urls?.[0];
+      if (!uploadedUrl) {
+        toast.error("Не удалось получить URL загруженной иконки");
+        return;
+      }
+
+      updateSetting("site_favicon_url", uploadedUrl);
+      toast.success("Иконка вкладки загружена");
+    } catch (error) {
+      toast.error("Не удалось загрузить иконку");
+    } finally {
+      setFaviconUploading(false);
+    }
   };
 
   const isSettingEnabled = (key: string, fallback = false) => {
@@ -1449,6 +1474,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           onChange={(e) => updateSetting("site_favicon_url", e.target.value)}
                           placeholder="https://cdn.example.com/favicon.ico"
                         />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Input
+                            type="file"
+                            accept="image/png,image/x-icon,image/svg+xml,image/webp,image/jpeg"
+                            onChange={(e) => handleFaviconUpload(e.target.files?.[0] || null)}
+                            disabled={faviconUploading}
+                            className="max-w-sm"
+                          />
+                          {faviconUploading && (
+                            <span className="text-sm text-muted-foreground">Загрузка...</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Можно вставить внешний URL или загрузить файл. Рекомендуемый размер: 32x32 или 48x48 px.
+                        </p>
                       </div>
                     </div>
                   )}
