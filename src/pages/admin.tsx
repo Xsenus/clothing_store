@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -354,6 +354,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingGalleryImageId, setEditingGalleryImageId] = useState<string | null>(null);
   const [editingGalleryName, setEditingGalleryName] = useState("");
   const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
+  const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedGalleryFileName, setSelectedGalleryFileName] = useState("");
   const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
 
   useEffect(() => {
@@ -499,6 +501,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       await FLOW.uploadAdminGalleryImage({ input: payload });
       setGalleryName("");
       setGalleryDescription("");
+      setSelectedGalleryFileName("");
+      if (galleryFileInputRef.current) {
+        galleryFileInputRef.current.value = "";
+      }
       await fetchAdminData();
       toast.success("Изображение добавлено в галерею");
     } catch {
@@ -1200,13 +1206,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     className="rounded-none"
                   />
                   <div className="flex gap-2 items-center">
-                    <Input
+                    <input
+                      ref={galleryFileInputRef}
                       type="file"
                       accept="image/*"
-                      onChange={(e) => uploadGalleryImage(e.target.files?.[0] || null)}
-                      disabled={galleryUploading}
-                      className="rounded-none"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setSelectedGalleryFileName(file?.name || "");
+                        uploadGalleryImage(file);
+                      }}
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-none"
+                      disabled={galleryUploading}
+                      onClick={() => galleryFileInputRef.current?.click()}
+                    >
+                      <ImagePlus className="w-4 h-4 mr-2" />
+                      {galleryUploading ? "Загрузка..." : (selectedGalleryFileName ? `Файл: ${selectedGalleryFileName}` : "Загрузить файл")}
+                    </Button>
                     <Button type="button" variant="outline" className="rounded-none" onClick={restoreMissingGalleryImages}>
                       <RefreshCcw className="w-4 h-4 mr-1" />
                       Восстановить
@@ -1253,19 +1273,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="flex gap-2">
                       {editingGalleryImageId === image.id ? (
                         <>
-                          <Button size="sm" variant="default" className="rounded-none" onClick={saveGalleryImageMeta}>Сохранить</Button>
-                          <Button size="sm" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage}>Отмена</Button>
+                          <Button size="icon" variant="default" className="rounded-none" onClick={saveGalleryImageMeta} aria-label="Сохранить">
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button size="icon" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage} aria-label="Отмена">
+                            <Ban className="w-4 h-4" />
+                          </Button>
                         </>
                       ) : (
-                        <Button size="sm" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)}>
-                          <Pencil className="w-3 h-3 mr-1" /> Изменить
+                        <Button size="icon" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)} aria-label="Изменить">
+                          <Pencil className="w-4 h-4" />
                         </Button>
                       )}
-                      <Button size="sm" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)}>
-                        <Copy className="w-3 h-3 mr-1" /> Копировать
+                      <Button size="icon" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)} aria-label="Копировать на диск">
+                        <Copy className="w-4 h-4" />
                       </Button>
-                      <Button size="sm" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)}>
-                        <Trash2 className="w-3 h-3 mr-1" /> Удалить
+                      <Button size="icon" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)} aria-label="Удалить">
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
@@ -1303,19 +1327,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <TableCell className="text-right space-x-2">
                             {editingGalleryImageId === image.id ? (
                               <>
-                                <Button size="sm" variant="default" className="rounded-none" onClick={saveGalleryImageMeta}>Сохранить</Button>
-                                <Button size="sm" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage}>Отмена</Button>
+                                <Button size="icon" variant="default" className="rounded-none" onClick={saveGalleryImageMeta} aria-label="Сохранить">
+                                  <Check className="w-4 h-4" />
+                                </Button>
+                                <Button size="icon" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage} aria-label="Отмена">
+                                  <Ban className="w-4 h-4" />
+                                </Button>
                               </>
                             ) : (
-                              <Button size="sm" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)}>
-                                <Pencil className="w-3 h-3 mr-1" /> Изменить
+                              <Button size="icon" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)} aria-label="Изменить">
+                                <Pencil className="w-4 h-4" />
                               </Button>
                             )}
-                            <Button size="sm" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)}>
-                              <Copy className="w-3 h-3 mr-1" /> Копировать
+                            <Button size="icon" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)} aria-label="Копировать на диск">
+                              <Copy className="w-4 h-4" />
                             </Button>
-                            <Button size="sm" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)}>
-                              <Trash2 className="w-3 h-3 mr-1" /> Удалить
+                            <Button size="icon" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)} aria-label="Удалить">
+                              <Trash2 className="w-4 h-4" />
                             </Button>
                           </TableCell>
                         </TableRow>

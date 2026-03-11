@@ -8,6 +8,17 @@ const API_ORIGIN = (() => {
   }
 })();
 
+const API_PATH_BASE = (() => {
+  try {
+    const parsed = new URL(API_URL, WINDOW_ORIGIN);
+    const pathname = parsed.pathname || "";
+    if (!pathname || pathname === "/") return "";
+    return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  } catch {
+    return "";
+  }
+})();
+
 const toAbsoluteMediaUrl = (url) => {
   if (!url) return url;
   const normalizedUrl = String(url).trim();
@@ -24,6 +35,10 @@ const toAbsoluteMediaUrl = (url) => {
   }
 
   if (normalizedUrl.startsWith("/")) {
+    if (API_PATH_BASE && normalizedUrl.startsWith("/uploads/")) {
+      return `${API_ORIGIN}${API_PATH_BASE}${normalizedUrl}`;
+    }
+
     return `${API_ORIGIN}${normalizedUrl}`;
   }
 
