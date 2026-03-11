@@ -267,7 +267,10 @@ public class DatabaseInitializer
             Token = token.Value.Trim(),
             Username = username?.Value?.Trim().TrimStart('@'),
             Enabled = true,
+            UseForLogin = true,
+            AutoRepliesEnabled = true,
             CommandsJson = "[]",
+            ReplyTemplatesJson = "[]",
             CreatedAt = now,
             UpdatedAt = now
         });

@@ -12,11 +12,13 @@ import { Authenticated, useAuthActions } from "@/context/AuthContext";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { toast } from "sonner";
 import AdminPage from "./admin";
+import { useNavigate } from "react-router";
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState("orders");
   const [loading, setLoading] = useState(true);
   const { signOut } = useAuthActions();
+  const navigate = useNavigate();
 
   const [orders, setOrders] = useState([]);
   const [likedProductIds, setLikedProductIds] = useState([]);
@@ -26,6 +28,13 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const fetchData = async () => {
+      const token = localStorage.getItem("authToken");
+      const refreshToken = localStorage.getItem("refreshToken");
+      if (!token && !refreshToken) {
+        navigate("/", { replace: true });
+        return;
+      }
+
       setLoading(true);
       try {
         const [ordersRes, likesRes, productsRes, profileRes] = await Promise.all([
@@ -43,14 +52,21 @@ export default function ProfilePage() {
           setIsAdmin(!!profileRes.isAdmin);
         }
       } catch (error) {
-        console.error("Failed to fetch profile data:", error);
+        const status = typeof error === "object" && error && "status" in error
+          ? Number(error.status)
+          : null;
+        if (status === 401) {
+          await signOut();
+          navigate("/", { replace: true });
+          return;
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, []);
+  }, [navigate, signOut]);
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();

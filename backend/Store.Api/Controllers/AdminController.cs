@@ -210,6 +210,10 @@ public class AdminController : ControllerBase
         {
             return Results.BadRequest(new { detail = ex.Message });
         }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpGet("telegram-bots")]
@@ -232,6 +236,10 @@ public class AdminController : ControllerBase
         {
             return Results.BadRequest(new { detail = ex.Message });
         }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpPatch("telegram-bots/{id}")]
@@ -245,6 +253,10 @@ public class AdminController : ControllerBase
             return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
         }
         catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+        catch (Exception ex)
         {
             return Results.BadRequest(new { detail = ex.Message });
         }
@@ -269,6 +281,10 @@ public class AdminController : ControllerBase
             return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
         }
         catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+        catch (Exception ex)
         {
             return Results.BadRequest(new { detail = ex.Message });
         }

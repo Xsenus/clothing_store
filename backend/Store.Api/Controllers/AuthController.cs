@@ -309,6 +309,17 @@ public class AuthController : ControllerBase
 
     private async Task<string?> GetSettingOrConfigAsync(string key, string configPath)
     {
+        if (key == "telegram_bot_token")
+        {
+            var loginBotToken = await _db.TelegramBots
+                .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Token))
+                .OrderByDescending(x => x.UpdatedAt)
+                .Select(x => x.Token)
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(loginBotToken))
+                return loginBotToken;
+        }
+
         var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
         if (row is not null && !string.IsNullOrWhiteSpace(row.Value))
             return row.Value;
@@ -317,7 +328,8 @@ public class AuthController : ControllerBase
         {
             var botToken = await _db.TelegramBots
                 .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Token))
-                .OrderByDescending(x => x.UpdatedAt)
+                .OrderByDescending(x => x.UseForLogin)
+                .ThenByDescending(x => x.UpdatedAt)
                 .Select(x => x.Token)
                 .FirstOrDefaultAsync();
             if (!string.IsNullOrWhiteSpace(botToken))

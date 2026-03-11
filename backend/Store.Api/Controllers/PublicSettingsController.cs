@@ -40,7 +40,31 @@ public class PublicSettingsController : ControllerBase
             .Where(x => PublicKeys.Contains(x.Key))
             .ToListAsync();
 
-        return Results.Ok(settings.ToDictionary(x => x.Key, x => x.Value));
+        var result = settings.ToDictionary(x => x.Key, x => x.Value);
+
+        var loginBotUsername = await _db.TelegramBots
+            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Username))
+            .OrderByDescending(x => x.UpdatedAt)
+            .Select(x => x.Username)
+            .FirstOrDefaultAsync();
+
+        if (!string.IsNullOrWhiteSpace(loginBotUsername))
+            result["telegram_bot_username"] = loginBotUsername!;
+
+        if (!result.TryGetValue("telegram_bot_username", out var configuredLoginBotUsername) || string.IsNullOrWhiteSpace(configuredLoginBotUsername))
+        {
+            var fallbackUsername = await _db.TelegramBots
+                .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Username))
+                .OrderByDescending(x => x.UseForLogin)
+                .ThenByDescending(x => x.UpdatedAt)
+                .Select(x => x.Username)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(fallbackUsername))
+                result["telegram_bot_username"] = fallbackUsername!;
+        }
+
+        return Results.Ok(result);
     }
 }
 

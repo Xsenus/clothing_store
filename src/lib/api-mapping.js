@@ -104,12 +104,34 @@ const request = async (path, options = {}, retry = true) => {
     if (refreshed) {
       return request(path, options, false);
     }
+
+    clearAuthTokens();
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/profile")) {
+      window.location.replace("/");
+    }
   }
 
   if (!res.ok) {
     const text = await res.text();
-    const error = new Error(text || `Request failed: ${res.status}`);
+    let payload = null;
+    let message = text || `Request failed: ${res.status}`;
+
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+        if (typeof payload?.detail === "string" && payload.detail.trim()) {
+          message = payload.detail;
+        } else if (typeof payload?.message === "string" && payload.message.trim()) {
+          message = payload.message;
+        }
+      } catch {
+        payload = null;
+      }
+    }
+
+    const error = new Error(message);
     error.status = res.status;
+    error.payload = payload;
     throw error;
   }
 

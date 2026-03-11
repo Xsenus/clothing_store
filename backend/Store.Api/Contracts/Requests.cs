@@ -79,6 +79,13 @@ public record YandexDeliveryCalculatePayload(string ToAddress, decimal? WeightKg
 
 public record TelegramBotCommandPayload(string Command, string Description);
 
+public record TelegramBotReplyTemplatePayload(
+    string Key,
+    string Label,
+    string? Description,
+    bool Enabled,
+    string Text);
+
 public record TelegramBotPayload(
     string Name,
     string Description,
@@ -87,7 +94,10 @@ public record TelegramBotPayload(
     string Token,
     string? Username,
     bool Enabled,
-    List<TelegramBotCommandPayload>? Commands);
+    bool UseForLogin,
+    bool AutoRepliesEnabled,
+    List<TelegramBotCommandPayload>? Commands,
+    List<TelegramBotReplyTemplatePayload>? ReplyTemplates);
 
 public record TelegramBotPatchPayload(
     string? Name,
@@ -97,7 +107,10 @@ public record TelegramBotPatchPayload(
     string? Token,
     string? Username,
     bool? Enabled,
-    List<TelegramBotCommandPayload>? Commands);
+    bool? UseForLogin,
+    bool? AutoRepliesEnabled,
+    List<TelegramBotCommandPayload>? Commands,
+    List<TelegramBotReplyTemplatePayload>? ReplyTemplates);
 
 
 public record TelegramBotValidatePayload(string Token);
