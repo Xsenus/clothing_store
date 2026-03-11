@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -248,6 +248,15 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
+interface GalleryImage {
+  id: string;
+  name: string;
+  description?: string | null;
+  url: string;
+  fileSize: number;
+  existsOnDisk: boolean;
+}
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
@@ -290,6 +299,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -335,6 +345,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
+  const [galleryUploading, setGalleryUploading] = useState(false);
+  const [galleryName, setGalleryName] = useState("");
+  const [galleryDescription, setGalleryDescription] = useState("");
   const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
 
   useEffect(() => {
@@ -366,16 +379,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
-        FLOW.adminGetTelegramBots()
+        FLOW.adminGetTelegramBots(),
+        FLOW.getAdminGalleryImages()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
+      setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -456,6 +471,66 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const isSettingEnabled = (key: string, fallback = false) => {
     const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
     return value === "true" || value === "1" || value === "on";
+  };
+
+  const formatBytes = (value?: number) => {
+    if (!value || value <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const size = value / (1024 ** index);
+    return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  };
+
+  const uploadGalleryImage = async (file: File | null) => {
+    if (!file) return;
+
+    setGalleryUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("name", galleryName || file.name);
+      payload.append("description", galleryDescription);
+      await FLOW.uploadAdminGalleryImage({ input: payload });
+      setGalleryName("");
+      setGalleryDescription("");
+      await fetchAdminData();
+      toast.success("Изображение добавлено в галерею");
+    } catch {
+      toast.error("Не удалось загрузить изображение в галерею");
+    } finally {
+      setGalleryUploading(false);
+    }
+  };
+
+  const deleteGalleryImage = async (image: GalleryImage) => {
+    if (!confirm(`Удалить изображение «${image.name}»?`)) return;
+    try {
+      await FLOW.deleteAdminGalleryImage({ input: { id: image.id } });
+      await fetchAdminData();
+      toast.success("Изображение удалено");
+    } catch {
+      toast.error("Не удалось удалить изображение");
+    }
+  };
+
+  const copyGalleryImageToDisk = async (image: GalleryImage) => {
+    try {
+      await FLOW.copyAdminGalleryImageToDisk({ input: { id: image.id } });
+      await fetchAdminData();
+      toast.success("Изображение скопировано на диск");
+    } catch {
+      toast.error("Не удалось скопировать изображение");
+    }
+  };
+
+  const restoreMissingGalleryImages = async () => {
+    try {
+      const result = await FLOW.restoreMissingAdminGalleryImages();
+      await fetchAdminData();
+      toast.success(`Восстановлено файлов: ${result?.restored ?? 0}`);
+    } catch {
+      toast.error("Не удалось восстановить изображения");
+    }
   };
 
   const getErrorMessage = (error: unknown, fallback: string) => {
@@ -1008,6 +1083,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
+              <TabsTrigger value="gallery" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ГАЛЕРЕЯ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
             </TabsList>
 
@@ -1056,6 +1132,60 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </TableBody>
             </Table>
           </div>
+          </TabsContent>
+
+          <TabsContent value="gallery" className="mt-0">
+            <div className="space-y-4">
+              <div className="border border-gray-200 p-4 space-y-3">
+                <h2 className="text-2xl font-black uppercase">Галерея изображений</h2>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <Input
+                    placeholder="Наименование"
+                    value={galleryName}
+                    onChange={(e) => setGalleryName(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <Input
+                    placeholder="Описание"
+                    value={galleryDescription}
+                    onChange={(e) => setGalleryDescription(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => uploadGalleryImage(e.target.files?.[0] || null)}
+                      disabled={galleryUploading}
+                      className="rounded-none"
+                    />
+                    <Button type="button" variant="outline" className="rounded-none" onClick={restoreMissingGalleryImages}>
+                      <RefreshCcw className="w-4 h-4 mr-1" />
+                      Восстановить
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                {galleryImages.map((image) => (
+                  <div key={image.id} className="border border-gray-200 p-3 space-y-2">
+                    <img src={image.url} alt={image.name} className="w-full h-52 object-cover bg-gray-100" />
+                    <div className="font-semibold">{image.name}</div>
+                    <div className="text-sm text-muted-foreground">{image.description || "Без описания"}</div>
+                    <div className="text-xs text-muted-foreground">{formatBytes(image.fileSize)} · {image.existsOnDisk ? "На диске" : "Только в БД"}</div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)}>
+                        <Copy className="w-3 h-3 mr-1" /> Копировать
+                      </Button>
+                      <Button size="sm" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)}>
+                        <Trash2 className="w-3 h-3 mr-1" /> Удалить
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="users" className="mt-0">

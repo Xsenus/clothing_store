@@ -224,6 +224,44 @@ public class TelegramBotSubscriber
     public long UpdatedAt { get; set; }
 }
 
+[Table("gallery_images")]
+public class GalleryImage
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("content_type")]
+    public string ContentType { get; set; } = "application/octet-stream";
+
+    [Column("file_extension")]
+    public string FileExtension { get; set; } = string.Empty;
+
+    [Column("file_name")]
+    public string FileName { get; set; } = string.Empty;
+
+    [Column("disk_path")]
+    public string DiskPath { get; set; } = string.Empty;
+
+    [Column("file_size")]
+    public long FileSize { get; set; }
+
+    [Column("binary_data")]
+    public byte[] BinaryData { get; set; } = [];
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// Представляет код подтверждения или сброса.
 /// </summary>

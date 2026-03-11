@@ -253,6 +253,60 @@ export const FLOW = {
     return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
+  getAdminGalleryImages: async () => {
+    const images = await request("/admin/gallery");
+    return Array.isArray(images)
+      ? images.map((item) => ({
+        ...item,
+        url: toAbsoluteMediaUrl(item.url),
+      }))
+      : [];
+  },
+
+  uploadAdminGalleryImage: async ({ input }) => {
+    const image = await request("/admin/gallery", {
+      method: "POST",
+      body: input,
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  updateAdminGalleryImage: async ({ input }) => {
+    const image = await request(`/admin/gallery/${input.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input.name, description: input.description }),
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  deleteAdminGalleryImage: async ({ input }) => request(`/admin/gallery/${input.id}`, {
+    method: "DELETE",
+  }),
+
+  copyAdminGalleryImageToDisk: async ({ input }) => {
+    const image = await request(`/admin/gallery/${input.id}/copy-to-disk`, {
+      method: "POST",
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  restoreMissingAdminGalleryImages: async () => request("/admin/gallery/restore-missing", {
+    method: "POST",
+  }),
+
   createOrder: async ({ input }) => request("/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
