@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -356,7 +356,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
   const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedGalleryFileName, setSelectedGalleryFileName] = useState("");
-  const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
+  const [isMediaGalleryPickerOpen, setIsMediaGalleryPickerOpen] = useState(false);
+  const [mediaGallerySlot, setMediaGallerySlot] = useState<number | null>(null);
+  const [mediaGallerySearch, setMediaGallerySearch] = useState("");
+  const mediaGalleryUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -883,7 +886,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         category: product.category,
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
-        media: mediaList,
+        media: mediaList.length > 0 ? mediaList : [{ type: "image", url: "" }],
         sizes: product.sizes,
         isNew: product.isNew,
         isPopular: product.isPopular,
@@ -907,7 +910,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         category: "",
         images: "",
         videos: "",
-        media: [],
+        media: [{ type: "image", url: "" }],
         sizes: [],
         isNew: false,
         isPopular: false,
@@ -1065,6 +1068,69 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       return { ...prev, media };
     });
   };
+
+  const addMediaSlot = () => {
+    setFormData((prev) => ({
+      ...prev,
+      media: [...prev.media, { type: "image", url: "" }]
+    }));
+  };
+
+  const removeMediaSlot = (index: number) => {
+    setFormData((prev) => {
+      const nextMedia = prev.media.filter((_, mediaIndex) => mediaIndex !== index - 1);
+      return {
+        ...prev,
+        media: nextMedia.length > 0 ? nextMedia : [{ type: "image", url: "" }]
+      };
+    });
+  };
+
+  const openMediaGalleryPicker = (slot: number) => {
+    setMediaGallerySlot(slot);
+    setMediaGallerySearch("");
+    setIsMediaGalleryPickerOpen(true);
+  };
+
+  const selectMediaFromGallery = (url: string) => {
+    if (!mediaGallerySlot) return;
+    setMediaSlot(mediaGallerySlot, "image", url);
+    setIsMediaGalleryPickerOpen(false);
+    setMediaGallerySlot(null);
+  };
+
+  const uploadMediaToGalleryAndAssign = async (file: File | null, slot: number) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("name", file.name);
+      const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
+      if (uploaded?.url) {
+        setMediaSlot(slot, file.type.startsWith("video") ? "video" : "image", uploaded.url);
+        await fetchAdminData();
+        toast.success("Файл загружен в галерею и выбран");
+      }
+    } catch {
+      toast.error("Не удалось загрузить файл в галерею");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadFromPickerToGallery = async (file: File | null) => {
+    if (!file || !mediaGallerySlot) return;
+    await uploadMediaToGalleryAndAssign(file, mediaGallerySlot);
+    setIsMediaGalleryPickerOpen(false);
+    setMediaGallerySlot(null);
+  };
+
+  const filteredGalleryPickerImages = galleryImages.filter((image) => {
+    const q = mediaGallerySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
+  });
 
   const runSeedDemoData = async () => {
     setOperationsLoading(true);
@@ -2179,11 +2245,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-3">
                   <Label>Медиа (по порядку)</Label>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">Можно добавить любое количество фото/видео. Поддерживается выбор из галереи.</p>
+                    <Button type="button" size="sm" variant="outline" className="rounded-none" onClick={addMediaSlot}>
+                      <PlusCircle className="w-4 h-4 mr-1" /> Добавить блок
+                    </Button>
+                  </div>
                   <div className="space-y-3">
-                    {mediaSlots.map((slot) => {
-                      const item = formData.media[slot - 1] || { type: "image", url: "" };
+                    {formData.media.map((item, mediaIndex) => {
+                      const slot = mediaIndex + 1;
                       return (
-                        <div key={`media-slot-${slot}`} className="grid grid-cols-[40px_120px_1fr_120px] items-center gap-3">
+                        <div key={`media-slot-${slot}`} className="grid grid-cols-[40px_120px_1fr_120px_120px_40px] items-center gap-3">
                           <div className="w-10 h-10 border border-black flex items-center justify-center font-bold">
                             {slot}
                           </div>
@@ -2211,6 +2283,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               disabled={uploading}
                             />
                           </label>
+                          <label className="inline-flex items-center justify-center h-10 border border-black font-bold cursor-pointer">
+                            В галерею
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => uploadMediaToGalleryAndAssign(e.target.files?.[0] || null, slot)}
+                              disabled={uploading}
+                            />
+                          </label>
+                          <Button type="button" size="icon" variant="outline" className="rounded-none h-10 w-10" onClick={() => removeMediaSlot(slot)}>
+                            <MinusCircle className="w-4 h-4" />
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" className="rounded-none col-span-6 justify-start" onClick={() => openMediaGalleryPicker(slot)}>
+                            <Images className="w-4 h-4 mr-2" /> Выбрать из галереи
+                          </Button>
                         </div>
                       );
                     })}
@@ -2378,6 +2466,59 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </DialogFooter>
               </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isMediaGalleryPickerOpen} onOpenChange={setIsMediaGalleryPickerOpen}>
+            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Выбрать изображение из галереи</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Поиск по имени/описанию"
+                    value={mediaGallerySearch}
+                    onChange={(e) => setMediaGallerySearch(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <input
+                    ref={mediaGalleryUploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => uploadFromPickerToGallery(e.target.files?.[0] || null)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => mediaGalleryUploadInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Загрузить в галерею
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {filteredGalleryPickerImages.map((image) => (
+                    <button
+                      type="button"
+                      key={`picker-${image.id}`}
+                      className="border border-gray-200 text-left hover:border-black transition-colors"
+                      onClick={() => selectMediaFromGallery(image.url)}
+                    >
+                      <img src={image.url} alt={image.name} className="w-full h-36 object-cover bg-gray-100" />
+                      <div className="p-2">
+                        <div className="text-sm font-semibold truncate">{image.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{image.description || 'Без описания'}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </DialogContent>
           </Dialog>
         </main>
