@@ -75,7 +75,7 @@ npm run build
 sudo mkdir -p /var/www/clothing-store
 sudo rsync -a --delete dist/ /var/www/clothing-store/
 
-dotnet publish backend/Store.Api/Store.Api.csproj -c Release
+dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store/backend/Store.Api/publish
 ```
 
 ## 7. systemd сервис backend

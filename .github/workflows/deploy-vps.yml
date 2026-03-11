@@ -28,6 +28,7 @@ jobs:
       BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE != '' && vars.BACKEND_SERVICE || 'clothing-store-api' }}
       DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
       BACKEND_HEALTHCHECK_URL: ${{ vars.BACKEND_HEALTHCHECK_URL != '' && vars.BACKEND_HEALTHCHECK_URL || 'http://127.0.0.1:3001/products' }}
+      BACKEND_DLL_PATH: ${{ vars.BACKEND_DLL_PATH != '' && vars.BACKEND_DLL_PATH || '/opt/clothing_store/backend/Store.Api/publish/Store.Api.dll' }}
     steps:
       - name: Validate required secrets
         run: |
@@ -43,22 +44,33 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_SSH_PORT != '' && vars.VPS_SSH_PORT || '22' }}
           script_stop: true
-          envs: APP_DIR,FRONTEND_DIST_DIR,BACKEND_SERVICE,DEPLOY_REF,BACKEND_HEALTHCHECK_URL
+          envs: APP_DIR,FRONTEND_DIST_DIR,BACKEND_SERVICE,DEPLOY_REF,BACKEND_HEALTHCHECK_URL,BACKEND_DLL_PATH
           script: |
             set -Eeuo pipefail
+
+            BACKEND_TMP_PUBLISH_DIR=""
 
             on_error() {
               echo "❌ Direct deploy failed"
               sudo systemctl status "$BACKEND_SERVICE" --no-pager || true
               sudo journalctl -u "$BACKEND_SERVICE" -n 100 --no-pager || true
             }
+
+            cleanup() {
+              if [[ -n "$BACKEND_TMP_PUBLISH_DIR" && -d "$BACKEND_TMP_PUBLISH_DIR" ]]; then
+                rm -rf "$BACKEND_TMP_PUBLISH_DIR"
+              fi
+            }
+
             trap on_error ERR
+            trap cleanup EXIT
 
             echo "==> Starting direct deploy"
             echo "APP_DIR=$APP_DIR"
             echo "DEPLOY_REF=$DEPLOY_REF"
             echo "FRONTEND_DIST_DIR=$FRONTEND_DIST_DIR"
             echo "BACKEND_SERVICE=$BACKEND_SERVICE"
+            echo "BACKEND_DLL_PATH=$BACKEND_DLL_PATH"
 
             echo "==> Updating source code"
             cd "$APP_DIR"
@@ -80,11 +92,31 @@ jobs:
             sudo mkdir -p "$FRONTEND_DIST_DIR"
             sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
 
-            echo "==> Publishing backend"
-            dotnet publish backend/Store.Api/Store.Api.csproj -c Release
+            BACKEND_PUBLISH_DIR="$(dirname "$BACKEND_DLL_PATH")"
 
-            echo "==> Restarting backend service"
-            sudo systemctl restart "$BACKEND_SERVICE"
+            echo "==> Validating backend runtime path from systemd"
+            SYSTEMD_EXEC_START="$(sudo systemctl show -p ExecStart --value "$BACKEND_SERVICE")"
+            if [[ "$SYSTEMD_EXEC_START" != *"$BACKEND_DLL_PATH"* ]]; then
+              echo "❌ BACKEND_DLL_PATH does not match systemd ExecStart"
+              echo "Configured BACKEND_DLL_PATH: $BACKEND_DLL_PATH"
+              echo "systemd ExecStart: $SYSTEMD_EXEC_START"
+              exit 1
+            fi
+
+            BACKEND_TMP_PUBLISH_DIR="$(mktemp -d /tmp/store-api-publish.XXXXXX)"
+
+            echo "==> Publishing backend to temporary directory: $BACKEND_TMP_PUBLISH_DIR"
+            dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o "$BACKEND_TMP_PUBLISH_DIR"
+
+            echo "==> Stopping backend service"
+            sudo systemctl stop "$BACKEND_SERVICE"
+
+            echo "==> Syncing backend artifacts to runtime directory: $BACKEND_PUBLISH_DIR"
+            sudo mkdir -p "$BACKEND_PUBLISH_DIR"
+            sudo rsync -a --delete "$BACKEND_TMP_PUBLISH_DIR"/ "$BACKEND_PUBLISH_DIR"/
+
+            echo "==> Starting backend service"
+            sudo systemctl start "$BACKEND_SERVICE"
             sleep 5
 
             echo "==> Running backend health check: $BACKEND_HEALTHCHECK_URL"

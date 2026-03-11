@@ -151,7 +151,16 @@ sudo -u postgres psql -d clothing_store -c "select now();"
 
 - `docs/TELEGRAM_BOT_404.md`
 
-Коротко:
+Что сделать:
+
+```bash
+cd /opt/clothing_store
+git pull
+npm ci && npm run build
+dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store/backend/Store.Api/publish
+sudo systemctl restart clothing-store-api
+sudo systemctl status clothing-store-api --no-pager
+```
 
 - Если в `journalctl` есть `Request reached the end of the middleware pipeline...` для `POST /admin/telegram-bots/validate` или `/check`, то маршрут отсутствует в **запущенном** backend-процессе.
 - Обычно это старый бинарник, отсутствие рестарта после деплоя или неверный upstream в nginx.
