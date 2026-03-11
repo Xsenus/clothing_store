@@ -20,6 +20,31 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return;
+          }
+
+          if (id.includes('framer-motion')) {
+            return 'motion-vendor';
+          }
+
+          if (id.includes('recharts')) {
+            return 'charts-vendor';
+          }
+
+          if (id.includes('@stripe') || id.includes('stripe')) {
+            return 'payments-vendor';
+          }
+
+          return 'vendor';
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

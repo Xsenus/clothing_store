@@ -10,6 +10,7 @@ import { useNavigate } from "react-router";
 import { Authenticated } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
+import PageSeo from "@/components/PageSeo";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -58,6 +59,12 @@ export default function OnboardingPage() {
   return (
     <Authenticated>
       <div className="min-h-screen flex flex-col bg-background text-foreground">
+        <PageSeo
+          title="Заполнение профиля"
+          description="Первичная настройка профиля пользователя fashiondemon."
+          canonicalPath="/onboarding"
+          robots="noindex,nofollow"
+        />
         <Header />
         <main className="flex-1 flex items-center justify-center p-4">
           <Card className="w-full max-w-lg border-black shadow-xl rounded-none">

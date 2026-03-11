@@ -11,6 +11,17 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { SlidersHorizontal } from 'lucide-react';
+import PageSeo from '@/components/PageSeo';
+
+const CATALOG_KEYWORDS = [
+  'каталог одежды',
+  'fashiondemon каталог',
+  'streetwear каталог',
+  'худи',
+  'футболки',
+  'верхняя одежда',
+  'аксессуары',
+];
 
 interface Product {
   _id: string;
@@ -314,6 +325,20 @@ export default function CatalogPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <PageSeo
+        title="Каталог одежды"
+        description="Каталог fashiondemon: верхняя одежда, худи, футболки, аксессуары и другие модели бренда."
+        canonicalPath="/catalog"
+        keywords={CATALOG_KEYWORDS}
+        structuredData={({ canonicalUrl, title }) => ({
+          "@context": "https://schema.org",
+          "@type": "CollectionPage",
+          name: title,
+          url: canonicalUrl,
+          description: "Каталог fashiondemon с коллекциями одежды и аксессуаров.",
+          inLanguage: "ru-RU",
+        })}
+      />
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-8 pt-28">

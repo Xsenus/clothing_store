@@ -261,7 +261,7 @@ interface GalleryImage {
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
-  site_title: "Fashiondemon",
+  site_title: "fashiondemon",
   site_favicon_url: "",
   privacy_policy: "",
   user_agreement: "",
