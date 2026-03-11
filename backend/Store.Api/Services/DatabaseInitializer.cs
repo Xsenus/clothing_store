@@ -100,6 +100,8 @@ public class DatabaseInitializer
 
         await EnsureDefaultUserAsync(db);
         await EnsureAdminUserAsync(db);
+        await EnsureDefaultAppSettingsAsync(db);
+        await EnsureLegacyTelegramBotMigratedAsync(db);
         await EnsureTestDataAsync(db);
     }
 
@@ -228,6 +230,49 @@ public class DatabaseInitializer
         await db.SaveChangesAsync();
     }
 
+
+    private async Task EnsureDefaultAppSettingsAsync(StoreDbContext db)
+    {
+        var title = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == "site_title");
+        if (title is null)
+        {
+            db.AppSettings.Add(new AppSetting { Key = "site_title", Value = "Fashiondemon" });
+            await db.SaveChangesAsync();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(title.Value))
+        {
+            title.Value = "Fashiondemon";
+            await db.SaveChangesAsync();
+        }
+    }
+
+    private async Task EnsureLegacyTelegramBotMigratedAsync(StoreDbContext db)
+    {
+        var hasBots = await db.TelegramBots.AnyAsync();
+        if (hasBots)
+            return;
+
+        var token = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == "telegram_bot_token");
+        if (token is null || string.IsNullOrWhiteSpace(token.Value))
+            return;
+
+        var username = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == "telegram_bot_username");
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        db.TelegramBots.Add(new TelegramBot
+        {
+            Name = "Default Telegram Bot",
+            Description = "Migrated from legacy single-bot settings",
+            Token = token.Value.Trim(),
+            Username = username?.Value?.Trim().TrimStart('@'),
+            Enabled = true,
+            CommandsJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+    }
     private async Task EnsureTestDataAsync(StoreDbContext db)
     {
         var seedTestData = _configuration.GetValue<bool?>("DatabaseInitialization:SeedTestData") ?? false;

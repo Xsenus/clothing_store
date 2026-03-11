@@ -29,6 +29,22 @@ import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
+interface TelegramBotCommand {
+  command: string;
+  description: string;
+}
+
+interface TelegramBot {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl?: string | null;
+  username?: string | null;
+  enabled: boolean;
+  commands: TelegramBotCommand[];
+  botInfo?: any;
+}
+
 interface Product {
   _id: string;
   name: string;
@@ -57,7 +73,7 @@ interface Product {
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
-  site_title: "",
+  site_title: "Fashiondemon",
   site_favicon_url: "",
   privacy_policy: "",
   user_agreement: "",
@@ -95,12 +111,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
+  const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
+  const [telegramBotForm, setTelegramBotForm] = useState({
+    name: "",
+    description: "",
+    imageUrl: "",
+    token: "",
+    username: "",
+    enabled: true,
+    commandsText: "/check:Проверка работы бота"
+  });
   const navigate = useNavigate();
 
   // Form State
@@ -160,14 +186,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
-        FLOW.adminGetSettings()
+        FLOW.adminGetSettings(),
+        FLOW.adminGetTelegramBots()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
+      setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -225,6 +253,76 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const isSettingEnabled = (key: string, fallback = false) => {
     const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
     return value === "true" || value === "1" || value === "on";
+  };
+
+  const parseCommands = (text: string) => {
+    return text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [commandRaw, ...desc] = line.split(":");
+        return {
+          command: commandRaw.trim(),
+          description: desc.join(":").trim() || "Команда"
+        };
+      });
+  };
+
+  const createTelegramBot = async () => {
+    try {
+      await FLOW.adminCreateTelegramBot({ input: {
+        name: telegramBotForm.name,
+        description: telegramBotForm.description,
+        imageUrl: telegramBotForm.imageUrl,
+        token: telegramBotForm.token,
+        username: telegramBotForm.username,
+        enabled: telegramBotForm.enabled,
+        commands: parseCommands(telegramBotForm.commandsText)
+      } });
+      toast.success("Telegram бот добавлен");
+      setTelegramBotForm({
+        name: "",
+        description: "",
+        imageUrl: "",
+        token: "",
+        username: "",
+        enabled: true,
+        commandsText: "/check:Проверка работы бота"
+      });
+      await fetchAdminData();
+    } catch {
+      toast.error("Не удалось добавить Telegram-бота");
+    }
+  };
+
+  const toggleTelegramBot = async (bot: TelegramBot) => {
+    try {
+      await FLOW.adminUpdateTelegramBot({ input: { id: bot.id, payload: { enabled: !bot.enabled } } });
+      await fetchAdminData();
+    } catch {
+      toast.error("Не удалось изменить состояние бота");
+    }
+  };
+
+  const checkTelegramBot = async (bot: TelegramBot) => {
+    try {
+      await FLOW.adminCheckTelegramBot({ input: { id: bot.id } });
+      toast.success("Проверка бота выполнена");
+      await fetchAdminData();
+    } catch {
+      toast.error("Не удалось проверить бота");
+    }
+  };
+
+  const deleteTelegramBot = async (bot: TelegramBot) => {
+    if (!confirm(`Удалить бота ${bot.name}?`)) return;
+    try {
+      await FLOW.adminDeleteTelegramBot({ input: { id: bot.id } });
+      await fetchAdminData();
+    } catch {
+      toast.error("Не удалось удалить бота");
+    }
   };
 
   const settingsGroups = [
@@ -793,7 +891,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "integrations" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Интеграции</h3>
-                      <div className="space-y-2 border p-3">
+                      <div className="space-y-3 border p-3">
                         <div className="flex items-center gap-2">
                           <Checkbox
                             id="telegram-login-enabled"
@@ -803,12 +901,37 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Label htmlFor="telegram-login-enabled">Включить авторизацию через Telegram</Label>
                         </div>
                         <div className="space-y-1">
-                          <Label htmlFor="telegram-bot-username">Telegram Bot Username</Label>
+                          <Label htmlFor="telegram-bot-username">Telegram Login Bot Username (для кнопки входа)</Label>
                           <Input id="telegram-bot-username" value={settings["telegram_bot_username"] || ""} onChange={(e) => updateSetting("telegram_bot_username", e.target.value)} />
                         </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="telegram-bot-token">Telegram Bot Token</Label>
-                          <Input id="telegram-bot-token" type="password" value={settings["telegram_bot_token"] || ""} onChange={(e) => updateSetting("telegram_bot_token", e.target.value)} />
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          <Input placeholder="Название бота" value={telegramBotForm.name} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, name: e.target.value })} />
+                          <Input placeholder="@username (опционально)" value={telegramBotForm.username} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, username: e.target.value })} />
+                          <Input placeholder="URL картинки" value={telegramBotForm.imageUrl} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, imageUrl: e.target.value })} />
+                          <Input placeholder="Токен бота" type="password" value={telegramBotForm.token} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, token: e.target.value })} />
+                        </div>
+                        <Textarea placeholder="Описание" value={telegramBotForm.description} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, description: e.target.value })} />
+                        <Textarea placeholder="Команды по одной в строке: /check:Проверка" value={telegramBotForm.commandsText} onChange={(e) => setTelegramBotForm({ ...telegramBotForm, commandsText: e.target.value })} />
+                        <div className="flex gap-2">
+                          <Button type="button" onClick={createTelegramBot}>Добавить бота</Button>
+                        </div>
+                        <div className="space-y-2">
+                          {telegramBots.map((bot) => (
+                            <div key={bot.id} className="border p-2 text-sm space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <div className="font-semibold">{bot.name} {bot.username ? `(@${bot.username})` : ""}</div>
+                                  <div className="text-xs text-muted-foreground">ID: {bot.id}</div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button type="button" variant="outline" onClick={() => checkTelegramBot(bot)}>Проверить</Button>
+                                  <Button type="button" variant="outline" onClick={() => toggleTelegramBot(bot)}>{bot.enabled ? "Остановить" : "Запустить"}</Button>
+                                  <Button type="button" variant="destructive" onClick={() => deleteTelegramBot(bot)}>Удалить</Button>
+                                </div>
+                              </div>
+                              {bot.botInfo?.id && <div className="text-xs">Telegram ID: {bot.botInfo.id}</div>}
+                            </div>
+                          ))}
                         </div>
                       </div>
 

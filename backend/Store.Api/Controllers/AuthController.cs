@@ -313,6 +313,17 @@ public class AuthController : ControllerBase
         if (row is not null && !string.IsNullOrWhiteSpace(row.Value))
             return row.Value;
 
+        if (key == "telegram_bot_token")
+        {
+            var botToken = await _db.TelegramBots
+                .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Token))
+                .OrderByDescending(x => x.UpdatedAt)
+                .Select(x => x.Token)
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(botToken))
+                return botToken;
+        }
+
         return _configuration[configPath];
     }
 

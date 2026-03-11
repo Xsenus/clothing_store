@@ -277,6 +277,7 @@ namespace Store.Api.Migrations
                     b.ToTable("sessions");
                 });
 
+
             modelBuilder.Entity("Store.Api.Models.User", b =>
                 {
                     b.Property<string>("Id")

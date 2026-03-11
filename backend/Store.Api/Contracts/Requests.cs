@@ -76,3 +76,23 @@ public record AddressSuggestPayload(string Query, int? Count);
 /// Параметры расчёта стоимости доставки Яндекс.
 /// </summary>
 public record YandexDeliveryCalculatePayload(string ToAddress, decimal? WeightKg, decimal? DeclaredCost);
+
+public record TelegramBotCommandPayload(string Command, string Description);
+
+public record TelegramBotPayload(
+    string Name,
+    string Description,
+    string? ImageUrl,
+    string Token,
+    string? Username,
+    bool Enabled,
+    List<TelegramBotCommandPayload>? Commands);
+
+public record TelegramBotPatchPayload(
+    string? Name,
+    string? Description,
+    string? ImageUrl,
+    string? Token,
+    string? Username,
+    bool? Enabled,
+    List<TelegramBotCommandPayload>? Commands);

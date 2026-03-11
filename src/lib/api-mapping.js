@@ -390,6 +390,29 @@ export const FLOW = {
     method: "DELETE",
   }),
 
+
+  adminGetTelegramBots: async () => request("/admin/telegram-bots"),
+
+  adminCreateTelegramBot: async ({ input }) => request("/admin/telegram-bots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminUpdateTelegramBot: async ({ input }) => request(`/admin/telegram-bots/${input.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input.payload),
+  }),
+
+  adminDeleteTelegramBot: async ({ input }) => request(`/admin/telegram-bots/${input.id}`, {
+    method: "DELETE",
+  }),
+
+  adminCheckTelegramBot: async ({ input }) => request(`/admin/telegram-bots/${input.id}/check`, {
+    method: "POST",
+  }),
+
   adminGetSettings: async () => request("/admin/settings"),
 
   adminSaveSettings: async ({ input }) => request("/admin/settings", {
