@@ -18,8 +18,32 @@ var uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
 Directory.CreateDirectory(uploadsDir);
 
 var databaseUrl = builder.Configuration.GetConnectionString("DefaultConnection");
+
 if (string.IsNullOrWhiteSpace(databaseUrl))
-    throw new InvalidOperationException("ConnectionStrings:DefaultConnection must be set to a PostgreSQL connection string.");
+{
+    // systemd can start the DLL from /opt/.../publish while WorkingDirectory points
+    // to the repository root. In that case default host config misses runtime
+    // appsettings files, so we attempt an explicit fallback lookup from runtime dir.
+    var runtimeConfig = new ConfigurationBuilder()
+        .SetBasePath(AppContext.BaseDirectory)
+        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+        .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
+        .AddEnvironmentVariables()
+        .Build();
+
+    databaseUrl = runtimeConfig.GetConnectionString("DefaultConnection");
+
+    if (!string.IsNullOrWhiteSpace(databaseUrl))
+    {
+        builder.Configuration["ConnectionStrings:DefaultConnection"] = databaseUrl;
+    }
+}
+
+if (string.IsNullOrWhiteSpace(databaseUrl))
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection must be set. " +
+        "Check /opt/clothing_store/.env (ConnectionStrings__DefaultConnection), " +
+        "systemd EnvironmentFile, or appsettings.Production.json in publish directory.");
 
 builder.Configuration["ResolvedDatabase:Provider"] = "postgres";
 builder.Configuration["ResolvedDatabase:ConnectionString"] = databaseUrl;
