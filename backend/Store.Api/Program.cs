@@ -54,6 +54,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminDataSeeder>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DatabaseInitializer>();
+builder.Services.AddSingleton<GalleryStorageService>();
 builder.Services.AddSingleton<TelegramBotManager>();
 builder.Services.AddSingleton<ITelegramBotManager>(sp => sp.GetRequiredService<TelegramBotManager>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotManager>());
@@ -91,6 +92,11 @@ app.Logger.LogInformation(
     app.Configuration["ResolvedDatabase:Provider"] ?? "unknown");
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
+var restoredGalleryImages = await app.Services.GetRequiredService<GalleryStorageService>().RestoreMissingImagesAsync();
+if (restoredGalleryImages > 0)
+{
+    app.Logger.LogInformation("Restored {Count} gallery images from database to disk.", restoredGalleryImages);
+}
 
 var configuredAppUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
     ?? builder.Configuration["APP_URL"]

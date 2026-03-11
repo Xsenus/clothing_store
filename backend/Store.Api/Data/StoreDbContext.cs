@@ -59,6 +59,7 @@ public class StoreDbContext : DbContext
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<TelegramBot> TelegramBots => Set<TelegramBot>();
     public DbSet<TelegramBotSubscriber> TelegramBotSubscribers => Set<TelegramBotSubscriber>();
+    public DbSet<GalleryImage> GalleryImages => Set<GalleryImage>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -73,6 +74,7 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
         modelBuilder.Entity<TelegramBot>().HasIndex(x => x.Username);
         modelBuilder.Entity<TelegramBotSubscriber>().HasIndex(x => new { x.BotId, x.ChatId }).IsUnique();
+        modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
 
         modelBuilder.Entity<Session>()
             .HasOne<User>()

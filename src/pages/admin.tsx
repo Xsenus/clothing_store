@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -248,6 +248,16 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
+interface GalleryImage {
+  id: string;
+  name: string;
+  description?: string | null;
+  url: string;
+  fileSize: number;
+  existsOnDisk: boolean;
+  createdAt?: number;
+}
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
@@ -290,6 +300,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -335,7 +346,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
-  const mediaSlots = [1, 2, 3, 4, 5, 6, 7, 8];
+  const faviconUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFaviconFileName, setSelectedFaviconFileName] = useState("");
+  const [galleryUploading, setGalleryUploading] = useState(false);
+  const [galleryName, setGalleryName] = useState("");
+  const [galleryDescription, setGalleryDescription] = useState("");
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryViewMode, setGalleryViewMode] = useState<"grid" | "table">("grid");
+  const [editingGalleryImageId, setEditingGalleryImageId] = useState<string | null>(null);
+  const [editingGalleryName, setEditingGalleryName] = useState("");
+  const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
+  const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedGalleryFileName, setSelectedGalleryFileName] = useState("");
+  const [isMediaGalleryPickerOpen, setIsMediaGalleryPickerOpen] = useState(false);
+  const [mediaGallerySlot, setMediaGallerySlot] = useState<number | null>(null);
+  const [mediaGallerySearch, setMediaGallerySearch] = useState("");
+  const mediaGalleryUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -366,16 +392,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
-        FLOW.adminGetTelegramBots()
+        FLOW.adminGetTelegramBots(),
+        FLOW.getAdminGalleryImages()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
+      setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -437,14 +465,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     try {
       const formDataUpload = new FormData();
       formDataUpload.append("files", file);
-      const res = await FLOW.adminUpload({ input: formDataUpload });
-      const uploadedUrl = res?.urls?.[0];
+      const res = await FLOW.adminUploadFavicon({ input: formDataUpload });
+      const uploadedUrl = res?.url;
       if (!uploadedUrl) {
         toast.error("Не удалось получить URL загруженной иконки");
         return;
       }
 
       updateSetting("site_favicon_url", uploadedUrl);
+      setSelectedFaviconFileName("");
+      if (faviconUploadInputRef.current) {
+        faviconUploadInputRef.current.value = "";
+      }
       toast.success("Иконка вкладки загружена");
     } catch (error) {
       toast.error("Не удалось загрузить иконку");
@@ -457,6 +489,106 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
     return value === "true" || value === "1" || value === "on";
   };
+
+  const formatBytes = (value?: number) => {
+    if (!value || value <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const size = value / (1024 ** index);
+    return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  };
+
+  const uploadGalleryImage = async (file: File | null) => {
+    if (!file) return;
+
+    setGalleryUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("name", galleryName || file.name);
+      payload.append("description", galleryDescription);
+      await FLOW.uploadAdminGalleryImage({ input: payload });
+      setGalleryName("");
+      setGalleryDescription("");
+      setSelectedGalleryFileName("");
+      if (galleryFileInputRef.current) {
+        galleryFileInputRef.current.value = "";
+      }
+      await fetchAdminData();
+      toast.success("Изображение добавлено в галерею");
+    } catch {
+      toast.error("Не удалось загрузить изображение в галерею");
+    } finally {
+      setGalleryUploading(false);
+    }
+  };
+
+  const deleteGalleryImage = async (image: GalleryImage) => {
+    if (!confirm(`Удалить изображение «${image.name}»?`)) return;
+    try {
+      await FLOW.deleteAdminGalleryImage({ input: { id: image.id } });
+      await fetchAdminData();
+      toast.success("Изображение удалено");
+    } catch {
+      toast.error("Не удалось удалить изображение");
+    }
+  };
+
+  const copyGalleryImageToDisk = async (image: GalleryImage) => {
+    try {
+      await FLOW.copyAdminGalleryImageToDisk({ input: { id: image.id } });
+      await fetchAdminData();
+      toast.success("Изображение скопировано на диск");
+    } catch {
+      toast.error("Не удалось скопировать изображение");
+    }
+  };
+
+  const restoreMissingGalleryImages = async () => {
+    try {
+      const result = await FLOW.restoreMissingAdminGalleryImages();
+      await fetchAdminData();
+      toast.success(`Восстановлено файлов: ${result?.restored ?? 0}`);
+    } catch {
+      toast.error("Не удалось восстановить изображения");
+    }
+  };
+
+  const startEditGalleryImage = (image: GalleryImage) => {
+    setEditingGalleryImageId(image.id);
+    setEditingGalleryName(image.name || "");
+    setEditingGalleryDescription(image.description || "");
+  };
+
+  const cancelEditGalleryImage = () => {
+    setEditingGalleryImageId(null);
+    setEditingGalleryName("");
+    setEditingGalleryDescription("");
+  };
+
+  const saveGalleryImageMeta = async () => {
+    if (!editingGalleryImageId) return;
+    try {
+      await FLOW.updateAdminGalleryImage({
+        input: {
+          id: editingGalleryImageId,
+          name: editingGalleryName,
+          description: editingGalleryDescription
+        }
+      });
+      await fetchAdminData();
+      toast.success("Изображение обновлено");
+      cancelEditGalleryImage();
+    } catch {
+      toast.error("Не удалось обновить метаданные изображения");
+    }
+  };
+
+  const filteredGalleryImages = galleryImages.filter((image) => {
+    const q = gallerySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
+  });
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message.trim()) {
@@ -760,7 +892,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         category: product.category,
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
-        media: mediaList,
+        media: mediaList.length > 0 ? mediaList : [{ type: "image", url: "" }],
         sizes: product.sizes,
         isNew: product.isNew,
         isPopular: product.isPopular,
@@ -784,7 +916,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         category: "",
         images: "",
         videos: "",
-        media: [],
+        media: [{ type: "image", url: "" }],
         sizes: [],
         isNew: false,
         isPopular: false,
@@ -943,6 +1075,69 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
+  const addMediaSlot = () => {
+    setFormData((prev) => ({
+      ...prev,
+      media: [...prev.media, { type: "image", url: "" }]
+    }));
+  };
+
+  const removeMediaSlot = (index: number) => {
+    setFormData((prev) => {
+      const nextMedia = prev.media.filter((_, mediaIndex) => mediaIndex !== index - 1);
+      return {
+        ...prev,
+        media: nextMedia.length > 0 ? nextMedia : [{ type: "image", url: "" }]
+      };
+    });
+  };
+
+  const openMediaGalleryPicker = (slot: number) => {
+    setMediaGallerySlot(slot);
+    setMediaGallerySearch("");
+    setIsMediaGalleryPickerOpen(true);
+  };
+
+  const selectMediaFromGallery = (url: string) => {
+    if (!mediaGallerySlot) return;
+    setMediaSlot(mediaGallerySlot, "image", url);
+    setIsMediaGalleryPickerOpen(false);
+    setMediaGallerySlot(null);
+  };
+
+  const uploadMediaToGalleryAndAssign = async (file: File | null, slot: number) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("name", file.name);
+      const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
+      if (uploaded?.url) {
+        setMediaSlot(slot, file.type.startsWith("video") ? "video" : "image", uploaded.url);
+        await fetchAdminData();
+        toast.success("Файл загружен в галерею и выбран");
+      }
+    } catch {
+      toast.error("Не удалось загрузить файл в галерею");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadFromPickerToGallery = async (file: File | null) => {
+    if (!file || !mediaGallerySlot) return;
+    await uploadMediaToGalleryAndAssign(file, mediaGallerySlot);
+    setIsMediaGalleryPickerOpen(false);
+    setMediaGallerySlot(null);
+  };
+
+  const filteredGalleryPickerImages = galleryImages.filter((image) => {
+    const q = mediaGallerySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
+  });
+
   const runSeedDemoData = async () => {
     setOperationsLoading(true);
     try {
@@ -1008,6 +1203,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
+              <TabsTrigger value="gallery" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ГАЛЕРЕЯ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
             </TabsList>
 
@@ -1056,6 +1252,179 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </TableBody>
             </Table>
           </div>
+          </TabsContent>
+
+          <TabsContent value="gallery" className="mt-0">
+            <div className="space-y-4">
+              <div className="border border-gray-200 p-4 space-y-3">
+                <h2 className="text-2xl font-black uppercase">Галерея изображений</h2>
+                <div className="grid md:grid-cols-4 gap-3">
+                  <Input
+                    placeholder="Наименование"
+                    value={galleryName}
+                    onChange={(e) => setGalleryName(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <Input
+                    placeholder="Описание"
+                    value={galleryDescription}
+                    onChange={(e) => setGalleryDescription(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <Input
+                    placeholder="Поиск по имени/описанию"
+                    value={gallerySearch}
+                    onChange={(e) => setGallerySearch(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <div className="flex gap-2 items-center">
+                    <input
+                      ref={galleryFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setSelectedGalleryFileName(file?.name || "");
+                        uploadGalleryImage(file);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-none"
+                      disabled={galleryUploading}
+                      onClick={() => galleryFileInputRef.current?.click()}
+                    >
+                      <ImagePlus className="w-4 h-4 mr-2" />
+                      {galleryUploading ? "Загрузка..." : (selectedGalleryFileName ? `Файл: ${selectedGalleryFileName}` : "Загрузить файл")}
+                    </Button>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={restoreMissingGalleryImages}>
+                      <RefreshCcw className="w-4 h-4 mr-1" />
+                      Восстановить
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={galleryViewMode === "grid" ? "default" : "outline"}
+                    className="rounded-none"
+                    onClick={() => setGalleryViewMode("grid")}
+                  >
+                    Плитка
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={galleryViewMode === "table" ? "default" : "outline"}
+                    className="rounded-none"
+                    onClick={() => setGalleryViewMode("table")}
+                  >
+                    Таблица
+                  </Button>
+                </div>
+              </div>
+
+              {galleryViewMode === "grid" ? (
+                <div className="grid md:grid-cols-3 gap-4">
+                  {filteredGalleryImages.map((image) => (
+                  <div key={image.id} className="border border-gray-200 p-3 space-y-2">
+                    <img src={image.url} alt={image.name} className="w-full h-52 object-cover bg-gray-100" />
+                    {editingGalleryImageId === image.id ? (
+                      <div className="space-y-2">
+                        <Input value={editingGalleryName} onChange={(e) => setEditingGalleryName(e.target.value)} className="rounded-none" />
+                        <Textarea value={editingGalleryDescription} onChange={(e) => setEditingGalleryDescription(e.target.value)} className="rounded-none min-h-20" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="font-semibold">{image.name}</div>
+                        <div className="text-sm text-muted-foreground">{image.description || "Без описания"}</div>
+                      </>
+                    )}
+                    <div className="text-xs text-muted-foreground">{formatBytes(image.fileSize)} · {image.existsOnDisk ? "На диске" : "Только в БД"}</div>
+                    <div className="flex gap-2">
+                      {editingGalleryImageId === image.id ? (
+                        <>
+                          <Button size="icon" variant="default" className="rounded-none" onClick={saveGalleryImageMeta} aria-label="Сохранить">
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button size="icon" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage} aria-label="Отмена">
+                            <Ban className="w-4 h-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button size="icon" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)} aria-label="Изменить">
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                      )}
+                      <Button size="icon" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)} aria-label="Копировать на диск">
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                      <Button size="icon" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)} aria-label="Удалить">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-gray-200 overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Превью</TableHead>
+                        <TableHead>Файл</TableHead>
+                        <TableHead>Описание</TableHead>
+                        <TableHead>Размер</TableHead>
+                        <TableHead>Статус</TableHead>
+                        <TableHead className="text-right">Действия</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredGalleryImages.map((image) => (
+                        <TableRow key={image.id}>
+                          <TableCell><img src={image.url} alt={image.name} className="w-16 h-12 object-cover bg-gray-100" /></TableCell>
+                          <TableCell className="font-semibold">
+                            {editingGalleryImageId === image.id ? (
+                              <Input value={editingGalleryName} onChange={(e) => setEditingGalleryName(e.target.value)} className="rounded-none" />
+                            ) : image.name}
+                          </TableCell>
+                          <TableCell>
+                            {editingGalleryImageId === image.id ? (
+                              <Textarea value={editingGalleryDescription} onChange={(e) => setEditingGalleryDescription(e.target.value)} className="rounded-none min-h-20" />
+                            ) : (image.description || "—")}
+                          </TableCell>
+                          <TableCell>{formatBytes(image.fileSize)}</TableCell>
+                          <TableCell>{image.existsOnDisk ? "На диске" : "Только в БД"}</TableCell>
+                          <TableCell className="text-right space-x-2">
+                            {editingGalleryImageId === image.id ? (
+                              <>
+                                <Button size="icon" variant="default" className="rounded-none" onClick={saveGalleryImageMeta} aria-label="Сохранить">
+                                  <Check className="w-4 h-4" />
+                                </Button>
+                                <Button size="icon" variant="outline" className="rounded-none" onClick={cancelEditGalleryImage} aria-label="Отмена">
+                                  <Ban className="w-4 h-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <Button size="icon" variant="outline" className="rounded-none" onClick={() => startEditGalleryImage(image)} aria-label="Изменить">
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            )}
+                            <Button size="icon" variant="outline" className="rounded-none" onClick={() => copyGalleryImageToDisk(image)} aria-label="Копировать на диск">
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                            <Button size="icon" variant="destructive" className="rounded-none" onClick={() => deleteGalleryImage(image)} aria-label="Удалить">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="users" className="mt-0">
@@ -1474,20 +1843,53 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           onChange={(e) => updateSetting("site_favicon_url", e.target.value)}
                           placeholder="https://cdn.example.com/favicon.ico"
                         />
+                        {!!settings.site_favicon_url && (
+                          <div className="flex items-center gap-3 border border-gray-200 p-2 max-w-md">
+                            <img
+                              src={settings.site_favicon_url}
+                              alt="favicon preview"
+                              className="w-8 h-8 object-contain bg-gray-50"
+                            />
+                            <span className="text-xs text-muted-foreground truncate">{settings.site_favicon_url}</span>
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2">
-                          <Input
+                          <input
+                            ref={faviconUploadInputRef}
                             type="file"
-                            accept="image/png,image/x-icon,image/svg+xml,image/webp,image/jpeg"
-                            onChange={(e) => handleFaviconUpload(e.target.files?.[0] || null)}
-                            disabled={faviconUploading}
-                            className="max-w-sm"
+                            accept=".ico,image/x-icon"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setSelectedFaviconFileName(file?.name || "");
+                              handleFaviconUpload(file);
+                            }}
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-none"
+                            onClick={() => faviconUploadInputRef.current?.click()}
+                            disabled={faviconUploading}
+                          >
+                            <Upload className="w-4 h-4 mr-2" />
+                            {faviconUploading ? "Загрузка..." : (selectedFaviconFileName ? `Файл: ${selectedFaviconFileName}` : "Загрузить файл")}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-none"
+                            onClick={() => faviconUploadInputRef.current?.click()}
+                            disabled={faviconUploading}
+                          >
+                            <Images className="w-4 h-4 mr-2" /> Заменить favicon.ico
+                          </Button>
                           {faviconUploading && (
                             <span className="text-sm text-muted-foreground">Загрузка...</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Можно вставить внешний URL или загрузить файл. Рекомендуемый размер: 32x32 или 48x48 px.
+                          Для этого поля поддерживается прямая загрузка только файла <b>favicon.ico</b>. Файл используется только как иконка вкладки.
                         </p>
                       </div>
                     </div>
@@ -1887,11 +2289,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-3">
                   <Label>Медиа (по порядку)</Label>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">Можно добавить любое количество фото/видео. Поддерживается выбор из галереи.</p>
+                    <Button type="button" size="sm" variant="outline" className="rounded-none" onClick={addMediaSlot}>
+                      <PlusCircle className="w-4 h-4 mr-1" /> Добавить блок
+                    </Button>
+                  </div>
                   <div className="space-y-3">
-                    {mediaSlots.map((slot) => {
-                      const item = formData.media[slot - 1] || { type: "image", url: "" };
+                    {formData.media.map((item, mediaIndex) => {
+                      const slot = mediaIndex + 1;
                       return (
-                        <div key={`media-slot-${slot}`} className="grid grid-cols-[40px_120px_1fr_120px] items-center gap-3">
+                        <div key={`media-slot-${slot}`} className="grid grid-cols-[40px_120px_1fr_120px_120px_40px] items-center gap-3">
                           <div className="w-10 h-10 border border-black flex items-center justify-center font-bold">
                             {slot}
                           </div>
@@ -1919,6 +2327,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               disabled={uploading}
                             />
                           </label>
+                          <label className="inline-flex items-center justify-center h-10 border border-black font-bold cursor-pointer">
+                            В галерею
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => uploadMediaToGalleryAndAssign(e.target.files?.[0] || null, slot)}
+                              disabled={uploading}
+                            />
+                          </label>
+                          <Button type="button" size="icon" variant="outline" className="rounded-none h-10 w-10" onClick={() => removeMediaSlot(slot)}>
+                            <MinusCircle className="w-4 h-4" />
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" className="rounded-none col-span-6 justify-start" onClick={() => openMediaGalleryPicker(slot)}>
+                            <Images className="w-4 h-4 mr-2" /> Выбрать из галереи
+                          </Button>
                         </div>
                       );
                     })}
@@ -2086,6 +2510,59 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </DialogFooter>
               </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isMediaGalleryPickerOpen} onOpenChange={setIsMediaGalleryPickerOpen}>
+            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Выбрать изображение из галереи</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Поиск по имени/описанию"
+                    value={mediaGallerySearch}
+                    onChange={(e) => setMediaGallerySearch(e.target.value)}
+                    className="rounded-none"
+                  />
+                  <input
+                    ref={mediaGalleryUploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => uploadFromPickerToGallery(e.target.files?.[0] || null)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => mediaGalleryUploadInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Загрузить в галерею
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {filteredGalleryPickerImages.map((image) => (
+                    <button
+                      type="button"
+                      key={`picker-${image.id}`}
+                      className="border border-gray-200 text-left hover:border-black transition-colors"
+                      onClick={() => selectMediaFromGallery(image.url)}
+                    >
+                      <img src={image.url} alt={image.name} className="w-full h-36 object-cover bg-gray-100" />
+                      <div className="p-2">
+                        <div className="text-sm font-semibold truncate">{image.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{image.description || 'Без описания'}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </DialogContent>
           </Dialog>
         </main>

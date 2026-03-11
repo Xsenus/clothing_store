@@ -76,6 +76,8 @@ public class DatabaseInitializer
 
         _logger.LogInformation("Database schema is ready (migrations applied).");
 
+        await EnsureGalleryTableAsync(db);
+
         await CleanupExpiredDataAsync(db);
 
         var seedMode = _configuration["DatabaseInitialization:SeedMode"] ?? "EnsureSeeded";
@@ -114,6 +116,48 @@ public class DatabaseInitializer
         await EnsureDefaultAppSettingsAsync(db);
         await EnsureLegacyTelegramBotMigratedAsync(db);
         await EnsureTestDataAsync(db);
+    }
+
+    private static async Task EnsureGalleryTableAsync(StoreDbContext db)
+    {
+        if (db.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            await db.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS gallery_images (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NULL,
+                    content_type TEXT NOT NULL,
+                    file_extension TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    disk_path TEXT NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    binary_data BLOB NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_gallery_images_name ON gallery_images (name);
+            ");
+
+            return;
+        }
+
+        await db.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS gallery_images (
+                id text NOT NULL PRIMARY KEY,
+                name text NOT NULL,
+                description text NULL,
+                content_type text NOT NULL,
+                file_extension text NOT NULL,
+                file_name text NOT NULL,
+                disk_path text NOT NULL,
+                file_size bigint NOT NULL,
+                binary_data bytea NOT NULL,
+                created_at bigint NOT NULL,
+                updated_at bigint NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ""IX_gallery_images_name"" ON gallery_images (name);
+        ");
     }
 
     private async Task EnsureAdminUserAsync(StoreDbContext db)

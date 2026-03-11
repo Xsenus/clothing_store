@@ -8,6 +8,17 @@ const API_ORIGIN = (() => {
   }
 })();
 
+const API_PATH_BASE = (() => {
+  try {
+    const parsed = new URL(API_URL, WINDOW_ORIGIN);
+    const pathname = parsed.pathname || "";
+    if (!pathname || pathname === "/") return "";
+    return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  } catch {
+    return "";
+  }
+})();
+
 const toAbsoluteMediaUrl = (url) => {
   if (!url) return url;
   const normalizedUrl = String(url).trim();
@@ -24,6 +35,10 @@ const toAbsoluteMediaUrl = (url) => {
   }
 
   if (normalizedUrl.startsWith("/")) {
+    if (API_PATH_BASE && normalizedUrl.startsWith("/uploads/")) {
+      return `${API_ORIGIN}${API_PATH_BASE}${normalizedUrl}`;
+    }
+
     return `${API_ORIGIN}${normalizedUrl}`;
   }
 
@@ -244,6 +259,15 @@ export const FLOW = {
     return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
+  adminUploadFavicon: async ({ input }) => {
+    const res = await request("/admin/upload/favicon", {
+      method: "POST",
+      body: input,
+    });
+
+    return { url: toAbsoluteMediaUrl(res?.url) };
+  },
+
   uploadMedia: async ({ input }) => {
     const res = await request("/upload", {
       method: "POST",
@@ -252,6 +276,60 @@ export const FLOW = {
     const urls = Array.isArray(res?.urls) ? res.urls : [];
     return { urls: urls.map(toAbsoluteMediaUrl) };
   },
+
+  getAdminGalleryImages: async () => {
+    const images = await request("/admin/gallery");
+    return Array.isArray(images)
+      ? images.map((item) => ({
+        ...item,
+        url: toAbsoluteMediaUrl(item.url),
+      }))
+      : [];
+  },
+
+  uploadAdminGalleryImage: async ({ input }) => {
+    const image = await request("/admin/gallery", {
+      method: "POST",
+      body: input,
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  updateAdminGalleryImage: async ({ input }) => {
+    const image = await request(`/admin/gallery/${input.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input.name, description: input.description }),
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  deleteAdminGalleryImage: async ({ input }) => request(`/admin/gallery/${input.id}`, {
+    method: "DELETE",
+  }),
+
+  copyAdminGalleryImageToDisk: async ({ input }) => {
+    const image = await request(`/admin/gallery/${input.id}/copy-to-disk`, {
+      method: "POST",
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  restoreMissingAdminGalleryImages: async () => request("/admin/gallery/restore-missing", {
+    method: "POST",
+  }),
 
   createOrder: async ({ input }) => request("/orders", {
     method: "POST",
