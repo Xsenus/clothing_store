@@ -197,6 +197,7 @@ public class AdminController : ControllerBase
 
 
     [HttpPost("telegram-bots/validate")]
+    [HttpPost("telegram-bots/check")]
     public async Task<IResult> ValidateTelegramBot([FromBody] TelegramBotValidatePayload payload)
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();

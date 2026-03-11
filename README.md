@@ -1,6 +1,6 @@
 # Clothing Store — React + ASP.NET Core + PostgreSQL
 
-## Stack
+## Стек
 
 - Frontend: React + Vite + Tailwind
 - Backend: ASP.NET Core (.NET 9)
@@ -9,87 +9,174 @@
 
 ---
 
-## Backend: откуда берётся конфиг БД
+## Где находятся настройки
 
-Backend использует `ConnectionStrings:DefaultConnection` из `appsettings*.json`.
+### Frontend
 
-- `appsettings.Development.json` — dev-конфигурация
-- `appsettings.Production.json` — production-конфигурация
-
-Если строка подключения пустая или в формате SQLite (`Data Source=...`), будет использован SQLite.
-Если строка подключения PostgreSQL (`Host=...;Port=...`), будет использован PostgreSQL.
-
-Ключевая логика: `backend/Store.Api/Program.cs`.
-
----
-
-## Разделение конфигов (frontend vs backend)
-
-### Frontend `.env`
-
-Файл `.env` в корне используется для Vite-переменных фронта:
+Файл в корне проекта: `.env`
 
 ```env
 VITE_API_URL=/api
 VITE_API_TARGET=http://127.0.0.1:3001
 ```
 
-### Backend `appsettings`
+- `VITE_API_URL` — путь, на который фронт отправляет API-запросы.
+- `VITE_API_TARGET` — куда Vite proxy направляет запросы в dev.
 
-#### Development (`backend/Store.Api/appsettings.Development.json`)
+### Backend
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=127.0.0.1;Port=5433;Database=clothing_store;Username=store_user;Password=Qwerty!@#"
-  }
-}
-```
+- Dev: `backend/Store.Api/appsettings.Development.json`
+- Prod: `backend/Store.Api/appsettings.Production.json`
 
-#### Production (`backend/Store.Api/appsettings.Production.json`)
+Основные секции:
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=Qwerty!@#"
-  }
-}
-```
+- `ConnectionStrings:DefaultConnection`
+- `Integrations:Telegram:*`
+- `Email:*`
+
+Ключевая логика инициализации API и БД: `backend/Store.Api/Program.cs`.
 
 ---
 
-## Локальный запуск
+## Запуск локально
 
-### Frontend
+### 1) Frontend
 
 ```bash
 npm ci
 npm run dev
 ```
 
-### Backend (Development)
+### 2) Backend
 
 ```bash
 dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
-Backend при старте автоматически выполняет миграции (`Database.MigrateAsync()`).
-Для `dotnet ef` из Visual Studio/PMC можно дополнительно задать `STORE_API_DIR` (путь к `backend/Store.Api`), если команда запускается не из корня репозитория.
-Если миграции ещё не созданы, backend завершится с ошибкой и попросит создать baseline migration.
+При старте backend автоматически применяет миграции (`Database.MigrateAsync()`).
 
 ---
 
-## Deploy на сервер (Production)
+## Управление сервисами на сервере (systemd)
 
-Подробно: `docs/DEPLOYMENT.md`.
+Ниже предполагаются сервисы:
+
+- `clothing-store-api` (backend)
+- `nginx` (web/proxy)
+- `postgresql` (БД)
+
+### Быстрая шпаргалка
+
+```bash
+# статус
+sudo systemctl status clothing-store-api --no-pager
+sudo systemctl status nginx --no-pager
+sudo systemctl status postgresql --no-pager
+
+# запуск
+sudo systemctl start clothing-store-api
+sudo systemctl start nginx
+sudo systemctl start postgresql
+
+# остановка
+sudo systemctl stop clothing-store-api
+sudo systemctl stop nginx
+sudo systemctl stop postgresql
+
+# перезапуск
+sudo systemctl restart clothing-store-api
+sudo systemctl restart nginx
+sudo systemctl restart postgresql
+```
+
+### Автозапуск после перезагрузки сервера
+
+```bash
+sudo systemctl enable clothing-store-api
+sudo systemctl enable nginx
+sudo systemctl enable postgresql
+```
+
+### Логи backend
+
+```bash
+sudo journalctl -u clothing-store-api -n 200 --no-pager
+sudo journalctl -u clothing-store-api -f
+```
+
+---
+
+## Как проверить, что сервисы работают
+
+### Проверка API с сервера
+
+```bash
+curl -i http://127.0.0.1:3001/products
+curl -i http://127.0.0.1:3001/admin/telegram-bots
+```
+
+> Для `/admin/*` эндпоинтов без токена администратора ожидаемо будет `401`, это нормально и означает, что API отвечает.
+
+### Проверка через Nginx (снаружи)
+
+```bash
+curl -I https://your-domain.com
+curl -i https://your-domain.com/api/products
+```
+
+### Проверка БД
+
+```bash
+sudo -u postgres psql -d clothing_store -c "select now();"
+```
+
+---
+
+## Как проверить в админ-панели
+
+1. Открыть `/admin` и авторизоваться.
+2. Перейти в раздел интеграции Telegram-бота.
+3. В форме бота:
+   - ввести токен,
+   - нажать **«Проверить (getMe)»**,
+   - дождаться успешного ответа с `ID`, `username`, `name`.
+4. Сохранить бота и нажать проверку/синхронизацию в списке ботов.
+5. Если ошибка — сразу смотреть backend-логи (`journalctl`).
+
+---
+
+## Ошибка `Request failed: 404` при проверке Telegram-бота
+
+Если при кнопке **«Проверить (getMe)»** приходит `404`, обычно причина одна из двух:
+
+1. На сервере запущен старый backend (без актуального endpoint проверки).
+2. После деплоя backend не был перезапущен.
+
+Что сделать:
+
+```bash
+cd /opt/clothing_store
+git pull
+npm ci && npm run build
+dotnet publish backend/Store.Api/Store.Api.csproj -c Release
+sudo systemctl restart clothing-store-api
+sudo systemctl status clothing-store-api --no-pager
+```
+
+После этого снова проверить кнопку **«Проверить (getMe)»** в админке.
+
+---
+
+## Deploy в production
+
+Подробный гайд: `docs/DEPLOYMENT.md`.
 
 Коротко:
 
-1. Установить `nginx`, `postgresql`, `.NET SDK`, `node`.
-2. Собрать фронтенд: `npm ci && npm run build`, скопировать `dist` в `/var/www/clothing-store`.
-3. Опубликовать backend: `dotnet publish backend/Store.Api/Store.Api.csproj -c Release`.
-4. Запустить backend как systemd сервис `clothing-store-api`.
-5. Убедиться, что в `appsettings.Production.json` задан production PostgreSQL connection string.
+1. Собрать фронтенд и скопировать `dist` в `/var/www/clothing-store`.
+2. Выполнить `dotnet publish` backend.
+3. Перезапустить `clothing-store-api`.
+4. Проверить `nginx`, `postgresql`, API и логи.
 
 ---
 

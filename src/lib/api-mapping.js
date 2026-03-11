@@ -415,11 +415,23 @@ export const FLOW = {
 
   adminGetTelegramBots: async () => request("/admin/telegram-bots"),
 
-  adminValidateTelegramBot: async ({ input }) => request("/admin/telegram-bots/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }),
+  adminValidateTelegramBot: async ({ input }) => {
+    try {
+      return await request("/admin/telegram-bots/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+
+      return request("/admin/telegram-bots/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+    }
+  },
 
   adminCreateTelegramBot: async ({ input }) => request("/admin/telegram-bots", {
     method: "POST",
