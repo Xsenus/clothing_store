@@ -38,6 +38,7 @@ git clone <YOUR_REPO_URL> .
 ```env
 VITE_API_URL=/api
 VITE_API_TARGET=http://127.0.0.1:3001
+VITE_SITE_URL=https://your-domain.com
 ```
 
 ## 5. Конфиг backend (appsettings)

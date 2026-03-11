@@ -18,10 +18,12 @@
 ```env
 VITE_API_URL=/api
 VITE_API_TARGET=http://127.0.0.1:3001
+VITE_SITE_URL=https://your-domain.com
 ```
 
 - `VITE_API_URL` — путь, на который фронт отправляет API-запросы.
 - `VITE_API_TARGET` — куда Vite proxy направляет запросы в dev.
+- `VITE_SITE_URL` — канонический адрес сайта для генерации `sitemap.xml`, `robots.txt` и canonical SEO URL в production build.
 
 ### Backend
 
@@ -46,6 +48,8 @@ VITE_API_TARGET=http://127.0.0.1:3001
 npm ci
 npm run dev
 ```
+
+`npm run build` дополнительно генерирует `dist/sitemap.xml` и `dist/robots.txt`.
 
 ### 2) Backend
 
