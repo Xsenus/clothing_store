@@ -57,6 +57,8 @@ interface Product {
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
+  site_title: "",
+  site_favicon_url: "",
   privacy_policy: "",
   user_agreement: "",
   public_offer: "",
@@ -864,6 +866,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <div className="space-y-1">
                         <Label htmlFor="store-name">Название магазина</Label>
                         <Input id="store-name" value={settings.storeName || ""} onChange={(e) => updateSetting("storeName", e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="site-title">Название вкладки браузера</Label>
+                        <Input
+                          id="site-title"
+                          value={settings.site_title || ""}
+                          onChange={(e) => updateSetting("site_title", e.target.value)}
+                          placeholder="Например: Fashion Demon"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="site-favicon-url">URL иконки вкладки (favicon)</Label>
+                        <Input
+                          id="site-favicon-url"
+                          value={settings.site_favicon_url || ""}
+                          onChange={(e) => updateSetting("site_favicon_url", e.target.value)}
+                          placeholder="https://cdn.example.com/favicon.ico"
+                        />
                       </div>
                     </div>
                   )}

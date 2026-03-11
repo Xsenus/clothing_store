@@ -10,6 +10,7 @@ import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
 import CookieBanner from "@/components/CookieBanner";
 import MetricsScripts from "@/components/MetricsScripts";
+import SiteBranding from "@/components/SiteBranding";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -22,6 +23,7 @@ createRoot(document.getElementById("root")).render(
             <App />
             <CookieBanner />
             <MetricsScripts />
+            <SiteBranding />
           </BrowserRouter>
         </TooltipProvider>
       </CartProvider>

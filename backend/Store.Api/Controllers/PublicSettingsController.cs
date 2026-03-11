@@ -21,7 +21,9 @@ public class PublicSettingsController : ControllerBase
         "metrics_vk_pixel_enabled",
         "metrics_vk_pixel_code",
         "telegram_login_enabled",
-        "telegram_bot_username"
+        "telegram_bot_username",
+        "site_title",
+        "site_favicon_url"
     ];
 
     private readonly StoreDbContext _db;
