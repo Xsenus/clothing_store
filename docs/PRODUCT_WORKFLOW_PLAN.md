@@ -131,7 +131,7 @@
 ## 8) Этапы внедрения
 
 ### Этап 1 (быстрый запуск)
-- Стабилизировать запуск backend (локальный SQLite + PostgreSQL в проде).
+- Стабилизировать запуск backend (единый PostgreSQL в dev/prod).
 - Вынести настройки checkout в `app_settings`.
 - Добавить `product_variants` и ограничения остатков.
 
@@ -155,7 +155,7 @@
 Типичный локальный сбой: backend ожидает PostgreSQL по умолчанию, и если БД не поднята — приложение завершается на старте.
 
 Решение в этом репозитории:
-- backend выбирает БД по `ConnectionStrings:DefaultConnection` (SQLite при `Data Source=...`, PostgreSQL при `Host=...;Port=...`);
+- backend использует только PostgreSQL по `ConnectionStrings:DefaultConnection` (`Host=...;Port=...`).
 - для dev/prod используются `appsettings.Development.json` и `appsettings.Production.json`.
 - добавлен явный лог активного провайдера БД при старте.
 

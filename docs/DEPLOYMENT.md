@@ -1,29 +1,31 @@
-# Deployment Guide (Direct: systemd + Nginx + PostgreSQL)
+# Deployment Guide (VPS, systemd + Nginx + PostgreSQL)
 
-Этот проект деплоится напрямую через systemd + Nginx + PostgreSQL.
+Ниже — полный сценарий деплоя проекта на VPS. Примеры команд рассчитаны на Ubuntu 22.04/24.04.
 
-## 1. Установка зависимостей на сервер
+## 0) Принятые пути и имена
+- Репозиторий: `/opt/clothing_store`
+- Backend publish: `/opt/clothing_store/backend/Store.Api/publish`
+- Frontend build (Nginx root): `/var/www/clothing-store`
+- systemd сервис API: `clothing-store-api.service`
+- API bind: `127.0.0.1:3001`
+- Публичный домен: `your-domain.com`
 
+## 1) Установка пакетов
 ```bash
 sudo apt update
-sudo apt upgrade -y
-sudo apt install -y git nginx postgresql postgresql-contrib rsync ca-certificates curl gnupg lsb-release
+sudo apt install -y git nginx postgresql postgresql-contrib rsync curl ca-certificates
 ```
 
-Установите .NET SDK и Node.js (если ещё не установлены).
-
-## 2. PostgreSQL
-
+## 2) Создание БД и пользователя PostgreSQL
 ```bash
 sudo -u postgres psql <<'SQL'
 CREATE DATABASE clothing_store;
-CREATE USER store_user WITH ENCRYPTED PASSWORD 'Qwerty!@#';
+CREATE USER store_user WITH ENCRYPTED PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
 GRANT ALL PRIVILEGES ON DATABASE clothing_store TO store_user;
 SQL
 ```
 
-## 3. Клонирование проекта
-
+## 3) Клонирование проекта
 ```bash
 sudo mkdir -p /opt/clothing_store
 sudo chown -R $USER:$USER /opt/clothing_store
@@ -31,43 +33,36 @@ cd /opt/clothing_store
 git clone <YOUR_REPO_URL> .
 ```
 
-## 4. Конфиг frontend (.env)
-
-Создайте/обновите `/opt/clothing_store/.env`:
-
+## 4) Настройка `.env`
+Создать `/opt/clothing_store/.env`:
 ```env
 VITE_API_URL=/api
 VITE_API_TARGET=http://127.0.0.1:3001
+ASPNETCORE_ENVIRONMENT=Production
+ConnectionStrings__DefaultConnection=Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=CHANGE_ME_STRONG_PASSWORD
+ADMIN_EMAIL=admin@your-domain.com
+ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD
 ```
 
-## 5. Конфиг backend (appsettings)
 
-### Development
+## 4.1) Подготовленные товары (seed)
+Убедитесь, что файл `/opt/clothing_store/seed/products.jsonl` существует в репозитории.
+При пустой таблице `products` backend автоматически импортирует товары из этого файла при старте.
 
-`backend/Store.Api/appsettings.Development.json`:
-
+## 5) Настройка backend appsettings
+Проверить `backend/Store.Api/appsettings.Production.json`:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=127.0.0.1;Port=5433;Database=clothing_store;Username=store_user;Password=Qwerty!@#"
+    "DefaultConnection": "Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=CHANGE_ME_STRONG_PASSWORD"
+  },
+  "Swagger": {
+    "Enabled": false
   }
 }
 ```
 
-### Production
-
-`backend/Store.Api/appsettings.Production.json`:
-
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=Qwerty!@#"
-  }
-}
-```
-
-## 6. Build frontend и publish backend
-
+## 6) Сборка frontend и publish backend
 ```bash
 cd /opt/clothing_store
 npm ci
@@ -78,8 +73,7 @@ sudo rsync -a --delete dist/ /var/www/clothing-store/
 dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store/backend/Store.Api/publish
 ```
 
-## 7. systemd сервис backend
-
+## 7) systemd unit для backend
 ```bash
 sudo tee /etc/systemd/system/clothing-store-api.service >/dev/null <<'UNIT'
 [Unit]
@@ -94,6 +88,7 @@ Restart=always
 RestartSec=5
 User=www-data
 Environment=ASPNETCORE_ENVIRONMENT=Production
+EnvironmentFile=/opt/clothing_store/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -105,13 +100,55 @@ sudo systemctl restart clothing-store-api
 sudo systemctl status clothing-store-api --no-pager
 ```
 
-## 8. Nginx
-
-Настройте Nginx как reverse-proxy на backend (`127.0.0.1:3001`) и раздачу фронтенда из `/var/www/clothing-store`.
-
-## 9. Проверка
-
+## 8) Nginx
 ```bash
-curl --fail --silent --show-error http://127.0.0.1:3001/products >/dev/null && echo OK
-sudo journalctl -u clothing-store-api -n 100 --no-pager
+sudo tee /etc/nginx/sites-available/clothing-store >/dev/null <<'NGINX'
+server {
+  listen 80;
+  server_name your-domain.com;
+
+  root /var/www/clothing-store;
+  index index.html;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3001/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location / {
+    try_files $uri /index.html;
+  }
+}
+NGINX
+
+sudo ln -sf /etc/nginx/sites-available/clothing-store /etc/nginx/sites-enabled/clothing-store
+sudo nginx -t
+sudo systemctl restart nginx
+sudo systemctl status nginx --no-pager
+```
+
+## 9) Проверка после деплоя
+```bash
+curl -i http://127.0.0.1:3001/products
+curl -i http://127.0.0.1:3001/media/non-existent-id
+curl -i http://127.0.0.1:3001/admin/gallery
+curl -I http://your-domain.com
+curl -i http://your-domain.com/api/products
+sudo journalctl -u clothing-store-api -n 200 --no-pager
+```
+
+## 10) Обновление релиза
+```bash
+cd /opt/clothing_store
+git pull
+npm ci
+npm run build
+sudo rsync -a --delete dist/ /var/www/clothing-store/
+dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store/backend/Store.Api/publish
+sudo systemctl restart clothing-store-api
+sudo systemctl restart nginx
 ```

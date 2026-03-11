@@ -1,65 +1,29 @@
 # Architecture Notes
 
 ## Stack
-
 - Frontend: React + Vite
-- Backend: ASP.NET Core Minimal API (.NET 8)
+- Backend: ASP.NET Core (.NET 9)
 - DB: PostgreSQL
-- Reverse proxy: Nginx (static frontend + reverse proxy to backend)
+- Reverse proxy: Nginx
+
+## Database policy
+- Проект работает **только с PostgreSQL**.
+- SQLite не используется ни в runtime, ни как fallback.
 
 ## Data model (high level)
-
 Основные таблицы:
-
-- `users`
-- `sessions`
-- `admin_sessions`
-- `verification_codes`
-- `profiles`
-- `products` (JSONB payload + indexed fields)
-- `cart_items`
-- `likes`
-- `orders`
-
-Схема создается миграциями в `backend/Store.Api/Migrations`.
+- `users`, `sessions`, `admin_sessions`
+- `verification_codes`, `profiles`
+- `products` (JSONB payload + индексируемые поля)
+- `cart_items`, `likes`, `orders`
+- `gallery_images` (медиа в БД, `binary_data`)
 
 ## Product storage strategy
-
-Продукт хранится в `products.data` (JSONB), а также дублируются ключевые поля для фильтрации/сортировки:
-
-- `slug`
-- `category`
-- `is_new`
-- `is_popular`
-- `likes_count`
-- `creation_time`
-
-Это позволяет:
-
-- не ломать фронтовый payload
-- быстрее отбирать “new/popular/category”
+Продукт хранится в `products.data` (JSONB), а ключевые поля дублируются для фильтрации и сортировки.
 
 ## Seed strategy
+Если таблица `products` пуста, backend импортирует подготовленные данные из `seed/products.jsonl` в PostgreSQL.
 
-При пустой таблице `products` backend импортирует данные в таком порядке:
-
-1. `backend/products.json`
-2. `seed/products.jsonl`
-
-## Auth strategy
-
-- user token: таблица `sessions`
-- admin token: таблица `admin_sessions`
-- password hash: PBKDF2 SHA-256
-- email-коды: `verification_codes`
-- Telegram Login Widget: `POST /auth/telegram/login` (проверка подписи + авто-создание пользователя)
-
-### Telegram auth (кратко)
-
-Подробный сценарий и таблицы см. в `docs/TELEGRAM_AUTH.md`.
-
-Ключевой принцип текущей реализации: отдельного поля `telegram_id` в профиле нет, идентификация Telegram-пользователя выполняется по техническому email формата `telegram_<id>@telegram.local`.
-
-## Upload strategy
-
-Загрузка медиа на файловую систему (`STORE_UPLOADS_DIR`), доступ через `/uploads/...`.
+## Media strategy
+Медиа хранится в таблице `gallery_images` (поле `binary_data`) и кэшируется в `backend/uploads/gallery/*` для быстрого ответа.
+Если файл на диске отсутствует, backend отдает изображение из БД и восстанавливает файл на диск.

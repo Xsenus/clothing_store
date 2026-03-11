@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Store.Api.Data;
 using Store.Api.Services;
 
@@ -18,37 +17,13 @@ var uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
     ?? Path.Combine(projectRoot, "backend", "uploads");
 Directory.CreateDirectory(uploadsDir);
 
-var sqlitePath = Environment.GetEnvironmentVariable("STORE_SQLITE_PATH")
-    ?? Path.Combine(projectRoot, "backend", "app.db");
 var databaseUrl = builder.Configuration.GetConnectionString("DefaultConnection");
-var useSqlite = string.IsNullOrWhiteSpace(databaseUrl)
-    || databaseUrl.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)
-    || databaseUrl.StartsWith("Filename=", StringComparison.OrdinalIgnoreCase)
-    || databaseUrl.StartsWith("sqlite", StringComparison.OrdinalIgnoreCase);
+if (string.IsNullOrWhiteSpace(databaseUrl))
+    throw new InvalidOperationException("ConnectionStrings:DefaultConnection must be set to a PostgreSQL connection string.");
 
-if (useSqlite)
-{
-    var sqliteDir = Path.GetDirectoryName(sqlitePath);
-    if (!string.IsNullOrWhiteSpace(sqliteDir))
-    {
-        Directory.CreateDirectory(sqliteDir);
-    }
-
-    var sqliteConnection = $"Data Source={sqlitePath}";
-    builder.Configuration["ResolvedDatabase:Provider"] = "sqlite";
-    builder.Configuration["ResolvedDatabase:ConnectionString"] = sqliteConnection;
-    builder.Services.AddDbContext<StoreDbContext>(opt =>
-    {
-        opt.UseSqlite(sqliteConnection);
-        opt.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
-    });
-}
-else
-{
-    builder.Configuration["ResolvedDatabase:Provider"] = "postgres";
-    builder.Configuration["ResolvedDatabase:ConnectionString"] = databaseUrl;
-    builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl));
-}
+builder.Configuration["ResolvedDatabase:Provider"] = "postgres";
+builder.Configuration["ResolvedDatabase:ConnectionString"] = databaseUrl;
+builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl));
 
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminDataSeeder>();
