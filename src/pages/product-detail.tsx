@@ -14,6 +14,8 @@ import { useCart } from '@/context/CartContext';
 import { toast } from 'sonner';
 import { Heart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import PageSeo from '@/components/PageSeo';
+import { resolveUrl, truncateText } from '@/lib/seo';
 
 interface Product {
   _id: string;
@@ -57,6 +59,28 @@ export default function ProductDetailPage() {
   const { addToCart } = useCart();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const mediaImage = product?.media?.find((item) => item.type === "image")?.url || "";
+  const productImage = product?.images?.[0] || mediaImage || "/favicon.ico";
+  const productDescription = product
+    ? truncateText(product.description || `${product.name} от fashiondemon`, 160)
+    : "Страница товара fashiondemon.";
+  const hasStock = product
+    ? product.sizeStock
+      ? Object.values(product.sizeStock).some((value) => Number(value) > 0)
+      : (product.sizes || []).length > 0
+    : false;
+  const productImages = product
+    ? (product.images?.length
+        ? product.images
+        : (product.media || [])
+            .filter((item) => item.type === "image")
+            .map((item) => item.url))
+        .map((item) => resolveUrl(item))
+        .filter(Boolean)
+    : [];
+  const seoTitle = product ? product.name : (loading ? "Товар" : "Товар не найден");
+  const seoPath = slug ? `/product/${slug}` : "/catalog";
+  const seoRobots = product ? "index,follow" : "noindex,nofollow";
 
   useEffect(() => {
     if (!slug) return;
@@ -218,23 +242,77 @@ export default function ProductDetailPage() {
     }
   };
 
-  if (loading) return <LoadingSpinner className="h-screen" />;
+  if (loading) return (
+    <>
+      <PageSeo
+        title={seoTitle}
+        description={productDescription}
+        canonicalPath={seoPath}
+        image={productImage}
+        robots={seoRobots}
+      />
+      <LoadingSpinner className="h-screen" />
+    </>
+  );
   
   if (!product) return (
-    <div className="min-h-screen flex flex-col">
-      <Header />
-      <div className="flex-1 flex flex-col items-center justify-center">
+    <>
+      <PageSeo
+        title="Товар не найден"
+        description="Запрошенный товар не найден в каталоге fashiondemon."
+        canonicalPath={seoPath}
+        image={productImage}
+        robots="noindex,nofollow"
+      />
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1 flex flex-col items-center justify-center">
         <h1 className="text-4xl font-black mb-4">ТОВАР НЕ НАЙДЕН</h1>
         <Link to="/catalog">
           <Button>Вернуться в каталог</Button>
         </Link>
+        </div>
+        <Footer />
       </div>
-      <Footer />
-    </div>
+    </>
   );
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <PageSeo
+        title={seoTitle}
+        description={productDescription}
+        canonicalPath={seoPath}
+        image={productImage}
+        type="product"
+        robots={seoRobots}
+        keywords={[product.name, product.category, product.sku, 'fashiondemon', 'купить одежду'].filter(Boolean)}
+        structuredData={({ canonicalUrl, siteTitle }) => ({
+          "@context": "https://schema.org",
+          "@type": "Product",
+          name: product.name,
+          description: productDescription,
+          image: productImages.length > 0 ? productImages : [resolveUrl(productImage)],
+          sku: product.sku || product.slug,
+          category: product.category,
+          color: product.color || undefined,
+          material: product.material || undefined,
+          brand: {
+            "@type": "Brand",
+            name: siteTitle,
+          },
+          offers: {
+            "@type": "Offer",
+            url: canonicalUrl,
+            priceCurrency: "RUB",
+            price: String(Math.round(product.price)),
+            availability: hasStock
+              ? "https://schema.org/InStock"
+              : "https://schema.org/OutOfStock",
+            itemCondition: "https://schema.org/NewCondition",
+          },
+        })}
+      />
       <Header />
       
       <main className="flex-1 container mx-auto px-4 pt-28 pb-12 md:pt-32">

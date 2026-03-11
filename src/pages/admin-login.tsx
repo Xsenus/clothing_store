@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { FLOW } from "@/lib/api-mapping";
 import { toast } from "sonner";
+import PageSeo from "@/components/PageSeo";
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState("");
@@ -30,6 +31,12 @@ export default function AdminLoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <PageSeo
+        title="Вход администратора"
+        description="Авторизация администратора fashiondemon."
+        canonicalPath="/admin-login"
+        robots="noindex,nofollow"
+      />
       <Header />
       <main className="flex-1 container mx-auto px-4 py-12 flex items-center justify-center">
         <Card className="w-full max-w-[420px]">

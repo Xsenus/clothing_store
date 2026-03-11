@@ -3,6 +3,7 @@ import Footer from '@/components/Footer';
 import { PRIVACY_POLICY } from '@/lib/legal-texts';
 import { useEffect, useState } from 'react';
 import { fetchPublicSettings } from '@/lib/site-settings';
+import PageSeo from '@/components/PageSeo';
 
 export default function PrivacyPage() {
   const [text, setText] = useState(PRIVACY_POLICY);
@@ -19,6 +20,18 @@ export default function PrivacyPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <PageSeo
+        title="Политика конфиденциальности"
+        description="Политика конфиденциальности магазина fashiondemon."
+        canonicalPath="/privacy"
+        structuredData={({ canonicalUrl, title }) => ({
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: title,
+          url: canonicalUrl,
+          inLanguage: "ru-RU",
+        })}
+      />
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-12 md:py-24 max-w-4xl">

@@ -4,8 +4,7 @@ import {
   getCachedPublicSettings,
   SITE_BRANDING_UPDATED_EVENT,
 } from "@/lib/site-settings";
-
-const DEFAULT_TITLE = "Fashiondemon";
+import { buildDocumentTitle, DEFAULT_SITE_TITLE, normalizeSiteTitle } from "@/lib/seo";
 
 const ensureFaviconElement = () => {
   const existing = document.querySelector('link[rel="icon"]');
@@ -18,8 +17,10 @@ const ensureFaviconElement = () => {
 };
 
 const applyBranding = (settings, defaultFaviconUrl) => {
-  const nextTitle = settings?.site_title?.trim() || DEFAULT_TITLE;
-  document.title = nextTitle;
+  const siteTitle = normalizeSiteTitle(settings?.site_title) || DEFAULT_SITE_TITLE;
+  const pageTitle = document.documentElement.dataset.pageTitle || "";
+  document.documentElement.dataset.siteTitle = siteTitle;
+  document.title = buildDocumentTitle(pageTitle, siteTitle);
 
   const faviconLink = ensureFaviconElement();
   const faviconUrl = settings?.site_favicon_url?.trim();

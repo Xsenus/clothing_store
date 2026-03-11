@@ -13,6 +13,7 @@ import LoadingSpinner from "@/components/LoadingSpinner";
 import { toast } from "sonner";
 import AdminPage from "./admin";
 import { useNavigate } from "react-router";
+import PageSeo from "@/components/PageSeo";
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState("orders");
@@ -94,11 +95,27 @@ export default function ProfilePage() {
 
   const likedProducts = products.filter((product) => likedProductIds.includes(product._id));
 
-  if (loading) return <LoadingSpinner className="h-screen" />;
+  if (loading) return (
+    <>
+      <PageSeo
+        title="Личный кабинет"
+        description="Личный кабинет пользователя fashiondemon."
+        canonicalPath="/profile"
+        robots="noindex,nofollow"
+      />
+      <LoadingSpinner className="h-screen" />
+    </>
+  );
 
   return (
     <Authenticated>
       <div className="min-h-screen flex flex-col bg-background text-foreground">
+        <PageSeo
+          title="Личный кабинет"
+          description="Личный кабинет пользователя fashiondemon."
+          canonicalPath="/profile"
+          robots="noindex,nofollow"
+        />
         <Header />
 
         <main className="flex-1 container mx-auto px-4 py-12">

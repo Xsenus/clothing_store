@@ -6,6 +6,17 @@ import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import PageSeo from '@/components/PageSeo';
+
+const HOME_KEYWORDS = [
+  'fashiondemon',
+  'магазин одежды',
+  'streetwear',
+  'стритвир',
+  'модная одежда',
+  'брендовая одежда',
+  'каталог одежды',
+];
 
 interface Product {
   _id: string;
@@ -50,6 +61,27 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground selection:bg-black selection:text-white">
+      <PageSeo
+        description="fashiondemon - магазин одежды и стритвира: новые коллекции, популярные модели и доставка по России."
+        canonicalPath="/"
+        keywords={HOME_KEYWORDS}
+        structuredData={({ canonicalUrl, imageUrl, siteTitle }) => ([
+          {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            name: siteTitle,
+            url: canonicalUrl,
+            logo: imageUrl,
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            name: siteTitle,
+            url: canonicalUrl,
+            inLanguage: "ru-RU",
+          },
+        ])}
+      />
       <Header />
       
       {/* Hero Section */}

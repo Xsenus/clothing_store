@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Authenticated } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import PageSeo from '@/components/PageSeo';
 
 export default function CheckoutPage() {
   const { cartItems, totalItems, clearCart } = useCart();
@@ -145,6 +146,12 @@ export default function CheckoutPage() {
   return (
     <Authenticated>
       <div className="min-h-screen flex flex-col bg-background text-foreground">
+        <PageSeo
+          title="Оформление заказа"
+          description="Оформление заказа в магазине fashiondemon."
+          canonicalPath="/checkout"
+          robots="noindex,nofollow"
+        />
         <Header />
         
         <main className="flex-1 container mx-auto px-4 py-12">

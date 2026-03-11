@@ -7,6 +7,7 @@ import { Link } from 'react-router';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import PageSeo from '@/components/PageSeo';
 
 interface Product {
   _id: string;
@@ -47,10 +48,26 @@ export default function CartPage() {
     return sum + (product ? product.price * item.quantity : 0);
   }, 0);
 
-  if (isLoading || fetchingProducts) return <LoadingSpinner className="h-screen" />;
+  if (isLoading || fetchingProducts) return (
+    <>
+      <PageSeo
+        title="Корзина"
+        description="Корзина покупателя fashiondemon."
+        canonicalPath="/cart"
+        robots="noindex,nofollow"
+      />
+      <LoadingSpinner className="h-screen" />
+    </>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <PageSeo
+        title="Корзина"
+        description="Корзина покупателя fashiondemon."
+        canonicalPath="/cart"
+        robots="noindex,nofollow"
+      />
       <Header />
 
       <main className="flex-1 container mx-auto px-4 py-12">

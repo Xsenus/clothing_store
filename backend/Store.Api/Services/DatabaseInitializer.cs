@@ -291,14 +291,14 @@ public class DatabaseInitializer
         var title = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == "site_title");
         if (title is null)
         {
-            db.AppSettings.Add(new AppSetting { Key = "site_title", Value = "Fashiondemon" });
+            db.AppSettings.Add(new AppSetting { Key = "site_title", Value = "fashiondemon" });
             await db.SaveChangesAsync();
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(title.Value))
+        if (string.IsNullOrWhiteSpace(title.Value) || string.Equals(title.Value, "Fashiondemon", StringComparison.Ordinal))
         {
-            title.Value = "Fashiondemon";
+            title.Value = "fashiondemon";
             await db.SaveChangesAsync();
         }
     }

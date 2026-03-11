@@ -11,6 +11,7 @@ import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
 import { fetchPublicSettings } from "@/lib/site-settings";
+import PageSeo from "@/components/PageSeo";
 
 
 function AuthMiniFooter() {
@@ -53,6 +54,7 @@ export default function AuthPage() {
 
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
+  const authSeoTitle = pendingEmail ? "Подтверждение email" : "Вход и регистрация";
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -274,6 +276,12 @@ export default function AuthPage() {
   if (showReset) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
+        <PageSeo
+          title="Восстановление пароля"
+          description="Восстановление доступа к аккаунту fashiondemon."
+          canonicalPath="/auth"
+          robots="noindex,nofollow"
+        />
         <Header />
         <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <Card
@@ -349,6 +357,12 @@ export default function AuthPage() {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
+        <PageSeo
+          title={authSeoTitle}
+          description="Вход и регистрация в магазине fashiondemon."
+          canonicalPath="/auth"
+          robots="noindex,nofollow"
+        />
         <Header />
         <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
           <div className="text-sm text-gray-500">Проверяем сессию…</div>
@@ -364,6 +378,12 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <PageSeo
+        title={authSeoTitle}
+        description="Вход и регистрация в магазине fashiondemon."
+        canonicalPath="/auth"
+        robots="noindex,nofollow"
+      />
       <Header />
       <main className="flex-1 container mx-auto px-4 py-8 pt-28 md:py-10 md:pt-0 flex items-center justify-center">
         <Card className="mx-auto w-full shadow-lg" style={{ width: "min(100%, 400px)" }}>
