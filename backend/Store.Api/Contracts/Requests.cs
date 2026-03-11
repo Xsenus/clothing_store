@@ -96,3 +96,6 @@ public record TelegramBotPatchPayload(
     string? Username,
     bool? Enabled,
     List<TelegramBotCommandPayload>? Commands);
+
+
+public record TelegramBotValidatePayload(string Token);

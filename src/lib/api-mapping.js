@@ -393,6 +393,12 @@ export const FLOW = {
 
   adminGetTelegramBots: async () => request("/admin/telegram-bots"),
 
+  adminValidateTelegramBot: async ({ input }) => request("/admin/telegram-bots/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminCreateTelegramBot: async ({ input }) => request("/admin/telegram-bots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -15,6 +15,7 @@ public interface ITelegramBotManager
     Task<object?> UpdateBotAsync(string id, TelegramBotPatchPayload payload);
     Task<bool> DeleteBotAsync(string id);
     Task<object?> CheckBotAsync(string id);
+    Task<object> ValidateTokenAsync(string token);
     Task SyncNowAsync();
 }
 
@@ -39,6 +40,17 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             await SyncWorkersAsync(stoppingToken);
             await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
+    }
+
+
+    public async Task<object> ValidateTokenAsync(string token)
+    {
+        var normalizedToken = token?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedToken))
+            throw new InvalidOperationException("Telegram bot token is required");
+
+        var me = await FetchMeInfoAsync(normalizedToken, CancellationToken.None);
+        return JsonSerializer.Deserialize<object>(me.RawResult.GetRawText()) ?? new { };
     }
 
     public async Task SyncNowAsync() => await SyncWorkersAsync(CancellationToken.None);
@@ -157,22 +169,30 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
+        var token = payload.Token?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Telegram bot token is required");
+
+        await FetchMeInfoAsync(token, CancellationToken.None);
+
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var bot = new TelegramBot
         {
             Name = payload.Name.Trim(),
             Description = payload.Description?.Trim() ?? string.Empty,
             ImageUrl = string.IsNullOrWhiteSpace(payload.ImageUrl) ? null : payload.ImageUrl.Trim(),
-            Token = payload.Token.Trim(),
+            Token = token,
             Username = string.IsNullOrWhiteSpace(payload.Username) ? null : payload.Username.Trim().TrimStart('@'),
             Enabled = payload.Enabled,
             CommandsJson = SerializeCommands(payload.Commands),
             CreatedAt = now,
             UpdatedAt = now
         };
-        db.TelegramBots.Add(bot);
-        await db.SaveChangesAsync();
+
         await ApplyBotMetadataAsync(db, bot, CancellationToken.None);
+        await FetchMeInfoAsync(bot.Token, CancellationToken.None);
+
+        db.TelegramBots.Add(bot);
         await db.SaveChangesAsync();
         await SyncNowAsync();
         return ToDto(bot);
@@ -185,17 +205,24 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         var bot = await db.TelegramBots.FirstOrDefaultAsync(x => x.Id == id);
         if (bot is null) return null;
 
+        var tokenCandidate = payload.Token is null ? bot.Token : payload.Token.Trim();
+        if (string.IsNullOrWhiteSpace(tokenCandidate))
+            throw new InvalidOperationException("Telegram bot token is required");
+
+        await FetchMeInfoAsync(tokenCandidate, CancellationToken.None);
+
         if (payload.Name is not null) bot.Name = payload.Name.Trim();
         if (payload.Description is not null) bot.Description = payload.Description.Trim();
         if (payload.ImageUrl is not null) bot.ImageUrl = string.IsNullOrWhiteSpace(payload.ImageUrl) ? null : payload.ImageUrl.Trim();
-        if (payload.Token is not null) bot.Token = payload.Token.Trim();
+        bot.Token = tokenCandidate;
         if (payload.Username is not null) bot.Username = string.IsNullOrWhiteSpace(payload.Username) ? null : payload.Username.Trim().TrimStart('@');
         if (payload.Enabled.HasValue) bot.Enabled = payload.Enabled.Value;
         if (payload.Commands is not null) bot.CommandsJson = SerializeCommands(payload.Commands);
         bot.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        await db.SaveChangesAsync();
         await ApplyBotMetadataAsync(db, bot, CancellationToken.None);
+        await FetchMeInfoAsync(bot.Token, CancellationToken.None);
+
         await db.SaveChangesAsync();
         await SyncNowAsync();
         return ToDto(bot);
@@ -226,18 +253,11 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private async Task ApplyBotMetadataAsync(StoreDbContext db, TelegramBot bot, CancellationToken cancellationToken)
     {
+        var meInfo = await FetchMeInfoAsync(bot.Token, cancellationToken);
+        bot.Username = meInfo.Username ?? bot.Username;
+        bot.LastBotInfoJson = JsonSerializer.Serialize(meInfo.RawResult);
+
         var client = _httpClientFactory.CreateClient();
-        using var meRes = await client.GetAsync($"https://api.telegram.org/bot{bot.Token}/getMe", cancellationToken);
-        var meContent = await meRes.Content.ReadAsStringAsync(cancellationToken);
-        if (meRes.IsSuccessStatusCode)
-        {
-            using var doc = JsonDocument.Parse(meContent);
-            if (doc.RootElement.TryGetProperty("result", out var result))
-            {
-                bot.Username = result.TryGetProperty("username", out var u) ? u.GetString() : bot.Username;
-                bot.LastBotInfoJson = result.GetRawText();
-            }
-        }
 
         var commands = DeserializeCommands(bot.CommandsJson);
         if (!commands.Any(x => x.Command == "/check"))
@@ -258,6 +278,33 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         bot.LastCheckedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         bot.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
+
+
+    private async Task<TelegramBotMeInfo> FetchMeInfoAsync(string token, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var meRes = await client.GetAsync($"https://api.telegram.org/bot{token}/getMe", cancellationToken);
+        var meContent = await meRes.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!meRes.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Telegram getMe failed with status {(int)meRes.StatusCode}");
+
+        using var doc = JsonDocument.Parse(meContent);
+        if (!doc.RootElement.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
+            throw new InvalidOperationException("Telegram getMe returned unsuccessful response");
+
+        if (!doc.RootElement.TryGetProperty("result", out var resultEl) || resultEl.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Telegram getMe response does not contain bot info");
+
+        var rawJson = resultEl.GetRawText();
+        using var rawDoc = JsonDocument.Parse(rawJson);
+        var cloned = rawDoc.RootElement.Clone();
+        var username = cloned.TryGetProperty("username", out var u) ? u.GetString() : null;
+
+        return new TelegramBotMeInfo(username, cloned);
+    }
+
+    private sealed record TelegramBotMeInfo(string? Username, JsonElement RawResult);
 
     private static object ToDto(TelegramBot bot)
     {

@@ -196,6 +196,22 @@ public class AdminController : ControllerBase
     }
 
 
+    [HttpPost("telegram-bots/validate")]
+    public async Task<IResult> ValidateTelegramBot([FromBody] TelegramBotValidatePayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var info = await _telegramBotManager.ValidateTokenAsync(payload.Token);
+            return Results.Ok(info);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
     [HttpGet("telegram-bots")]
     public async Task<IResult> TelegramBots()
     {
@@ -207,15 +223,31 @@ public class AdminController : ControllerBase
     public async Task<IResult> CreateTelegramBot([FromBody] TelegramBotPayload payload)
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-        return Results.Ok(await _telegramBotManager.CreateBotAsync(payload));
+
+        try
+        {
+            return Results.Ok(await _telegramBotManager.CreateBotAsync(payload));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpPatch("telegram-bots/{id}")]
     public async Task<IResult> UpdateTelegramBot(string id, [FromBody] TelegramBotPatchPayload payload)
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-        var bot = await _telegramBotManager.UpdateBotAsync(id, payload);
-        return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+
+        try
+        {
+            var bot = await _telegramBotManager.UpdateBotAsync(id, payload);
+            return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpDelete("telegram-bots/{id}")]
@@ -230,8 +262,16 @@ public class AdminController : ControllerBase
     public async Task<IResult> CheckTelegramBot(string id)
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-        var bot = await _telegramBotManager.CheckBotAsync(id);
-        return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+
+        try
+        {
+            var bot = await _telegramBotManager.CheckBotAsync(id);
+            return bot is null ? Results.NotFound(new { detail = "Bot not found" }) : Results.Ok(bot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpGet("settings")]
