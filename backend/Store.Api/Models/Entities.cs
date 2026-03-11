@@ -155,6 +155,9 @@ public class TelegramBot
     [Column("description")]
     public string Description { get; set; } = string.Empty;
 
+    [Column("short_description")]
+    public string? ShortDescription { get; set; }
+
     [Column("image_url")]
     public string? ImageUrl { get; set; }
 

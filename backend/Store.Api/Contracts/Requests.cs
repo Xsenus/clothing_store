@@ -82,6 +82,7 @@ public record TelegramBotCommandPayload(string Command, string Description);
 public record TelegramBotPayload(
     string Name,
     string Description,
+    string? ShortDescription,
     string? ImageUrl,
     string Token,
     string? Username,
@@ -91,6 +92,7 @@ public record TelegramBotPayload(
 public record TelegramBotPatchPayload(
     string? Name,
     string? Description,
+    string? ShortDescription,
     string? ImageUrl,
     string? Token,
     string? Username,

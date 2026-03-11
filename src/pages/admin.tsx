@@ -23,10 +23,10 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -38,8 +38,11 @@ interface TelegramBot {
   id: string;
   name: string;
   description: string;
+  shortDescription?: string | null;
   imageUrl?: string | null;
   username?: string | null;
+  tokenMasked?: string;
+  hasToken?: boolean;
   enabled: boolean;
   commands: TelegramBotCommand[];
   botInfo?: any;
@@ -121,9 +124,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotForm, setTelegramBotForm] = useState({
     name: "",
     description: "",
+    shortDescription: "",
     imageUrl: "",
     token: "",
     username: "",
+    tokenMasked: "",
     enabled: true,
     commandsText: "/check:Проверка работы бота"
   });
@@ -132,6 +137,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotSaving, setTelegramBotSaving] = useState(false);
   const [telegramBotChecking, setTelegramBotChecking] = useState(false);
   const [telegramBotCheckInfo, setTelegramBotCheckInfo] = useState<any | null>(null);
+  const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
 
   // Form State
@@ -264,9 +270,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setTelegramBotForm({
       name: "",
       description: "",
+      shortDescription: "",
       imageUrl: "",
       token: "",
       username: "",
+      tokenMasked: "",
       enabled: true,
       commandsText: "/check:Проверка работы бота"
     });
@@ -307,17 +315,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setTelegramBotForm({
       name: bot.name || "",
       description: bot.description || "",
+      shortDescription: bot.shortDescription || "",
       imageUrl: bot.imageUrl || "",
       token: "",
       username: bot.username || "",
+      tokenMasked: bot.tokenMasked || "",
       enabled: bot.enabled,
       commandsText: toCommandsText(bot.commands)
     });
     setIsTelegramBotDialogOpen(true);
   };
 
-  const validateTelegramToken = async () => {
-    const token = telegramBotForm.token.trim();
+  const validateTelegramToken = async (tokenInput?: string) => {
+    const token = (tokenInput ?? telegramBotForm.token).trim();
     if (!token) {
       toast.error("Токен бота обязателен");
       return null;
@@ -327,7 +337,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     try {
       const info = await FLOW.adminValidateTelegramBot({ input: { token } });
       setTelegramBotCheckInfo(info || null);
-      if (!telegramBotForm.username && info?.username) {
+      if (info?.username) {
         setTelegramBotForm((prev) => ({ ...prev, username: info.username }));
       }
       if (!telegramBotForm.name && info?.first_name) {
@@ -343,8 +353,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const uploadTelegramBotImage = async (file?: File) => {
+    if (!file) return;
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append("files", file);
+      const res = await FLOW.adminUpload({ input: formDataUpload });
+      const first = Array.isArray(res?.urls) ? res.urls[0] : null;
+      if (!first) {
+        toast.error("Не удалось загрузить изображение");
+        return;
+      }
+
+      setTelegramBotForm((prev) => ({ ...prev, imageUrl: first }));
+      toast.success("Изображение загружено");
+    } catch {
+      toast.error("Ошибка загрузки изображения");
+    }
+  };
+
   const saveTelegramBot = async () => {
-    if (!telegramBotForm.token.trim()) {
+    const enteredToken = telegramBotForm.token.trim();
+
+    if (!enteredToken && !editingTelegramBotId) {
       toast.error("Токен бота обязателен");
       return;
     }
@@ -356,37 +387,45 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
     setTelegramBotSaving(true);
     try {
-      const preCheck = await validateTelegramToken();
-      if (!preCheck) {
-        return;
+      if (enteredToken) {
+        const preCheck = await validateTelegramToken(enteredToken);
+        if (!preCheck) return;
+      } else if (editingTelegramBotId) {
+        await FLOW.adminCheckTelegramBot({ input: { id: editingTelegramBotId } });
       }
 
       const payload = {
         name: telegramBotForm.name.trim(),
         description: telegramBotForm.description.trim(),
+        shortDescription: telegramBotForm.shortDescription.trim(),
         imageUrl: telegramBotForm.imageUrl.trim(),
-        token: telegramBotForm.token.trim(),
-        username: telegramBotForm.username.trim(),
+        token: enteredToken || undefined,
         enabled: telegramBotForm.enabled,
         commands: parseCommands(telegramBotForm.commandsText)
       };
 
+      let savedBot: any;
       if (editingTelegramBotId) {
-        await FLOW.adminUpdateTelegramBot({ input: { id: editingTelegramBotId, payload } });
+        savedBot = await FLOW.adminUpdateTelegramBot({ input: { id: editingTelegramBotId, payload } });
       } else {
-        await FLOW.adminCreateTelegramBot({ input: payload });
+        savedBot = await FLOW.adminCreateTelegramBot({ input: { ...payload, token: enteredToken } });
       }
 
-      const postCheck = await validateTelegramToken();
-      if (!postCheck) {
-        toast.error("Повторная проверка getMe после сохранения не прошла");
-        return;
+      if (enteredToken) {
+        const postCheck = await validateTelegramToken(enteredToken);
+        if (!postCheck) {
+          toast.error("Повторная проверка getMe после сохранения не прошла");
+          return;
+        }
+      } else if (editingTelegramBotId) {
+        await FLOW.adminCheckTelegramBot({ input: { id: editingTelegramBotId } });
       }
 
       toast.success(editingTelegramBotId ? "Бот обновлён и запущен" : "Бот добавлен и запущен");
       setIsTelegramBotDialogOpen(false);
       resetTelegramBotForm();
       await fetchAdminData();
+      setTelegramBotCheckInfo(savedBot?.botInfo || null);
     } catch {
       toast.error("Не удалось сохранить Telegram-бота");
     } finally {
@@ -1014,14 +1053,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <div className="font-semibold truncate">{bot.name}</div>
                                   <div className="text-xs text-slate-400 truncate">{bot.username ? `@${bot.username}` : "username не задан"}</div>
                                   <div className="text-xs text-slate-500">ID: {bot.botInfo?.id || bot.id}</div>
+                                  <div className="text-xs text-slate-400">Токен: {bot.tokenMasked || "********"}</div>
                                 </div>
                                 <div className="flex items-center justify-between gap-2">
                                   <span className={`text-xs ${bot.enabled ? "text-emerald-400" : "text-amber-300"}`}>{bot.enabled ? "Активен" : "Остановлен"}</span>
                                   <div className="flex gap-2">
-                                    <Button type="button" size="sm" variant="outline" onClick={() => openEditTelegramBotDialog(bot)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                    <Button type="button" size="sm" variant="outline" onClick={() => checkTelegramBot(bot)}>Check</Button>
-                                    <Button type="button" size="sm" variant="outline" onClick={() => toggleTelegramBot(bot)}>{bot.enabled ? "Stop" : "Start"}</Button>
-                                    <Button type="button" size="sm" variant="destructive" onClick={() => deleteTelegramBot(bot)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                    <Button type="button" size="icon" className="h-8 w-8 border border-slate-500 bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={() => openEditTelegramBotDialog(bot)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                    <Button type="button" size="icon" className="h-8 w-8 border border-emerald-500 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/50" onClick={() => checkTelegramBot(bot)}><ShieldCheck className="h-3.5 w-3.5" /></Button>
+                                    <Button type="button" size="icon" className="h-8 w-8 border border-sky-500 bg-sky-900/30 text-sky-300 hover:bg-sky-800/50" onClick={() => toggleTelegramBot(bot)}>{bot.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</Button>
+                                    <Button type="button" size="icon" className="h-8 w-8 border border-red-500 bg-red-900/30 text-red-300 hover:bg-red-800/50" onClick={() => deleteTelegramBot(bot)}><Trash2 className="h-3.5 w-3.5" /></Button>
                                   </div>
                                 </div>
                               </div>
@@ -1154,19 +1194,33 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <Label>Username</Label>
                     <Input
                       value={telegramBotForm.username}
-                      onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, username: e.target.value }))}
                       placeholder="@my_bot"
+                      readOnly
+                      className="bg-muted"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <Label>URL картинки</Label>
                   <Input
                     value={telegramBotForm.imageUrl}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, imageUrl: e.target.value }))}
                     placeholder="https://..."
                   />
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={() => telegramBotImageInputRef.current?.click()}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Загрузить на сайт
+                    </Button>
+                    <input
+                      ref={telegramBotImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => uploadTelegramBotImage(e.target.files?.[0])}
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -1175,9 +1229,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     type="password"
                     value={telegramBotForm.token}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, token: e.target.value }))}
-                    placeholder="12345:AA..."
-                    required
+                    placeholder={editingTelegramBotId ? (telegramBotForm.tokenMasked || "Оставьте пустым, чтобы не менять токен") : "12345:AA..."}
+                    required={!editingTelegramBotId}
                   />
+                  {editingTelegramBotId && (
+                    <p className="text-xs text-muted-foreground">Если токен не меняли, оставьте поле пустым — сохранится текущий токен.</p>
+                  )}
                   <Button type="button" variant="outline" onClick={validateTelegramToken} disabled={telegramBotChecking}>
                     {telegramBotChecking ? "Проверка..." : "Проверить (getMe)"}
                   </Button>
@@ -1194,7 +1251,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <Textarea
                     value={telegramBotForm.description}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, description: e.target.value }))}
-                    placeholder="Короткое описание бота"
+                    placeholder="Описание бота (setMyDescription)"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Краткое описание</Label>
+                  <Input
+                    value={telegramBotForm.shortDescription}
+                    onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, shortDescription: e.target.value }))}
+                    placeholder="Краткое описание (setMyShortDescription)"
                   />
                 </div>
 
