@@ -147,23 +147,15 @@ sudo -u postgres psql -d clothing_store -c "select now();"
 
 ## Ошибка `Request failed: 404` при проверке Telegram-бота
 
-Если при кнопке **«Проверить (getMe)»** приходит `404`, обычно причина одна из двух:
+Подробный пошаговый runbook вынесен в отдельный документ:
 
-1. На сервере запущен старый backend (без актуального endpoint проверки).
-2. После деплоя backend не был перезапущен.
+- `docs/TELEGRAM_BOT_404.md`
 
-Что сделать:
+Коротко:
 
-```bash
-cd /opt/clothing_store
-git pull
-npm ci && npm run build
-dotnet publish backend/Store.Api/Store.Api.csproj -c Release
-sudo systemctl restart clothing-store-api
-sudo systemctl status clothing-store-api --no-pager
-```
-
-После этого снова проверить кнопку **«Проверить (getMe)»** в админке.
+- Если в `journalctl` есть `Request reached the end of the middleware pipeline...` для `POST /admin/telegram-bots/validate` или `/check`, то маршрут отсутствует в **запущенном** backend-процессе.
+- Обычно это старый бинарник, отсутствие рестарта после деплоя или неверный upstream в nginx.
+- Выполните чеклист из `docs/TELEGRAM_BOT_404.md`.
 
 ---
 
