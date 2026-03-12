@@ -364,6 +364,11 @@ namespace Store.Api.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("enabled");
 
+                    b.Property<string>("UpdateMode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("update_mode");
+
                     b.Property<string>("ImageUrl")
                         .HasColumnType("text")
                         .HasColumnName("image_url");
@@ -402,6 +407,10 @@ namespace Store.Api.Migrations
                     b.Property<bool>("UseForLogin")
                         .HasColumnType("boolean")
                         .HasColumnName("use_for_login");
+
+                    b.Property<string>("WebhookSecret")
+                        .HasColumnType("text")
+                        .HasColumnName("webhook_secret");
 
                     b.Property<string>("Username")
                         .HasColumnType("text")

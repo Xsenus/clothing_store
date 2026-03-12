@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Store.Api.Contracts;
 using Store.Api.Data;
+using Store.Api.Services;
 
 namespace Store.Api.Controllers;
 
@@ -16,12 +17,25 @@ public class IntegrationsController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
+    private readonly ITelegramBotManager _telegramBotManager;
 
-    public IntegrationsController(IHttpClientFactory httpClientFactory, StoreDbContext db, IConfiguration configuration)
+    public IntegrationsController(IHttpClientFactory httpClientFactory, StoreDbContext db, IConfiguration configuration, ITelegramBotManager telegramBotManager)
     {
         _httpClientFactory = httpClientFactory;
         _db = db;
         _configuration = configuration;
+        _telegramBotManager = telegramBotManager;
+    }
+
+    [HttpPost("telegram/webhook/{id}")]
+    public async Task<IResult> TelegramWebhook(string id, [FromBody] JsonElement payload, CancellationToken cancellationToken)
+    {
+        var secret = Request.Headers["X-Telegram-Bot-Api-Secret-Token"].FirstOrDefault();
+        var handled = await _telegramBotManager.HandleWebhookUpdateAsync(id, secret, payload, cancellationToken);
+        if (!handled)
+            return Results.NotFound(new { detail = "Bot not found, disabled, or webhook is not configured" });
+
+        return Results.Ok(new { ok = true });
     }
 
     [HttpPost("dadata/suggest")]
