@@ -390,6 +390,60 @@ public class TelegramAuthRequest
     public long? ConsumedAt { get; set; }
 }
 
+
+[Table("contact_change_requests")]
+public class ContactChangeRequest
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Column("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    [Column("target_value")]
+    public string TargetValue { get; set; } = string.Empty;
+
+    [Column("code")]
+    public string? Code { get; set; }
+
+    [Column("state")]
+    public string? State { get; set; }
+
+    [Column("chat_id")]
+    public long? ChatId { get; set; }
+
+    [Column("telegram_user_id")]
+    public string? TelegramUserId { get; set; }
+
+    [Column("status")]
+    public string Status { get; set; } = "pending";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("expires_at")]
+    public long ExpiresAt { get; set; }
+
+    [Column("verified_at")]
+    public long? VerifiedAt { get; set; }
+
+    [Column("consumed_at")]
+    public long? ConsumedAt { get; set; }
+
+    [Column("last_sent_at")]
+    public long? LastSentAt { get; set; }
+
+    [Column("resend_count")]
+    public int ResendCount { get; set; }
+
+    [Column("resend_window_started_at")]
+    public long? ResendWindowStartedAt { get; set; }
+}
+
 /// <summary>
 /// Представляет товар каталога.
 /// </summary>

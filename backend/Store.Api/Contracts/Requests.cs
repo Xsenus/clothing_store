@@ -28,7 +28,7 @@ public record RefreshPayload(string RefreshToken);
 /// <summary>
 /// Данные профиля пользователя.
 /// </summary>
-public record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname);
+public record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname, string? Email = null);
 
 /// <summary>
 /// Данные для добавления товара в корзину.
@@ -68,6 +68,10 @@ public record TelegramAuthPayload(
     string Hash);
 
 public record TelegramStartAuthPayload(string? ReturnUrl);
+
+public record ContactChangeStartPayload(string Value);
+
+public record ContactChangeConfirmPayload(string Value, string Code);
 
 /// <summary>
 /// Параметры поиска адреса через DaData.

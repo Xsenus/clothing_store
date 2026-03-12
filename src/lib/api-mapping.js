@@ -223,6 +223,27 @@ export const FLOW = {
 
   getProfile: async () => request("/profile"),
 
+  startEmailVerification: async ({ input }) => request("/profile/email/verify/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value }),
+  }),
+
+  confirmEmailVerification: async ({ input }) => request("/profile/email/verify/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value, code: input.code }),
+  }),
+
+  startPhoneVerification: async ({ input }) => request("/profile/phone/verify/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value }),
+  }),
+
+  getPhoneVerificationStatus: async ({ input }) => request(`/profile/phone/verify/status/${encodeURIComponent(input.state)}`),
+
+
   createProfile: async ({ input }) => request("/profile", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

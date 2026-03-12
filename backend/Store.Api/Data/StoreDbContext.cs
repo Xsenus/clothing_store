@@ -60,6 +60,7 @@ public class StoreDbContext : DbContext
     public DbSet<TelegramBot> TelegramBots => Set<TelegramBot>();
     public DbSet<TelegramBotSubscriber> TelegramBotSubscribers => Set<TelegramBotSubscriber>();
     public DbSet<TelegramAuthRequest> TelegramAuthRequests => Set<TelegramAuthRequest>();
+    public DbSet<ContactChangeRequest> ContactChangeRequests => Set<ContactChangeRequest>();
     public DbSet<GalleryImage> GalleryImages => Set<GalleryImage>();
 
     /// <inheritdoc />
@@ -76,6 +77,8 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<TelegramBot>().HasIndex(x => x.Username);
         modelBuilder.Entity<TelegramBotSubscriber>().HasIndex(x => new { x.BotId, x.ChatId }).IsUnique();
         modelBuilder.Entity<TelegramAuthRequest>().HasIndex(x => x.State).IsUnique();
+        modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => new { x.UserId, x.Kind, x.Status });
+        modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => x.State);
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
 
         modelBuilder.Entity<Session>()

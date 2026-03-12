@@ -360,6 +360,13 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         if (bot.UseForLogin)
         {
+            var handledPhoneVerification = await TryHandlePhoneVerificationMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+            if (handledPhoneVerification)
+            {
+                await db.SaveChangesAsync(token);
+                return;
+            }
+
             var handledLogin = await TryHandleLoginFlowMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
             if (handledLogin)
             {
@@ -412,6 +419,117 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         }
 
         await db.SaveChangesAsync(token);
+    }
+
+    private async Task<bool> TryHandlePhoneVerificationMessageAsync(
+        HttpClient client,
+        StoreDbContext db,
+        TelegramBot bot,
+        JsonElement messageEl,
+        long chatId,
+        long fromTelegramUserId,
+        CancellationToken token)
+    {
+        var text = messageEl.TryGetProperty("text", out var textEl) ? textEl.GetString()?.Trim() : null;
+        if (!string.IsNullOrWhiteSpace(text) && text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
+        {
+            var state = ExtractStateFromStartCommand(text, "verify_phone_");
+            if (string.IsNullOrWhiteSpace(state))
+                return false;
+
+            var request = await db.ContactChangeRequests
+                .Where(x => x.Kind == "phone" && x.State == state)
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(token);
+            if (request is null)
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Запрос подтверждения телефона не найден. Запустите подтверждение с сайта заново.", null, token);
+                return true;
+            }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (request.ExpiresAt <= now)
+            {
+                request.Status = "expired";
+                await SendMessageAsync(client, bot.Token, chatId, "Ссылка подтверждения телефона устарела. Повторите на сайте.", null, token);
+                return true;
+            }
+
+            var linkedUser = fromTelegramUserId > 0
+                ? await db.Users.FirstOrDefaultAsync(x => x.Email == $"telegram_{fromTelegramUserId}@telegram.local", token)
+                : null;
+            if (linkedUser is null || !string.Equals(linkedUser.Id, request.UserId, StringComparison.Ordinal))
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Этот Telegram-аккаунт не привязан к профилю, для которого запрошено подтверждение.", null, token);
+                return true;
+            }
+
+            request.ChatId = chatId;
+            request.TelegramUserId = fromTelegramUserId > 0 ? fromTelegramUserId.ToString() : null;
+            request.Status = "awaiting_phone";
+
+            await SendMessageAsync(
+                client,
+                bot.Token,
+                chatId,
+                "Нажмите кнопку ниже и отправьте контакт, чтобы подтвердить номер телефона.",
+                new
+                {
+                    keyboard = new object[]
+                    {
+                        new object[]
+                        {
+                            new { text = "📱 Подтвердить номер", request_contact = true }
+                        }
+                    },
+                    resize_keyboard = true,
+                    one_time_keyboard = true
+                },
+                token);
+            return true;
+        }
+
+        if (!messageEl.TryGetProperty("contact", out var contactEl))
+            return false;
+
+        var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var requestByChat = await db.ContactChangeRequests
+            .Where(x => x.Kind == "phone"
+                && x.ChatId == chatId
+                && x.Status == "awaiting_phone"
+                && x.ExpiresAt > nowUnixMs)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(token);
+        if (requestByChat is null)
+            return false;
+
+        var contactUserId = contactEl.TryGetProperty("user_id", out var contactUserIdEl) ? contactUserIdEl.GetInt64() : 0L;
+        if (contactUserId > 0 && fromTelegramUserId > 0 && contactUserId != fromTelegramUserId)
+        {
+            await SendMessageAsync(client, bot.Token, chatId, "Отправьте контакт именно текущего Telegram-аккаунта.", null, token);
+            return true;
+        }
+
+        var phoneNumber = contactEl.TryGetProperty("phone_number", out var phoneEl) ? phoneEl.GetString() : null;
+        var normalizedPhone = NormalizePhone(phoneNumber);
+        if (string.IsNullOrWhiteSpace(normalizedPhone))
+        {
+            await SendMessageAsync(client, bot.Token, chatId, "Не удалось получить номер телефона. Повторите попытку.", null, token);
+            return true;
+        }
+
+        if (!string.Equals(normalizedPhone, NormalizePhone(requestByChat.TargetValue), StringComparison.Ordinal))
+        {
+            await SendMessageAsync(client, bot.Token, chatId, "Номер не совпадает с указанным на сайте. Повторите подтверждение с нужным номером.", null, token);
+            return true;
+        }
+
+        requestByChat.Status = "completed";
+        requestByChat.VerifiedAt = nowUnixMs;
+        requestByChat.TelegramUserId = fromTelegramUserId > 0 ? fromTelegramUserId.ToString() : requestByChat.TelegramUserId;
+
+        await SendMessageAsync(client, bot.Token, chatId, "Номер телефона подтвержден ✅ Вернитесь на сайт и сохраните изменения.", new { remove_keyboard = true }, token);
+        return true;
     }
 
     private async Task<bool> TryHandleLoginFlowMessageAsync(
@@ -590,7 +708,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         return true;
     }
 
-    private static string? ExtractStateFromStartCommand(string text)
+    private static string? ExtractStateFromStartCommand(string text, string prefix = "login_")
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
@@ -600,7 +718,6 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return null;
 
         var payload = parts[1];
-        const string prefix = "login_";
         if (!payload.StartsWith(prefix, StringComparison.Ordinal))
             return null;
 
@@ -889,6 +1006,23 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             if ((template.Text ?? string.Empty).Length > MaxReplyTextLength)
                 throw new InvalidOperationException($"Reply template '{template.Label}' must be at most {MaxReplyTextLength} characters");
         }
+    }
+
+    private static string NormalizePhone(string? phone)
+    {
+        var trimmed = (phone ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return string.Empty;
+
+        var chars = trimmed.Where(c => char.IsDigit(c) || c == '+').ToArray();
+        var normalized = new string(chars);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
+        if (!normalized.StartsWith('+') && normalized.All(char.IsDigit))
+            normalized = $"+{normalized}";
+
+        return normalized;
     }
 
     private static async Task SendMessageAsync(HttpClient client, string token, long chatId, string text, object? replyMarkup, CancellationToken cancellationToken)
