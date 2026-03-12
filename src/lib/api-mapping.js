@@ -317,6 +317,16 @@ export const FLOW = {
   }),
 
 
+  signIn: async ({ input }) => {
+    const result = await request("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    saveAuthTokens(result || {});
+    return result;
+  },
+
   signUp: async ({ input }) => {
     const result = await request("/auth/signup", {
       method: "POST",

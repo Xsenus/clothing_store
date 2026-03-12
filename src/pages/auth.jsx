@@ -124,6 +124,15 @@ export default function AuthPage() {
     if (normalized.includes("email already in use") || normalized.includes("user already exists")) {
       return "Этот email уже используется";
     }
+    if (normalized.includes("invalid credentials")) {
+      return "Неверный email или пароль";
+    }
+    if (normalized.includes("email is not verified")) {
+      return "Email не подтвержден";
+    }
+    if (normalized.includes("user is blocked")) {
+      return "Аккаунт заблокирован";
+    }
     if (normalized.includes("password is too weak")) {
       return "Пароль слишком простой";
     }
@@ -177,7 +186,7 @@ export default function AuthPage() {
         navigate("/");
       }
     } catch (error) {
-      toast.error("Неверные данные или требуется подтверждение email");
+      toast.error(getErrorMessage(error, "Не удалось войти"));
     } finally {
       setLoading(false);
     }
