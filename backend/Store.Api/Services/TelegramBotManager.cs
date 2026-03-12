@@ -403,7 +403,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         if (!bot.AutoRepliesEnabled)
         {
-            if (bot.UseForLogin && string.IsNullOrWhiteSpace(normalizedCommand))
+            if (bot.UseForLogin)
             {
                 await SendMessageAsync(client, bot.Token, chatId, "Этот бот используется для авторизации. Нажмите кнопку входа на сайте и вернитесь сюда по ссылке.", null, token);
             }
