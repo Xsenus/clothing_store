@@ -1,13 +1,13 @@
-# Telegram авторизация
+# Авторизация через Telegram
 
 Документ описывает, как в проекте работает вход через Telegram Login Widget, какие настройки нужны и почему Telegram ID сейчас не отображается как отдельное поле пользователя.
 
-## 1) Поток авторизации (end-to-end)
+## 1) Полный поток авторизации
 
 1. Фронтенд (`/auth`) читает публичные настройки через `GET /settings/public`.
 2. Если `telegram_login_enabled=true` и задан `telegram_bot_username`, монтируется Telegram Login Widget.
 3. После клика «Войти через Telegram» виджет возвращает объект `user` и `hash`.
-4. Фронтенд отправляет payload в `POST /auth/telegram/login`.
+4. Фронтенд отправляет данные в `POST /auth/telegram/login`.
 5. Бэкенд:
    - получает `telegram_bot_token` из `app_settings` (или из конфига `Integrations:Telegram:BotToken`),
    - проверяет подпись (`hash`) по Telegram-правилам,
@@ -26,22 +26,22 @@
 |---|---|---:|---:|
 | `telegram_login_enabled` | Включает блок Telegram-входа на фронте | Да | Да |
 | `telegram_bot_username` | `data-telegram-login` для Telegram Widget | Да | Да |
-| `telegram_bot_token` | Проверка подписи payload на backend | Да | Нет |
+| `telegram_bot_token` | Проверка подписи данных на бэкенде | Да | Нет |
 
 ### 2.2 Источник настроек
 
 | Настройка | Приоритет чтения |
 |---|---|
-| `telegram_bot_token` | `app_settings.telegram_bot_token` → fallback: `Integrations:Telegram:BotToken` |
+| `telegram_bot_token` | `app_settings.telegram_bot_token` → резервный источник: `Integrations:Telegram:BotToken` |
 | `telegram_login_enabled`, `telegram_bot_username` | Только `app_settings`, отдаются через `GET /settings/public` |
 
 ---
 
-## 3) Payload от Telegram и серверная валидация
+## 3) Данные от Telegram и серверная валидация
 
 ### 3.1 Поля, отправляемые фронтом
 
-| Поле (frontend) | Источник из Telegram Widget | Поле на backend DTO |
+| Поле на фронтенде | Источник из Telegram Widget | Поле в DTO бэкенда |
 |---|---|---|
 | `id` | `telegramUser.id` | `TelegramAuthPayload.Id` |
 | `firstName` | `telegramUser.first_name` | `TelegramAuthPayload.FirstName` |
@@ -51,7 +51,7 @@
 | `authDate` | `telegramUser.auth_date` | `TelegramAuthPayload.AuthDate` |
 | `hash` | `telegramUser.hash` | `TelegramAuthPayload.Hash` |
 
-### 3.2 Что проверяется на backend
+### 3.2 Что проверяется на бэкенде
 
 | Проверка | Логика |
 |---|---|
@@ -90,7 +90,7 @@
 
 1. Добавить поля в модель/миграцию (например, `profiles.telegram_id`, `profiles.telegram_username`, `profiles.telegram_photo_url`).
 2. В `POST /auth/telegram/login` заполнять/обновлять их на каждом входе.
-3. В `GET /profile` вернуть эти поля в response.
-4. На фронте (`/profile`) показать Telegram-поля (обычно read-only).
+3. В `GET /profile` вернуть эти поля в ответе.
+4. На фронте (`/profile`) показать Telegram-поля (обычно только для чтения).
 5. В админке пользователей добавить колонки Telegram ID/username для поддержки.
 

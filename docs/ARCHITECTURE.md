@@ -1,29 +1,29 @@
-# Architecture Notes
+# Заметки по архитектуре
 
-## Stack
-- Frontend: React + Vite
-- Backend: ASP.NET Core (.NET 9)
-- DB: PostgreSQL
-- Reverse proxy: Nginx
+## Стек
+- Фронтенд: React + Vite
+- Бэкенд: ASP.NET Core (.NET 9)
+- БД: PostgreSQL
+- Обратный прокси: Nginx
 
-## Database policy
+## Политика базы данных
 - Проект работает **только с PostgreSQL**.
-- SQLite не используется ни в runtime, ни как fallback.
+- SQLite не используется ни в рантайме, ни как резервный вариант.
 
-## Data model (high level)
+## Модель данных (в общих чертах)
 Основные таблицы:
 - `users`, `sessions`, `admin_sessions`
 - `verification_codes`, `profiles`
-- `products` (JSONB payload + индексируемые поля)
+- `products` (JSONB-данные + индексируемые поля)
 - `cart_items`, `likes`, `orders`
 - `gallery_images` (медиа в БД, `binary_data`)
 
-## Product storage strategy
-Продукт хранится в `products.data` (JSONB), а ключевые поля дублируются для фильтрации и сортировки.
+## Стратегия хранения товаров
+Товар хранится в `products.data` (JSONB), а ключевые поля дублируются для фильтрации и сортировки.
 
-## Seed strategy
-Если таблица `products` пуста, backend импортирует подготовленные данные из `seed/products.jsonl` в PostgreSQL.
+## Стратегия сидирования
+Если таблица `products` пуста, бэкенд импортирует подготовленные данные из `seed/products.jsonl` в PostgreSQL.
 
-## Media strategy
+## Стратегия работы с медиа
 Медиа хранится в таблице `gallery_images` (поле `binary_data`) и кэшируется в `backend/uploads/gallery/*` для быстрого ответа.
-Если файл на диске отсутствует, backend отдает изображение из БД и восстанавливает файл на диск.
+Если файла на диске нет, бэкенд отдает изображение из БД и восстанавливает файл на диск.

@@ -1,25 +1,25 @@
-# Deployment Guide
+# Руководство по развертыванию
 
-Target platform: Ubuntu 22.04/24.04 with Nginx, systemd, PostgreSQL, Node.js, and .NET 9.
+Целевая платформа: Ubuntu 22.04/24.04 с Nginx, systemd, PostgreSQL, Node.js и .NET 9.
 
-Operational runbook: [AUTODEPLOY_CHECKLIST.md](./AUTODEPLOY_CHECKLIST.md).
+Операционный чеклист: [AUTODEPLOY_CHECKLIST.md](./AUTODEPLOY_CHECKLIST.md).
 
-## 0) Paths and names
-- Repository: `/opt/clothing_store`
-- Backend runtime directory: `/opt/clothing_store_runtime/store-api`
-- Frontend Nginx root: `/var/www/clothing-store`
-- Backend service: `clothing-store-api.service`
-- Backend environment file: `/etc/clothing-store/environment`
-- Backend bind address: `127.0.0.1:3001`
-- Public domain: `your-domain.com`
+## 0) Пути и имена
+- Репозиторий: `/opt/clothing_store`
+- Каталог runtime для бэкенда: `/opt/clothing_store_runtime/store-api`
+- Корень Nginx для фронтенда: `/var/www/clothing-store`
+- Сервис бэкенда: `clothing-store-api.service`
+- Файл окружения бэкенда: `/etc/clothing-store/environment`
+- Адрес привязки бэкенда: `127.0.0.1:3001`
+- Публичный домен: `your-domain.com`
 
-Why the runtime directory is outside the repository:
-- It prevents `dotnet publish` from recursively nesting `publish/publish/...`.
-- It keeps runtime artifacts isolated from the git working tree.
-- It makes rollback and cleanup safer.
+Почему runtime-каталог вынесен за пределы репозитория:
+- Это предотвращает рекурсивное вложение `publish/publish/...` при `dotnet publish`.
+- Это изолирует runtime-артефакты от git-дерева.
+- Это делает откат и очистку безопаснее.
 
-## 1) Install packages and toolchain
-Direct deploy builds the project on the VPS, so the server must have Node.js 18+ and .NET 9 SDK/runtime installed.
+## 1) Установка пакетов и инструментов
+Прямой деплой собирает проект на VPS, поэтому на сервере должны быть установлены Node.js 18+ и SDK/runtime .NET 9.
 
 ```bash
 sudo apt update
@@ -29,7 +29,7 @@ sudo apt install -y git nginx postgresql postgresql-contrib rsync curl ca-certif
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 
-# .NET 9 SDK + runtime
+# SDK и runtime .NET 9
 curl -fsSL https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb -o packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
@@ -42,7 +42,7 @@ dotnet --list-sdks
 dotnet --list-runtimes
 ```
 
-## 2) Create PostgreSQL role
+## 2) Создание роли PostgreSQL
 ```bash
 sudo -u postgres psql <<'SQL'
 CREATE USER store_user WITH ENCRYPTED PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
@@ -50,9 +50,9 @@ ALTER USER store_user CREATEDB;
 SQL
 ```
 
-On the first backend startup, the API creates the target database from `ConnectionStrings__DefaultConnection` automatically if it does not exist yet.
+При первом запуске бэкенда API автоматически создаст целевую базу из `ConnectionStrings__DefaultConnection`, если её ещё нет.
 
-If you do not want to grant `CREATEDB`, create the database manually instead and make the app role its owner:
+Если вы не хотите выдавать право `CREATEDB`, создайте базу вручную и назначьте владельцем роль приложения:
 
 ```bash
 sudo -u postgres psql <<'SQL'
@@ -60,7 +60,7 @@ CREATE DATABASE clothing_store OWNER store_user;
 SQL
 ```
 
-## 3) Clone the project
+## 3) Клонирование проекта
 ```bash
 sudo mkdir -p /opt/clothing_store
 sudo chown -R $USER:$USER /opt/clothing_store
@@ -68,8 +68,8 @@ cd /opt/clothing_store
 git clone <YOUR_REPO_URL> .
 ```
 
-## 4) Prepare runtime and environment
-Create runtime directories:
+## 4) Подготовка runtime и окружения
+Создайте runtime-каталоги:
 
 ```bash
 sudo mkdir -p /opt/clothing_store_runtime/store-api
@@ -79,7 +79,7 @@ sudo mkdir -p /opt/clothing_store/backend/uploads
 sudo chown -R www-data:www-data /opt/clothing_store/backend/uploads
 ```
 
-Create `/etc/clothing-store/environment`:
+Создайте `/etc/clothing-store/environment`:
 
 ```bash
 sudo tee /etc/clothing-store/environment >/dev/null <<'ENV'
@@ -91,24 +91,24 @@ ENV
 sudo chmod 600 /etc/clothing-store/environment
 ```
 
-If `clothing_store` may be missing on first start, the PostgreSQL role in `ConnectionStrings__DefaultConnection` must have `CREATEDB`.
+Если на первом запуске база `clothing_store` может отсутствовать, роль PostgreSQL из `ConnectionStrings__DefaultConnection` должна иметь право `CREATEDB`.
 
-Template file in the repository: [deploy/backend.environment.example](../deploy/backend.environment.example).
+Шаблон файла в репозитории: [deploy/backend.environment.example](../deploy/backend.environment.example).
 
-The frontend production build does not require a root `.env` on the server. The app defaults to `/api`.
+Production-сборке фронтенда не нужен корневой `.env` на сервере. Приложение по умолчанию использует `/api`.
 
-## 5) Clean old nested publish artifacts once
-If you previously published into `backend/Store.Api/publish`, remove the old runtime tree once to avoid confusion:
+## 5) Однократная очистка старых вложенных publish-артефактов
+Если раньше вы публиковали в `backend/Store.Api/publish`, один раз удалите старое runtime-дерево, чтобы не путаться:
 
 ```bash
 sudo rm -rf /opt/clothing_store/backend/Store.Api/publish
 sudo rm -rf /opt/clothing_store_runtime/store-api/*
 ```
 
-## 6) Review backend appsettings
-Production secrets should not be committed. Keep secrets in `/etc/clothing-store/environment` and keep `backend/Store.Api/appsettings.Production.json` limited to non-secret overrides.
+## 6) Проверка appsettings бэкенда
+Продакшен-секреты нельзя коммитить. Храните их в `/etc/clothing-store/environment`, а в `backend/Store.Api/appsettings.Production.json` оставляйте только несекретные переопределения.
 
-## 7) Build frontend and publish backend
+## 7) Сборка фронтенда и публикация бэкенда
 ```bash
 cd /opt/clothing_store
 npm ci
@@ -118,8 +118,8 @@ sudo rsync -a --delete dist/ /var/www/clothing-store/
 dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o /opt/clothing_store_runtime/store-api
 ```
 
-## 8) Configure systemd
-Use the repository root as `WorkingDirectory` and the external runtime directory as `ExecStart` target.
+## 8) Настройка systemd
+Используйте корень репозитория как `WorkingDirectory`, а внешний runtime-каталог как цель для `ExecStart`.
 
 ```bash
 sudo tee /etc/systemd/system/clothing-store-api.service >/dev/null <<'UNIT'
@@ -154,11 +154,11 @@ sudo systemctl restart clothing-store-api
 sudo systemctl status clothing-store-api --no-pager
 ```
 
-Reference template in repo: [deploy/systemd/clothing-store-api.service](../deploy/systemd/clothing-store-api.service).
+Эталонный шаблон в репозитории: [deploy/systemd/clothing-store-api.service](../deploy/systemd/clothing-store-api.service).
 
-The extra `HOME` / `DOTNET_*` environment variables prevent the .NET host from trying to write first-run files into `/var/www/.dotnet` when the service runs as `www-data`.
+Дополнительные переменные окружения `HOME` / `DOTNET_*` не дают .NET host пытаться записывать first-run файлы в `/var/www/.dotnet`, когда сервис работает от `www-data`.
 
-## 9) Configure Nginx
+## 9) Настройка Nginx
 ```bash
 sudo tee /etc/nginx/sites-available/clothing-store >/dev/null <<'NGINX'
 server {
@@ -198,14 +198,14 @@ sudo systemctl restart nginx
 sudo systemctl status nginx --no-pager
 ```
 
-Reference template in repo: [deploy/nginx/clothing-store.conf](../deploy/nginx/clothing-store.conf).
+Эталонный шаблон в репозитории: [deploy/nginx/clothing-store.conf](../deploy/nginx/clothing-store.conf).
 
-Important:
-- The repository Nginx template is HTTP-only (`listen 80`).
-- If Cloudflare is proxying `https://your-domain.com`, either set Cloudflare SSL/TLS mode to `Flexible` or configure origin HTTPS on port `443` before using `Full` / `Full (strict)`.
-- Cloudflare documents that `Full (strict)` requires the origin to accept HTTPS on `443` and present a matching certificate.
+Важно:
+- Шаблон Nginx из репозитория работает только по HTTP (`listen 80`).
+- Если Cloudflare проксирует `https://your-domain.com`, либо установите режим SSL/TLS `Flexible`, либо сначала поднимите HTTPS на origin-сервере на порту `443`, а уже потом используйте `Full` / `Full (strict)`.
+- В документации Cloudflare указано, что режим `Full (strict)` требует, чтобы origin принимал HTTPS на `443` и отдавал подходящий сертификат.
 
-## 10) Post-deploy checks
+## 10) Проверки после деплоя
 ```bash
 curl -i http://127.0.0.1:3001/products
 curl -i http://127.0.0.1:3001/media/non-existent-id
@@ -215,9 +215,9 @@ curl -i http://your-domain.com/api/products
 sudo journalctl -u clothing-store-api -n 200 --no-pager
 ```
 
-If `http://your-domain.com` works but `https://your-domain.com` returns a Cloudflare `520`, check Cloudflare SSL/TLS mode first and verify whether your origin actually serves HTTPS.
+Если `http://your-domain.com` работает, а `https://your-domain.com` возвращает Cloudflare `520`, сначала проверьте режим SSL/TLS в Cloudflare и убедитесь, что origin-сервер действительно обслуживает HTTPS.
 
-## 11) Release update
+## 11) Обновление релиза
 ```bash
 cd /opt/clothing_store
 git pull
@@ -229,8 +229,8 @@ sudo systemctl restart clothing-store-api
 sudo systemctl restart nginx
 ```
 
-## 12) GitHub Actions variables
-The deploy workflow supports these repository variables:
+## 12) Переменные GitHub Actions
+Сценарий деплоя поддерживает следующие переменные репозитория:
 - `VPS_APP_DIR`
 - `FRONTEND_DIST_DIR`
 - `BACKEND_SERVICE`
