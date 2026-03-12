@@ -223,6 +223,29 @@ export const FLOW = {
 
   getProfile: async () => request("/profile"),
 
+  getCart: async () => request("/cart"),
+
+  addToCart: async ({ input }) => request("/cart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  updateCartQuantity: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity: input.quantity }),
+  }),
+
+  removeCartItem: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+    method: "DELETE",
+  }),
+
+  clearCart: async () => request("/cart", {
+    method: "DELETE",
+  }),
+
+
   startEmailVerification: async ({ input }) => request("/profile/email/verify/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

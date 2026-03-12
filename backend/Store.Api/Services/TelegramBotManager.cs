@@ -403,6 +403,10 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         if (!bot.AutoRepliesEnabled)
         {
+            if (bot.UseForLogin && string.IsNullOrWhiteSpace(normalizedCommand))
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Этот бот используется для авторизации. Нажмите кнопку входа на сайте и вернитесь сюда по ссылке.", null, token);
+            }
             await db.SaveChangesAsync(token);
             return;
         }
@@ -578,7 +582,9 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
                 return true;
             }
 
-            if (!string.IsNullOrWhiteSpace(authRequest.UserId) && string.Equals(authRequest.Status, "completed", StringComparison.Ordinal))
+            if (!string.IsNullOrWhiteSpace(authRequest.UserId)
+                && (string.Equals(authRequest.Status, "completed", StringComparison.Ordinal)
+                    || string.Equals(authRequest.Status, "consumed", StringComparison.Ordinal)))
             {
                 await SendMessageAsync(client, bot.Token, chatId, "Вы уже авторизованы. Вернитесь на сайт — вход будет завершен автоматически.", null, token);
                 return true;
@@ -596,7 +602,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
                 authRequest.UserId = user.Id;
                 authRequest.Status = "completed";
                 authRequest.CompletedAt = now;
-                await SendMessageAsync(client, bot.Token, chatId, "Вход подтвержден ✅ Вернитесь на сайт, профиль уже открыт.", null, token);
+                await SendMessageAsync(client, bot.Token, chatId, "Вы уже авторизованы ✅ Вернитесь на сайт, профиль уже открыт.", null, token);
                 return true;
             }
 
