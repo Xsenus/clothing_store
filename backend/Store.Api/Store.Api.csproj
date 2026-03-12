@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>clothing-store-store-api-b6f1a24d</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

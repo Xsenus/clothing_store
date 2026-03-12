@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Store.Api.Configuration;
 using Store.Api.Services;
 
 namespace Store.Api.Controllers;
@@ -22,12 +23,10 @@ public class UploadController : ControllerBase
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="UploadController"/>.
     /// </summary>
-    public UploadController(AuthService auth, IConfiguration configuration, IWebHostEnvironment env)
+    public UploadController(AuthService auth, IConfiguration configuration, StoreRuntimePaths runtimePaths)
     {
         _auth = auth;
-        _uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
-            ?? configuration["Storage:UploadsDir"]
-            ?? Path.Combine(env.ContentRootPath, "..", "uploads");
+        _uploadsDir = runtimePaths.UploadsDir;
         _maxFileSizeBytes = configuration.GetValue<long?>("Storage:MaxUploadFileSizeBytes") ?? 10 * 1024 * 1024;
         _maxFaviconSizeBytes = configuration.GetValue<long?>("Storage:MaxFaviconUploadFileSizeBytes") ?? 2 * 1024 * 1024;
         Directory.CreateDirectory(_uploadsDir);

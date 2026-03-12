@@ -15,6 +15,8 @@ public class StoreDbContextFactory : IDesignTimeDbContextFactory<StoreDbContext>
             .SetBasePath(apiDirectory)
             .AddJsonFile("appsettings.json", optional: false)
             .AddJsonFile($"appsettings.{environment}.json", optional: true)
+            .AddUserSecrets<StoreDbContextFactory>(optional: true)
+            .AddEnvironmentVariables()
             .Build();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Store.Api.Configuration;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -14,12 +15,10 @@ public class GalleryStorageService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _uploadsDir;
 
-    public GalleryStorageService(IServiceScopeFactory scopeFactory, IConfiguration configuration, IWebHostEnvironment env)
+    public GalleryStorageService(IServiceScopeFactory scopeFactory, StoreRuntimePaths runtimePaths)
     {
         _scopeFactory = scopeFactory;
-        _uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
-            ?? configuration["Storage:UploadsDir"]
-            ?? Path.Combine(env.ContentRootPath, "..", "uploads");
+        _uploadsDir = runtimePaths.UploadsDir;
     }
 
     public string BuildRelativePath(string imageId, string extension) => $"gallery/{imageId}{extension.ToLowerInvariant()}";

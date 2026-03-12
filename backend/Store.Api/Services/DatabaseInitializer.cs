@@ -115,12 +115,8 @@ public class DatabaseInitializer
 
     private async Task EnsureAdminUserAsync(StoreDbContext db)
     {
-        var adminEmail = (_configuration["ADMIN_EMAIL"]
-            ?? _configuration["AdminUser:Email"]
-            ?? "admin@clothingstore.local").Trim().ToLowerInvariant();
-        var adminPassword = _configuration["ADMIN_PASSWORD"]
-            ?? _configuration["AdminUser:Password"]
-            ?? "admin12345";
+        var adminEmail = (_configuration["AdminUser:Email"] ?? string.Empty).Trim().ToLowerInvariant();
+        var adminPassword = _configuration["AdminUser:Password"] ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(adminEmail) || string.IsNullOrWhiteSpace(adminPassword))
             return;

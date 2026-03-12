@@ -1,0 +1,7 @@
+# ASP.NET Core environment
+ASPNETCORE_ENVIRONMENT=Production
+
+# Required production secrets
+ConnectionStrings__DefaultConnection=Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=CHANGE_ME_STRONG_PASSWORD
+AdminUser__Email=admin@your-domain.com
+AdminUser__Password=CHANGE_ME_ADMIN_PASSWORD

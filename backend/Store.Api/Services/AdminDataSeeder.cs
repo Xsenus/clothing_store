@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Store.Api.Configuration;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -12,11 +13,13 @@ public class AdminDataSeeder
 {
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
+    private readonly StoreRuntimePaths _runtimePaths;
 
-    public AdminDataSeeder(StoreDbContext db, IConfiguration configuration)
+    public AdminDataSeeder(StoreDbContext db, IConfiguration configuration, StoreRuntimePaths runtimePaths)
     {
         _db = db;
         _configuration = configuration;
+        _runtimePaths = runtimePaths;
     }
 
     public async Task<AdminDataSeedResult> SeedDemoDataAsync(int productCount = 50)
@@ -83,9 +86,7 @@ public class AdminDataSeeder
 
         var sizes = new[] { "XS", "S", "M", "L", "XL" };
 
-        var seedProductsPath = Environment.GetEnvironmentVariable("STORE_SEED_PRODUCTS_PATH")
-            ?? Path.Combine(Environment.GetEnvironmentVariable("STORE_ROOT")
-                ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../")), "seed", "products.jsonl");
+        var seedProductsPath = _runtimePaths.SeedProductsPath;
 
         var preparedProducts = await LoadPreparedProductsAsync(seedProductsPath);
         if (preparedProducts.Count == 0)

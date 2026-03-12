@@ -1,33 +1,44 @@
-# Clothing Store — React + ASP.NET Core + PostgreSQL
+# Clothing Store
 
-## Стек
-- Frontend: React + Vite + Tailwind
+React + Vite frontend with an ASP.NET Core 9 API and PostgreSQL.
+
+## Stack
+- Frontend: React, Vite, Tailwind CSS
 - Backend: ASP.NET Core (.NET 9)
-- DB: PostgreSQL (только PostgreSQL, без SQLite fallback)
+- Database: PostgreSQL
 - Deploy: Nginx + systemd + PostgreSQL
 
-## Конфиги
-- Frontend: `.env` (см. `.env.example`)
-- Backend: `backend/Store.Api/appsettings.Development.json`, `backend/Store.Api/appsettings.Production.json`
-- БД: `ConnectionStrings:DefaultConnection` (обязательно PostgreSQL connection string)
+## Configuration model
+- Frontend local dev config lives in the root `.env`.
+- Backend shared defaults live in `backend/Store.Api/appsettings*.json`.
+- Backend local secrets should use `dotnet user-secrets`.
+- Backend production secrets should live in an external environment file such as `/etc/clothing-store/environment`.
 
-## Локальный запуск
+The root [`.env.example`](.env.example) is frontend-only.
+The production backend environment template is [deploy/backend.environment.example](deploy/backend.environment.example).
+
+## Local development
+Frontend:
+
 ```bash
+cp .env.example .env
 npm ci
 npm run dev
+```
 
+Backend:
+
+```bash
+dotnet user-secrets --project backend/Store.Api/Store.Api.csproj set "ConnectionStrings:DefaultConnection" "Host=127.0.0.1;Port=5432;Database=clothing_store;Username=postgres;Password=CHANGE_ME"
+dotnet user-secrets --project backend/Store.Api/Store.Api.csproj set "AdminUser:Email" "admin@clothingstore.local"
+dotnet user-secrets --project backend/Store.Api/Store.Api.csproj set "AdminUser:Password" "CHANGE_ME"
 dotnet run --project backend/Store.Api/Store.Api.csproj
 ```
 
-## Что изменено по хранилищу
-- SQLite полностью удалён из backend-конфигурации и DI.
-- Если таблица products пустая, БД заполняется подготовленными данными из `seed/products.jsonl`.
-- Галерея хранит изображения в БД и кэширует их на диске в `backend/uploads`; при отсутствии файла на диске backend восстанавливает его из БД.
-
 ## Deployment
-Подробный максимально пошаговый гайд: `docs/DEPLOYMENT.md`.
+Use the step-by-step guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## Документация
-- Архитектура: `docs/ARCHITECTURE.md`
-- Деплой: `docs/DEPLOYMENT.md`
-- Telegram auth: `docs/TELEGRAM_AUTH.md`
+## Notes
+- Prepared products are seeded from `seed/products.jsonl` when the `products` table is empty.
+- Uploaded media is stored in `backend/uploads` by default.
+- Gallery images are persisted in PostgreSQL and restored to disk when needed.

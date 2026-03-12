@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Store.Api.Configuration;
 using Store.Api.Data;
 using Store.Api.Services;
 
@@ -7,47 +8,42 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
-var projectRoot = Environment.GetEnvironmentVariable("STORE_ROOT")
-    ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
-var seedDir = Environment.GetEnvironmentVariable("STORE_SEED_DIR")
-    ?? Path.Combine(projectRoot, "seed");
-var seedProductsPath = Environment.GetEnvironmentVariable("STORE_SEED_PRODUCTS_PATH")
-    ?? Path.Combine(seedDir, "products.jsonl");
-var uploadsDir = Environment.GetEnvironmentVariable("STORE_UPLOADS_DIR")
-    ?? Path.Combine(projectRoot, "backend", "uploads");
-Directory.CreateDirectory(uploadsDir);
+if (!File.Exists(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json")))
+{
+    builder.Configuration
+        .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: false)
+        .AddJsonFile(
+            Path.Combine(AppContext.BaseDirectory, $"appsettings.{builder.Environment.EnvironmentName}.json"),
+            optional: true,
+            reloadOnChange: false)
+        .AddEnvironmentVariables();
+}
+
+var storeRuntimePaths = StoreRuntimePaths.Resolve(
+    builder.Configuration,
+    builder.Environment.ContentRootPath,
+    AppContext.BaseDirectory);
+Directory.CreateDirectory(storeRuntimePaths.UploadsDir);
 
 var databaseUrl = builder.Configuration.GetConnectionString("DefaultConnection");
 
 if (string.IsNullOrWhiteSpace(databaseUrl))
-{
-    // systemd can start the DLL from /opt/.../publish while WorkingDirectory points
-    // to the repository root. In that case default host config misses runtime
-    // appsettings files, so we attempt an explicit fallback lookup from runtime dir.
-    var runtimeConfig = new ConfigurationBuilder()
-        .SetBasePath(AppContext.BaseDirectory)
-        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-        .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
-        .AddEnvironmentVariables()
-        .Build();
-
-    databaseUrl = runtimeConfig.GetConnectionString("DefaultConnection");
-
-    if (!string.IsNullOrWhiteSpace(databaseUrl))
-    {
-        builder.Configuration["ConnectionStrings:DefaultConnection"] = databaseUrl;
-    }
-}
-
-if (string.IsNullOrWhiteSpace(databaseUrl))
     throw new InvalidOperationException(
         "ConnectionStrings:DefaultConnection must be set. " +
-        "Check /opt/clothing_store/.env (ConnectionStrings__DefaultConnection), " +
-        "systemd EnvironmentFile, or appsettings.Production.json in publish directory.");
+        "Check backend environment variables, user secrets, or appsettings.");
+
+if (!builder.Environment.IsDevelopment()
+    && databaseUrl.Contains("CHANGE_ME", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection still contains a placeholder value. " +
+        "Configure a real production connection string before startup.");
+}
 
 builder.Configuration["ResolvedDatabase:Provider"] = "postgres";
 builder.Configuration["ResolvedDatabase:ConnectionString"] = databaseUrl;
 builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl));
+builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminDataSeeder>();
@@ -89,8 +85,12 @@ var app = builder.Build();
 app.Logger.LogInformation(
     "Database provider: {Provider}",
     app.Configuration["ResolvedDatabase:Provider"] ?? "unknown");
+app.Logger.LogInformation(
+    "Resolved runtime paths: seed={SeedProductsPath}, uploads={UploadsDir}",
+    storeRuntimePaths.SeedProductsPath,
+    storeRuntimePaths.UploadsDir);
 
-await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(seedProductsPath);
+await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(storeRuntimePaths.SeedProductsPath);
 var restoredGalleryImages = await app.Services.GetRequiredService<GalleryStorageService>().RestoreMissingImagesAsync();
 if (restoredGalleryImages > 0)
 {
@@ -174,7 +174,7 @@ if (!string.IsNullOrWhiteSpace(appPathBase))
 app.UseCors("app");
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsDir),
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(storeRuntimePaths.UploadsDir),
     RequestPath = "/uploads"
 });
 app.MapControllers();

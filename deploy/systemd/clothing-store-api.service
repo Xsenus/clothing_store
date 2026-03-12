@@ -1,0 +1,15 @@
+[Unit]
+Description=Clothing Store API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+WorkingDirectory=/opt/clothing_store
+ExecStart=/usr/bin/dotnet /opt/clothing_store_runtime/store-api/Store.Api.dll
+Restart=always
+RestartSec=5
+User=www-data
+EnvironmentFile=/etc/clothing-store/environment
+
+[Install]
+WantedBy=multi-user.target
