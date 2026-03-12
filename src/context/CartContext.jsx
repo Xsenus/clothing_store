@@ -11,6 +11,11 @@ export function CartProvider({ children }) {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
 
   const refreshCart = async () => {
+    if (typeof FLOW.getCart !== "function") {
+      console.warn("FLOW.getCart is not available; skipping cart refresh");
+      return;
+    }
+
     try {
       const items = await FLOW.getCart({ input: {} });
       if (Array.isArray(items)) {
@@ -32,6 +37,11 @@ export function CartProvider({ children }) {
 
   const addToCart = async (productId, size, quantity) => {
     setIsLoading(true);
+    if (typeof FLOW.addToCart !== "function") {
+      toast.error("Сервис корзины временно недоступен");
+      return false;
+    }
+
     try {
       await FLOW.addToCart({
         input: { productId, size, quantity },
@@ -49,6 +59,11 @@ export function CartProvider({ children }) {
   };
 
   const updateQuantity = async (cartItemId, quantity) => {
+    if (typeof FLOW.updateCartQuantity !== "function") {
+      toast.error("Сервис корзины временно недоступен");
+      return;
+    }
+
     try {
       await FLOW.updateCartQuantity({
         input: { cartItemId, quantity },
@@ -64,6 +79,11 @@ export function CartProvider({ children }) {
   };
 
   const removeFromCart = async (cartId) => {
+    if (typeof FLOW.removeCartItem !== "function") {
+      toast.error("Сервис корзины временно недоступен");
+      return;
+    }
+
     try {
       await FLOW.removeCartItem({
         input: { cartItemId: cartId },
@@ -78,6 +98,11 @@ export function CartProvider({ children }) {
   };
 
   const clearCart = async () => {
+    if (typeof FLOW.clearCart !== "function") {
+      toast.error("Сервис корзины временно недоступен");
+      return;
+    }
+
     try {
       await FLOW.clearCart({ input: {} });
       setCartItems([]);

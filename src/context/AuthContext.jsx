@@ -46,6 +46,17 @@ export function AuthProvider({ children }) {
       return { signingIn: true };
     }
 
+    if (flow === "telegram-state") {
+      const token = formData.get ? formData.get("token") : formData.token;
+      const refreshToken = formData.get ? formData.get("refreshToken") : formData.refreshToken;
+      const rawUser = formData.get ? formData.get("user") : formData.user;
+      const nextUser = typeof rawUser === "string" ? JSON.parse(rawUser || "{}") : rawUser;
+      if (token) localStorage.setItem("authToken", token);
+      if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
+      setUser(nextUser || null);
+      return { signingIn: true };
+    }
+
     if (flow === "signUp") {
       await FLOW.signUp({ input: { email, password } });
       return { signingIn: false };

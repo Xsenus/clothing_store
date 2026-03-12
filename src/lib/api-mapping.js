@@ -69,7 +69,8 @@ const shouldSkipRefresh = (path) => {
     || path.startsWith("/auth/verify")
     || path.startsWith("/auth/resend")
     || path.startsWith("/auth/reset")
-    || path.startsWith("/auth/refresh");
+    || path.startsWith("/auth/refresh")
+    || path.startsWith("/auth/telegram");
 };
 
 const refreshAuthSession = async () => {
@@ -221,6 +222,50 @@ export const FLOW = {
   },
 
   getProfile: async () => request("/profile"),
+
+  getCart: async () => request("/cart"),
+
+  addToCart: async ({ input }) => request("/cart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  updateCartQuantity: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity: input.quantity }),
+  }),
+
+  removeCartItem: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+    method: "DELETE",
+  }),
+
+  clearCart: async () => request("/cart", {
+    method: "DELETE",
+  }),
+
+
+  startEmailVerification: async ({ input }) => request("/profile/email/verify/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value }),
+  }),
+
+  confirmEmailVerification: async ({ input }) => request("/profile/email/verify/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value, code: input.code }),
+  }),
+
+  startPhoneVerification: async ({ input }) => request("/profile/phone/verify/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value }),
+  }),
+
+  getPhoneVerificationStatus: async ({ input }) => request(`/profile/phone/verify/status/${encodeURIComponent(input.state)}`),
+
 
   createProfile: async ({ input }) => request("/profile", {
     method: "POST",
@@ -374,6 +419,14 @@ export const FLOW = {
     return { ok: true };
   },
 
+
+  telegramStartAuth: async ({ input }) => request("/auth/telegram/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input || {}),
+  }),
+
+  telegramAuthStatus: async ({ input }) => request(`/auth/telegram/status/${encodeURIComponent(input.state)}`),
 
   telegramLogin: async ({ input }) => {
     const result = await request("/auth/telegram/login", {
