@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -44,14 +45,7 @@ public class DatabaseInitializer
                 "No EF Core migrations found. Create and apply a baseline migration before starting the application.");
         }
 
-        var databaseCreator = db.GetService<IRelationalDatabaseCreator>();
-        if (!await databaseCreator.ExistsAsync())
-        {
-            var provider = db.Database.ProviderName ?? "unknown";
-            throw new InvalidOperationException(
-                $"Database does not exist or is inaccessible for provider '{provider}'. " +
-                "Create the target database and grant connect/migration permissions to the application user before startup.");
-        }
+        await EnsureDatabaseExistsAsync(db);
 
         var pendingBefore = db.Database.GetPendingMigrations().ToArray();
         var appliedBefore = db.Database.GetAppliedMigrations().ToArray();
@@ -91,6 +85,67 @@ public class DatabaseInitializer
         await EnsureDefaultAppSettingsAsync(db);
         await EnsureLegacyTelegramBotMigratedAsync(db);
         await EnsureTestDataAsync(db);
+    }
+
+    private async Task EnsureDatabaseExistsAsync(StoreDbContext db)
+    {
+        var databaseCreator = db.GetService<IRelationalDatabaseCreator>();
+        if (await databaseCreator.ExistsAsync())
+        {
+            return;
+        }
+
+        var connectionString = db.Database.GetConnectionString();
+        var databaseName = GetConnectionStringValue(connectionString, builder => builder.Database) ?? "unknown";
+        var username = GetConnectionStringValue(connectionString, builder => builder.Username) ?? "unknown";
+
+        _logger.LogWarning(
+            "Database {DatabaseName} does not exist yet. Creating it before applying migrations.",
+            databaseName);
+
+        try
+        {
+            await databaseCreator.CreateAsync();
+            _logger.LogInformation("Created PostgreSQL database {DatabaseName}.", databaseName);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42P04")
+        {
+            _logger.LogInformation(
+                "Database {DatabaseName} was created by another process during startup.",
+                databaseName);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42501")
+        {
+            throw new InvalidOperationException(
+                $"Database '{databaseName}' does not exist and PostgreSQL user '{username}' cannot create it. " +
+                "Grant CREATEDB to that role or create the database manually before startup.",
+                ex);
+        }
+
+        if (!await databaseCreator.ExistsAsync())
+        {
+            throw new InvalidOperationException(
+                $"Database '{databaseName}' is still unavailable after the automatic creation attempt.");
+        }
+    }
+
+    private static string? GetConnectionStringValue(
+        string? connectionString,
+        Func<NpgsqlConnectionStringBuilder, string?> selector)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return null;
+        }
+
+        try
+        {
+            return selector(new NpgsqlConnectionStringBuilder(connectionString));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     private static async Task EnsureGalleryTableAsync(StoreDbContext db)

@@ -39,6 +39,7 @@ dotnet run --project backend/Store.Api/Store.Api.csproj
 Use the step-by-step guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Notes
+- On backend startup, EF Core migrations are applied automatically. If the PostgreSQL database is missing, the API will create it first when the configured role has `CREATEDB`.
 - Prepared products are seeded from `seed/products.jsonl` when the `products` table is empty.
 - Uploaded media is stored in `backend/uploads` by default.
 - Gallery images are persisted in PostgreSQL and restored to disk when needed.

@@ -41,7 +41,7 @@ grep -E '^(ASPNETCORE_ENVIRONMENT|ConnectionStrings__DefaultConnection|AdminUser
 ```
 
 ## 4) Expected PostgreSQL state
-The application requires a reachable PostgreSQL instance and an accessible target database.
+The application requires a reachable PostgreSQL instance. The target database may be absent on first start if the app role has `CREATEDB`.
 
 Quick check:
 
@@ -60,8 +60,11 @@ DB_PORT="$(printf '%s' "$CONNECTION_STRING" | tr ';' '\n' | sed -n 's/^Port=//p'
 DB_NAME="$(printf '%s' "$CONNECTION_STRING" | tr ';' '\n' | sed -n 's/^Database=//p' | head -n1)"
 DB_USER="$(printf '%s' "$CONNECTION_STRING" | tr ';' '\n' | sed -n 's/^Username=//p' | head -n1)"
 DB_PASSWORD="$(printf '%s' "$CONNECTION_STRING" | tr ';' '\n' | sed -n 's/^Password=//p' | head -n1)"
-PGPASSWORD="$DB_PASSWORD" psql -h "${DB_HOST:-127.0.0.1}" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" -Atqc 'select current_database(), current_user;'
+PGPASSWORD="$DB_PASSWORD" psql -h "${DB_HOST:-127.0.0.1}" -p "${DB_PORT:-5432}" -U "$DB_USER" -d postgres -Atqc 'select current_database(), current_user;'
+PGPASSWORD="$DB_PASSWORD" psql -h "${DB_HOST:-127.0.0.1}" -p "${DB_PORT:-5432}" -U "$DB_USER" -d postgres -Atqc "select rolcreatedb from pg_roles where rolname = current_user;"
 ```
+
+If the second command returns `t`, the backend can create a missing target database automatically on startup.
 
 ## 5) Expected systemd state
 Quick check:
@@ -117,7 +120,7 @@ systemctl show clothing-store-api -p WorkingDirectory -p ExecStart -p Environmen
 
 Typical failure classes:
 - PostgreSQL not running
-- target database missing
+- target database missing and app role lacks `CREATEDB`
 - app user cannot access the database
 - wrong `EnvironmentFile`
 - wrong `ExecStart`

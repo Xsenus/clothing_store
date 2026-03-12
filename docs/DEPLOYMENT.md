@@ -42,12 +42,21 @@ dotnet --list-sdks
 dotnet --list-runtimes
 ```
 
-## 2) Create PostgreSQL database
+## 2) Create PostgreSQL role
 ```bash
 sudo -u postgres psql <<'SQL'
-CREATE DATABASE clothing_store;
 CREATE USER store_user WITH ENCRYPTED PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
-GRANT ALL PRIVILEGES ON DATABASE clothing_store TO store_user;
+ALTER USER store_user CREATEDB;
+SQL
+```
+
+On the first backend startup, the API creates the target database from `ConnectionStrings__DefaultConnection` automatically if it does not exist yet.
+
+If you do not want to grant `CREATEDB`, create the database manually instead and make the app role its owner:
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE DATABASE clothing_store OWNER store_user;
 SQL
 ```
 
@@ -81,6 +90,8 @@ AdminUser__Password=CHANGE_ME_ADMIN_PASSWORD
 ENV
 sudo chmod 600 /etc/clothing-store/environment
 ```
+
+If `clothing_store` may be missing on first start, the PostgreSQL role in `ConnectionStrings__DefaultConnection` must have `CREATEDB`.
 
 Template file in the repository: [deploy/backend.environment.example](../deploy/backend.environment.example).
 

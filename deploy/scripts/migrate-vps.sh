@@ -431,15 +431,67 @@ ensure_postgres_ready() {
     fail "PostgreSQL is not reachable on ${db_host}:${db_port}. Check cluster status and the connection string."
   fi
 
-  if [[ -n "$db_name" && -n "$db_user" && -n "$db_password" && $(command -v psql) ]]; then
-    if ! PGPASSWORD="$db_password" psql \
+  if [[ -n "$db_name" && -n "$db_user" && -n "$db_password" ]] && command -v psql >/dev/null 2>&1; then
+    if PGPASSWORD="$db_password" psql \
       -h "$db_host" \
       -p "$db_port" \
       -U "$db_user" \
       -d "$db_name" \
       -Atqc "select current_database(), current_user;" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    local maintenance_db=""
+    local maintenance_ready="false"
+    local database_exists=""
+    local can_create_database=""
+
+    for maintenance_db in postgres template1; do
+      if PGPASSWORD="$db_password" psql \
+        -h "$db_host" \
+        -p "$db_port" \
+        -U "$db_user" \
+        -d "$maintenance_db" \
+        -Atqc "select current_database(), current_user;" >/dev/null 2>&1; then
+        maintenance_ready="true"
+        break
+      fi
+    done
+
+    if [[ "$maintenance_ready" != "true" ]]; then
+      fail "PostgreSQL is running but application credentials cannot access database '${db_name}' or maintenance databases as user '${db_user}'."
+    fi
+
+    database_exists="$(
+      PGPASSWORD="$db_password" psql \
+        -h "$db_host" \
+        -p "$db_port" \
+        -U "$db_user" \
+        -d "$maintenance_db" \
+        -v db_name="$db_name" \
+        -Atqc "select case when exists (select 1 from pg_database where datname = :'db_name') then 'true' else 'false' end;" \
+        | tr -d '[:space:]'
+    )"
+
+    if [[ "$database_exists" == "true" ]]; then
       fail "PostgreSQL is running but application credentials cannot access database '${db_name}' as user '${db_user}'."
     fi
+
+    can_create_database="$(
+      PGPASSWORD="$db_password" psql \
+        -h "$db_host" \
+        -p "$db_port" \
+        -U "$db_user" \
+        -d "$maintenance_db" \
+        -Atqc "select case when rolcreatedb then 'true' else 'false' end from pg_roles where rolname = current_user;" \
+        | tr -d '[:space:]'
+    )"
+
+    if [[ "$can_create_database" != "true" ]]; then
+      fail "Target database '${db_name}' does not exist and user '${db_user}' does not have CREATEDB. Grant CREATEDB or create the database manually before startup."
+    fi
+
+    log "Target database '${db_name}' does not exist yet; backend will create it automatically at startup."
   fi
 }
 
