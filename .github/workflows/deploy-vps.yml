@@ -123,6 +123,16 @@ jobs:
             git submodule update --init --recursive
 
             BACKEND_PUBLISH_DIR="$(dirname "$BACKEND_DLL_PATH")"
+            SYSTEMD_UNIT_SOURCE="$APP_DIR/deploy/systemd/${BACKEND_SERVICE}.service"
+            SYSTEMD_UNIT_DEST="/etc/systemd/system/${BACKEND_SERVICE}.service"
+
+            echo "==> Syncing systemd unit from repository"
+            if [[ ! -f "$SYSTEMD_UNIT_SOURCE" ]]; then
+              echo "[ERROR] Missing systemd unit template in repository: $SYSTEMD_UNIT_SOURCE"
+              exit 1
+            fi
+            sudo install -m 0644 "$SYSTEMD_UNIT_SOURCE" "$SYSTEMD_UNIT_DEST"
+            sudo systemctl daemon-reload
 
             echo "==> Validating deployment environment"
             require_env_file

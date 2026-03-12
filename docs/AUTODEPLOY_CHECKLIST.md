@@ -89,6 +89,12 @@ curl -I http://fashiondemon.shop
 curl -i http://fashiondemon.shop/api/products
 ```
 
+Cloudflare HTTPS note:
+- The repository Nginx template serves HTTP only.
+- If `http://fashiondemon.shop` works but `https://fashiondemon.shop` returns Cloudflare `520`, verify Cloudflare SSL/TLS mode.
+- Use `Flexible` if the origin serves only HTTP.
+- Use `Full` / `Full (strict)` only after configuring origin HTTPS on `443`.
+
 ## 7) Success criteria after a deploy
 - `systemctl is-active clothing-store-api` returns `active`
 - `ss -ltnp | grep 3001` shows `dotnet`

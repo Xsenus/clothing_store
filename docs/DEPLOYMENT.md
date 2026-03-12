@@ -189,6 +189,11 @@ sudo systemctl status nginx --no-pager
 
 Reference template in repo: [deploy/nginx/clothing-store.conf](../deploy/nginx/clothing-store.conf).
 
+Important:
+- The repository Nginx template is HTTP-only (`listen 80`).
+- If Cloudflare is proxying `https://your-domain.com`, either set Cloudflare SSL/TLS mode to `Flexible` or configure origin HTTPS on port `443` before using `Full` / `Full (strict)`.
+- Cloudflare documents that `Full (strict)` requires the origin to accept HTTPS on `443` and present a matching certificate.
+
 ## 10) Post-deploy checks
 ```bash
 curl -i http://127.0.0.1:3001/products
@@ -198,6 +203,8 @@ curl -I http://your-domain.com
 curl -i http://your-domain.com/api/products
 sudo journalctl -u clothing-store-api -n 200 --no-pager
 ```
+
+If `http://your-domain.com` works but `https://your-domain.com` returns a Cloudflare `520`, check Cloudflare SSL/TLS mode first and verify whether your origin actually serves HTTPS.
 
 ## 11) Release update
 ```bash
