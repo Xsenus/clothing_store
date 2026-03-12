@@ -501,11 +501,12 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         if (!messageEl.TryGetProperty("contact", out var contactEl))
             return false;
 
+        var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var awaitingRequest = await db.TelegramAuthRequests
             .Where(x => x.BotId == bot.Id
                 && x.ChatId == chatId
                 && x.Status == "awaiting_phone"
-                && x.ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+                && x.ExpiresAt > nowUnixMs)
             .OrderByDescending(x => x.CreatedAt)
             .FirstOrDefaultAsync(token);
 
