@@ -356,6 +356,18 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return;
 
         var (subscriber, isFirstInteraction) = await UpsertSubscriberAsync(db, bot.Id, messageEl, token);
+        var fromTelegramUserId = TryGetInt64(messageEl, "from", "id");
+
+        if (bot.UseForLogin)
+        {
+            var handledLogin = await TryHandleLoginFlowMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+            if (handledLogin)
+            {
+                await db.SaveChangesAsync(token);
+                return;
+            }
+        }
+
         var text = messageEl.TryGetProperty("text", out var textEl) ? textEl.GetString()?.Trim() : null;
 
         if (string.IsNullOrWhiteSpace(text))
@@ -367,7 +379,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         var normalizedCommand = ExtractIncomingCommand(text);
         if (string.Equals(normalizedCommand, "/check", StringComparison.Ordinal))
         {
-            await SendMessageAsync(client, bot.Token, chatId, $"✅ Bot '{bot.Name}' работает. ID: {bot.Id}", token);
+            await SendMessageAsync(client, bot.Token, chatId, $"✅ Bot '{bot.Name}' работает. ID: {bot.Id}", null, token);
             await db.SaveChangesAsync(token);
             return;
         }
@@ -400,6 +412,199 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         }
 
         await db.SaveChangesAsync(token);
+    }
+
+    private async Task<bool> TryHandleLoginFlowMessageAsync(
+        HttpClient client,
+        StoreDbContext db,
+        TelegramBot bot,
+        JsonElement messageEl,
+        long chatId,
+        long fromTelegramUserId,
+        CancellationToken token)
+    {
+        var text = messageEl.TryGetProperty("text", out var textEl) ? textEl.GetString()?.Trim() : null;
+        if (!string.IsNullOrWhiteSpace(text) && text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
+        {
+            var state = ExtractStateFromStartCommand(text);
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Для входа используйте ссылку с сайта, кнопка «Войти через Telegram».", null, token);
+                return true;
+            }
+
+            var authRequest = await db.TelegramAuthRequests
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(x => x.State == state && x.BotId == bot.Id, token);
+            if (authRequest is null)
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Ссылка авторизации не найдена. Запросите новую на сайте.", null, token);
+                return true;
+            }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (authRequest.ExpiresAt <= now)
+            {
+                authRequest.Status = "expired";
+                await SendMessageAsync(client, bot.Token, chatId, "Ссылка авторизации устарела. Вернитесь на сайт и начните вход заново.", null, token);
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(authRequest.UserId) && string.Equals(authRequest.Status, "completed", StringComparison.Ordinal))
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Вы уже авторизованы. Вернитесь на сайт — вход будет завершен автоматически.", null, token);
+                return true;
+            }
+
+            authRequest.ChatId = chatId;
+            authRequest.TelegramUserId = fromTelegramUserId > 0 ? fromTelegramUserId.ToString() : authRequest.TelegramUserId;
+
+            var user = fromTelegramUserId > 0
+                ? await db.Users.FirstOrDefaultAsync(x => x.Email == $"telegram_{fromTelegramUserId}@telegram.local", token)
+                : null;
+
+            if (user is not null)
+            {
+                authRequest.UserId = user.Id;
+                authRequest.Status = "completed";
+                authRequest.CompletedAt = now;
+                await SendMessageAsync(client, bot.Token, chatId, "Вход подтвержден ✅ Вернитесь на сайт, профиль уже открыт.", null, token);
+                return true;
+            }
+
+            authRequest.Status = "awaiting_phone";
+            await SendMessageAsync(
+                client,
+                bot.Token,
+                chatId,
+                "Чтобы завершить первый вход, отправьте номер телефона кнопкой ниже.",
+                new
+                {
+                    keyboard = new object[]
+                    {
+                        new object[]
+                        {
+                            new
+                            {
+                                text = "📱 Отправить номер телефона",
+                                request_contact = true
+                            }
+                        }
+                    },
+                    resize_keyboard = true,
+                    one_time_keyboard = true
+                },
+                token);
+            return true;
+        }
+
+        if (!messageEl.TryGetProperty("contact", out var contactEl))
+            return false;
+
+        var awaitingRequest = await db.TelegramAuthRequests
+            .Where(x => x.BotId == bot.Id
+                && x.ChatId == chatId
+                && x.Status == "awaiting_phone"
+                && x.ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(token);
+
+        if (awaitingRequest is null)
+            return false;
+
+        var contactUserId = contactEl.TryGetProperty("user_id", out var contactUserIdEl) ? contactUserIdEl.GetInt64() : 0L;
+        if (contactUserId > 0 && fromTelegramUserId > 0 && contactUserId != fromTelegramUserId)
+        {
+            await SendMessageAsync(client, bot.Token, chatId, "Пожалуйста, отправьте свой номер телефона из текущего Telegram-аккаунта.", null, token);
+            return true;
+        }
+
+        var phoneNumber = contactEl.TryGetProperty("phone_number", out var phoneEl) ? phoneEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(phoneNumber) || fromTelegramUserId <= 0)
+        {
+            await SendMessageAsync(client, bot.Token, chatId, "Не удалось получить номер телефона. Повторите попытку.", null, token);
+            return true;
+        }
+
+        var email = $"telegram_{fromTelegramUserId}@telegram.local";
+        var userEntity = await db.Users.FirstOrDefaultAsync(x => x.Email == email, token);
+        if (userEntity is null)
+        {
+            userEntity = new User
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Email = email,
+                PasswordHash = string.Empty,
+                Salt = string.Empty,
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Verified = true
+            };
+            db.Users.Add(userEntity);
+
+            db.Profiles.Add(new Profile
+            {
+                UserId = userEntity.Id,
+                Email = email,
+                Name = string.Join(" ", new[]
+                {
+                    TryGetString(messageEl, "from", "first_name"),
+                    TryGetString(messageEl, "from", "last_name")
+                }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim(),
+                Nickname = TryGetString(messageEl, "from", "username"),
+                Phone = phoneNumber,
+                PhoneVerified = true
+            });
+        }
+        else
+        {
+            var profile = await db.Profiles.FirstOrDefaultAsync(x => x.UserId == userEntity.Id, token);
+            if (profile is null)
+            {
+                profile = new Profile
+                {
+                    UserId = userEntity.Id,
+                    Email = userEntity.Email
+                };
+                db.Profiles.Add(profile);
+            }
+
+            if (string.IsNullOrWhiteSpace(profile.Phone))
+                profile.Phone = phoneNumber;
+            profile.PhoneVerified = true;
+        }
+
+        awaitingRequest.UserId = userEntity.Id;
+        awaitingRequest.PhoneNumber = phoneNumber;
+        awaitingRequest.TelegramUserId = fromTelegramUserId.ToString();
+        awaitingRequest.Status = "completed";
+        awaitingRequest.CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        await SendMessageAsync(
+            client,
+            bot.Token,
+            chatId,
+            "Готово ✅ Телефон подтвержден, вход завершен. Возвращайтесь на сайт — профиль откроется автоматически.",
+            new { remove_keyboard = true },
+            token);
+        return true;
+    }
+
+    private static string? ExtractStateFromStartCommand(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 2)
+            return null;
+
+        var payload = parts[1];
+        const string prefix = "login_";
+        if (!payload.StartsWith(prefix, StringComparison.Ordinal))
+            return null;
+
+        var state = payload[prefix.Length..].Trim();
+        return string.IsNullOrWhiteSpace(state) ? null : state;
     }
 
     private async Task<(TelegramBotSubscriber Subscriber, bool IsFirstInteraction)> UpsertSubscriberAsync(StoreDbContext db, string botId, JsonElement messageEl, CancellationToken token)
@@ -452,7 +657,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
-        await SendMessageAsync(client, bot.Token, chatId, text, cancellationToken);
+        await SendMessageAsync(client, bot.Token, chatId, text, null, cancellationToken);
         return true;
     }
 
@@ -685,9 +890,14 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         }
     }
 
-    private static async Task SendMessageAsync(HttpClient client, string token, long chatId, string text, CancellationToken cancellationToken)
+    private static async Task SendMessageAsync(HttpClient client, string token, long chatId, string text, object? replyMarkup, CancellationToken cancellationToken)
     {
-        var payload = JsonSerializer.Serialize(new { chat_id = chatId, text });
+        var payload = JsonSerializer.Serialize(new
+        {
+            chat_id = chatId,
+            text,
+            reply_markup = replyMarkup
+        });
         using var req = new HttpRequestMessage(HttpMethod.Post, $"https://api.telegram.org/bot{token}/sendMessage")
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json")

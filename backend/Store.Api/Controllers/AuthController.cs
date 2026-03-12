@@ -185,6 +185,102 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpPost("telegram/start")]
+    public async Task<IResult> StartTelegramAuth([FromBody] TelegramStartAuthPayload? payload)
+    {
+        var bot = await _db.TelegramBots
+            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Token) && !string.IsNullOrWhiteSpace(x.Username))
+            .OrderByDescending(x => x.UpdatedAt)
+            .FirstOrDefaultAsync();
+
+        if (bot is null)
+            return Results.BadRequest(new { detail = "Telegram bot is not configured for login" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var state = AuthService.GenerateToken()[..24].ToLowerInvariant();
+        var request = new TelegramAuthRequest
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            State = state,
+            BotId = bot.Id,
+            Status = "pending",
+            CreatedAt = now,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()
+        };
+
+        _db.TelegramAuthRequests.Add(request);
+        await _db.SaveChangesAsync();
+
+        var safeReturnUrl = string.IsNullOrWhiteSpace(payload?.ReturnUrl) ? "/profile" : payload!.ReturnUrl!.Trim();
+        return Results.Ok(new
+        {
+            state,
+            authUrl = $"https://t.me/{bot.Username}?start=login_{state}",
+            returnUrl = safeReturnUrl,
+            expiresAt = request.ExpiresAt,
+            pollIntervalMs = 2000
+        });
+    }
+
+    [HttpGet("telegram/status/{state}")]
+    public async Task<IResult> GetTelegramAuthStatus([FromRoute] string state)
+    {
+        var normalizedState = state?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedState))
+            return Results.BadRequest(new { detail = "Invalid state" });
+
+        var request = await _db.TelegramAuthRequests
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(x => x.State == normalizedState);
+
+        if (request is null)
+            return Results.NotFound(new { detail = "Authorization request not found" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (request.ExpiresAt <= now && request.Status != "completed" && request.Status != "consumed")
+        {
+            request.Status = "expired";
+            await _db.SaveChangesAsync();
+        }
+
+        if (!string.Equals(request.Status, "completed", StringComparison.Ordinal))
+            return Results.Ok(new { status = request.Status, completed = false });
+
+        if (string.IsNullOrWhiteSpace(request.UserId))
+            return Results.Ok(new { status = "pending", completed = false });
+
+        if (request.ConsumedAt.HasValue)
+            return Results.Ok(new { status = "consumed", completed = false });
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId);
+        if (user is null || user.IsBlocked)
+            return Results.BadRequest(new { detail = "User is not available for login" });
+
+        user.Verified = true;
+        var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
+        if (profile is not null && !string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            if (string.IsNullOrWhiteSpace(profile.Phone))
+                profile.Phone = request.PhoneNumber;
+            profile.PhoneVerified = true;
+        }
+
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+
+        request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        request.Status = "consumed";
+        await _db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            status = "completed",
+            completed = true,
+            token,
+            refreshToken,
+            user = new { id = user.Id, email = user.Email }
+        });
+    }
+
     /// <summary>
     /// Обновляет пользовательскую сессию по refresh-токену.
     /// </summary>

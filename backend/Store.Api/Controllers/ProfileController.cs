@@ -43,6 +43,7 @@ public class ProfileController : ControllerBase
                 shippingAddress = profile.ShippingAddress,
                 email = profile.Email,
                 nickname = profile.Nickname,
+                phoneVerified = profile.PhoneVerified,
                 isAdmin = user.IsAdmin,
                 isBlocked = user.IsBlocked
             })
@@ -53,6 +54,7 @@ public class ProfileController : ControllerBase
                 shippingAddress = "",
                 email = user.Email,
                 nickname = $"user{user.Id[..6]}",
+                phoneVerified = false,
                 isAdmin = user.IsAdmin,
                 isBlocked = user.IsBlocked
             });

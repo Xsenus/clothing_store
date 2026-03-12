@@ -69,7 +69,8 @@ const shouldSkipRefresh = (path) => {
     || path.startsWith("/auth/verify")
     || path.startsWith("/auth/resend")
     || path.startsWith("/auth/reset")
-    || path.startsWith("/auth/refresh");
+    || path.startsWith("/auth/refresh")
+    || path.startsWith("/auth/telegram");
 };
 
 const refreshAuthSession = async () => {
@@ -374,6 +375,14 @@ export const FLOW = {
     return { ok: true };
   },
 
+
+  telegramStartAuth: async ({ input }) => request("/auth/telegram/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input || {}),
+  }),
+
+  telegramAuthStatus: async ({ input }) => request(`/auth/telegram/status/${encodeURIComponent(input.state)}`),
 
   telegramLogin: async ({ input }) => {
     const result = await request("/auth/telegram/login", {

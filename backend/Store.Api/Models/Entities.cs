@@ -333,6 +333,9 @@ public class Profile
     [Column("phone")]
     public string? Phone { get; set; }
 
+    [Column("phone_verified")]
+    public bool PhoneVerified { get; set; }
+
     /// <summary>
     /// Получает или задаёт адрес доставки.
     /// </summary>
@@ -344,6 +347,47 @@ public class Profile
     /// </summary>
     [Column("nickname")]
     public string? Nickname { get; set; }
+}
+
+[Table("telegram_auth_requests")]
+public class TelegramAuthRequest
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("state")]
+    public string State { get; set; } = string.Empty;
+
+    [Column("bot_id")]
+    public string BotId { get; set; } = string.Empty;
+
+    [Column("telegram_user_id")]
+    public string? TelegramUserId { get; set; }
+
+    [Column("chat_id")]
+    public long? ChatId { get; set; }
+
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
+    [Column("phone_number")]
+    public string? PhoneNumber { get; set; }
+
+    [Column("status")]
+    public string Status { get; set; } = "pending";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("expires_at")]
+    public long ExpiresAt { get; set; }
+
+    [Column("completed_at")]
+    public long? CompletedAt { get; set; }
+
+    [Column("consumed_at")]
+    public long? ConsumedAt { get; set; }
 }
 
 /// <summary>

@@ -67,6 +67,8 @@ public record TelegramAuthPayload(
     string AuthDate,
     string Hash);
 
+public record TelegramStartAuthPayload(string? ReturnUrl);
+
 /// <summary>
 /// Параметры поиска адреса через DaData.
 /// </summary>

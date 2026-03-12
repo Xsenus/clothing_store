@@ -54,6 +54,8 @@ export default function AuthPage() {
 
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
+  const [telegramAuthState, setTelegramAuthState] = useState("");
+  const [telegramAuthExpiresAt, setTelegramAuthExpiresAt] = useState(0);
   const authSeoTitle = pendingEmail ? "Подтверждение email" : "Вход и регистрация";
 
   useEffect(() => {
@@ -72,52 +74,66 @@ export default function AuthPage() {
     loadTelegram();
   }, []);
 
-  useEffect(() => {
+
+  const handleTelegramSignIn = async () => {
     if (!telegramEnabled || !telegramBotUsername) return;
-
-    const mountNode = document.getElementById("telegram-login-widget");
-    if (!mountNode) return;
-
-    mountNode.innerHTML = "";
-    window.onTelegramAuth = async (telegramUser) => {
-      setLoading(true);
-      try {
-        const formData = new FormData();
-        formData.append("flow", "telegram");
-        formData.append("telegramPayload", JSON.stringify({
-          id: String(telegramUser.id),
-          firstName: telegramUser.first_name,
-          lastName: telegramUser.last_name,
-          username: telegramUser.username,
-          photoUrl: telegramUser.photo_url,
-          authDate: String(telegramUser.auth_date),
-          hash: telegramUser.hash,
-        }));
-        await signIn("telegram", formData);
-        toast.success("Вход через Telegram выполнен");
-        navigate("/");
-      } catch (error) {
-        toast.error("Не удалось авторизоваться через Telegram");
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    try {
+      const started = await FLOW.telegramStartAuth({ input: { returnUrl: "/profile" } });
+      if (!started?.authUrl || !started?.state) {
+        throw new Error("Telegram auth start failed");
       }
-    };
 
-    const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.async = true;
-    script.setAttribute("data-telegram-login", telegramBotUsername);
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-userpic", "false");
-    script.setAttribute("data-request-access", "write");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
-    mountNode.appendChild(script);
+      setTelegramAuthState(started.state);
+      setTelegramAuthExpiresAt(Number(started.expiresAt || 0));
+      window.open(started.authUrl, "_blank", "noopener,noreferrer");
+      toast.message("Открылся бот Telegram. Подтвердите вход, затем вернитесь на сайт.");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось начать вход через Telegram"));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return () => {
-      delete window.onTelegramAuth;
-      mountNode.innerHTML = "";
-    };
-  }, [telegramEnabled, telegramBotUsername, navigate, signIn]);
+  useEffect(() => {
+    if (!telegramAuthState) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await FLOW.telegramAuthStatus({ input: { state: telegramAuthState } });
+        if (status?.completed && status?.token) {
+          clearInterval(timer);
+          const formData = new FormData();
+          formData.append("flow", "telegram-state");
+          formData.append("token", status.token);
+          formData.append("refreshToken", status.refreshToken || "");
+          formData.append("user", JSON.stringify(status.user || null));
+          await signIn("telegram", formData);
+          setTelegramAuthState("");
+          setTelegramAuthExpiresAt(0);
+          toast.success("Вход через Telegram выполнен");
+          navigate("/profile", { replace: true });
+          return;
+        }
+
+        if (["expired", "consumed"].includes(String(status?.status || ""))) {
+          clearInterval(timer);
+          setTelegramAuthState("");
+          setTelegramAuthExpiresAt(0);
+          if (status?.status === "expired") {
+            toast.error("Сессия авторизации через Telegram истекла. Начните заново.");
+          }
+        }
+      } catch (error) {
+        clearInterval(timer);
+        setTelegramAuthState("");
+        setTelegramAuthExpiresAt(0);
+        toast.error(getErrorMessage(error, "Ошибка проверки статуса Telegram входа"));
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [telegramAuthState, navigate, signIn]);
 
   const mapKnownErrorMessage = (rawMessage) => {
     const normalized = (rawMessage || "").toLowerCase();
@@ -492,9 +508,16 @@ export default function AuthPage() {
                       {loading ? "Вход..." : "Войти"}
                     </Button>
                     {telegramEnabled && telegramBotUsername && (
-                      <div className="pt-1">
+                      <div className="pt-1 space-y-2">
                         <p className="text-xs text-muted-foreground">Или войдите через Telegram:</p>
-                        <div id="telegram-login-widget" className="pt-2" />
+                        <Button type="button" variant="outline" className="w-full h-9" onClick={handleTelegramSignIn} disabled={loading}>
+                          Войти через Telegram
+                        </Button>
+                        {telegramAuthState && (
+                          <p className="text-xs text-muted-foreground">
+                            Ожидаем подтверждение в @{telegramBotUsername}. {telegramAuthExpiresAt ? "Ссылка действует 10 минут." : ""}
+                          </p>
+                        )}
                       </div>
                     )}
                   </form>
