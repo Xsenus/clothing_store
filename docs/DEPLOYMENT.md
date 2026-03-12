@@ -123,6 +123,14 @@ ExecStart=/usr/bin/dotnet /opt/clothing_store_runtime/store-api/Store.Api.dll
 Restart=always
 RestartSec=5
 User=www-data
+StateDirectory=clothing-store-api
+CacheDirectory=clothing-store-api
+Environment=HOME=/var/lib/clothing-store-api
+Environment=DOTNET_CLI_HOME=/var/lib/clothing-store-api/.dotnet
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/clothing-store-api/dotnet-bundle
+Environment=DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
 EnvironmentFile=/etc/clothing-store/environment
 
 [Install]
@@ -136,6 +144,8 @@ sudo systemctl status clothing-store-api --no-pager
 ```
 
 Reference template in repo: [deploy/systemd/clothing-store-api.service](../deploy/systemd/clothing-store-api.service).
+
+The extra `HOME` / `DOTNET_*` environment variables prevent the .NET host from trying to write first-run files into `/var/www/.dotnet` when the service runs as `www-data`.
 
 ## 9) Configure Nginx
 ```bash

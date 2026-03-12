@@ -171,6 +171,7 @@ jobs:
             echo "==> Syncing backend artifacts to runtime directory: $BACKEND_PUBLISH_DIR"
             sudo mkdir -p "$BACKEND_PUBLISH_DIR"
             sudo rsync -a --delete "$BACKEND_TMP_PUBLISH_DIR"/ "$BACKEND_PUBLISH_DIR"/
+            sudo chmod -R a+rX "$BACKEND_PUBLISH_DIR"
 
             echo "==> Starting backend service"
             sudo systemctl start "$BACKEND_SERVICE"

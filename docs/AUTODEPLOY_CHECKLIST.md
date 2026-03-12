@@ -76,6 +76,8 @@ Expected values:
 - `WorkingDirectory=/opt/clothing_store`
 - `ExecStart=/usr/bin/dotnet /opt/clothing_store_runtime/store-api/Store.Api.dll`
 - `EnvironmentFiles=/etc/clothing-store/environment`
+- `HOME=/var/lib/clothing-store-api`
+- `DOTNET_CLI_HOME=/var/lib/clothing-store-api/.dotnet`
 
 ## 6) Expected Nginx state
 Quick check:

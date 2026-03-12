@@ -181,12 +181,15 @@ prepare_directories() {
   log "Preparing directories"
 
   mkdir -p "$APP_DIR"
+  mkdir -p "$(dirname "$RUNTIME_DIR")"
   mkdir -p "$RUNTIME_DIR"
   mkdir -p "$(dirname "$BACKEND_ENV_FILE")"
   mkdir -p "$FRONTEND_DIST_DIR"
   mkdir -p "$NEW_UPLOADS_DIR"
 
+  chmod 755 "$APP_DIR" "$(dirname "$RUNTIME_DIR")" "$RUNTIME_DIR"
   chown -R "$APP_USER:$APP_USER" "$NEW_UPLOADS_DIR"
+  chmod -R a+rX "$NEW_UPLOADS_DIR"
 }
 
 backup_existing_state() {
@@ -277,6 +280,14 @@ ExecStart=/usr/bin/dotnet ${RUNTIME_DIR}/Store.Api.dll
 Restart=always
 RestartSec=5
 User=${APP_USER}
+StateDirectory=clothing-store-api
+CacheDirectory=clothing-store-api
+Environment=HOME=/var/lib/clothing-store-api
+Environment=DOTNET_CLI_HOME=/var/lib/clothing-store-api/.dotnet
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/clothing-store-api/dotnet-bundle
+Environment=DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
 EnvironmentFile=${BACKEND_ENV_FILE}
 
 [Install]
@@ -441,6 +452,7 @@ build_and_publish() {
   npm run build
   rsync -a --delete dist/ "$FRONTEND_DIST_DIR"/
   dotnet publish backend/Store.Api/Store.Api.csproj -c Release -o "$RUNTIME_DIR"
+  chmod -R a+rX "$RUNTIME_DIR"
 }
 
 restart_services() {
