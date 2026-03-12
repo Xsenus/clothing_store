@@ -280,10 +280,6 @@ namespace Store.Api.Migrations
                         .HasColumnType("text")
                         .HasColumnName("phone");
 
-                    b.Property<bool>("PhoneVerified")
-                        .HasColumnType("boolean")
-                        .HasColumnName("phone_verified");
-
                     b.Property<string>("ShippingAddress")
                         .HasColumnType("text")
                         .HasColumnName("shipping_address");
@@ -338,67 +334,6 @@ namespace Store.Api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("sessions");
-                });
-
-            modelBuilder.Entity("Store.Api.Models.TelegramAuthRequest", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text")
-                        .HasColumnName("id");
-
-                    b.Property<string>("BotId")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("bot_id");
-
-                    b.Property<long?>("ChatId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("chat_id");
-
-                    b.Property<long?>("CompletedAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("completed_at");
-
-                    b.Property<long?>("ConsumedAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("consumed_at");
-
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_at");
-
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("expires_at");
-
-                    b.Property<string>("PhoneNumber")
-                        .HasColumnType("text")
-                        .HasColumnName("phone_number");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("state");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<string>("TelegramUserId")
-                        .HasColumnType("text")
-                        .HasColumnName("telegram_user_id");
-
-                    b.Property<string>("UserId")
-                        .HasColumnType("text")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("State")
-                        .IsUnique();
-
-                    b.ToTable("telegram_auth_requests");
                 });
 
             modelBuilder.Entity("Store.Api.Models.TelegramBot", b =>
