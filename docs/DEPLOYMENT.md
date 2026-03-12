@@ -2,6 +2,8 @@
 
 Target platform: Ubuntu 22.04/24.04 with Nginx, systemd, PostgreSQL, Node.js, and .NET 9.
 
+Operational runbook: [AUTODEPLOY_CHECKLIST.md](./AUTODEPLOY_CHECKLIST.md).
+
 ## 0) Paths and names
 - Repository: `/opt/clothing_store`
 - Backend runtime directory: `/opt/clothing_store_runtime/store-api`

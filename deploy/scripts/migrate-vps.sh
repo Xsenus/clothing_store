@@ -20,6 +20,7 @@ NGINX_SITE_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
 APP_USER="${APP_USER:-www-data}"
 OLD_UPLOADS_DIR="${OLD_UPLOADS_DIR:-/opt/backend/uploads}"
 NEW_UPLOADS_DIR="${NEW_UPLOADS_DIR:-${APP_DIR}/backend/uploads}"
+BACKEND_HEALTHCHECK_URL="${BACKEND_HEALTHCHECK_URL:-http://127.0.0.1:3001/products}"
 
 timestamp() {
   date +%Y%m%d-%H%M%S
@@ -64,6 +65,21 @@ first_non_empty() {
   for value in "$@"; do
     if [[ -n "${value:-}" ]]; then
       printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+connection_value() {
+  local key="$1"
+  local segment
+
+  IFS=';' read -r -a connection_segments <<<"$CONNECTION_STRING"
+  for segment in "${connection_segments[@]}"; do
+    if [[ "${segment%%=*}" == "$key" ]]; then
+      printf '%s\n' "${segment#*=}"
       return 0
     fi
   done
@@ -323,6 +339,99 @@ move_legacy_uploads() {
   chown -R "$APP_USER:$APP_USER" "$NEW_UPLOADS_DIR"
 }
 
+ensure_postgres_ready() {
+  local db_host
+  local db_port
+  local db_name
+  local db_user
+  local db_password
+  local db_ready="false"
+
+  db_host="$(
+    first_non_empty \
+      "$(connection_value "Host" || true)" \
+      "$(connection_value "Server" || true)" \
+      "127.0.0.1"
+  )"
+  db_port="$(
+    first_non_empty \
+      "$(connection_value "Port" || true)" \
+      "5432"
+  )"
+  db_name="$(
+    first_non_empty \
+      "$(connection_value "Database" || true)" \
+      "$(connection_value "Initial Catalog" || true)" \
+      ""
+  )"
+  db_user="$(
+    first_non_empty \
+      "$(connection_value "Username" || true)" \
+      "$(connection_value "User ID" || true)" \
+      "$(connection_value "User Id" || true)" \
+      ""
+  )"
+  db_password="$(
+    first_non_empty \
+      "$(connection_value "Password" || true)" \
+      ""
+  )"
+
+  if [[ "$db_host" != "127.0.0.1" && "$db_host" != "localhost" ]]; then
+    log "Skipping local PostgreSQL startup because database host is $db_host"
+    return 0
+  fi
+
+  log "Ensuring PostgreSQL is ready on ${db_host}:${db_port}"
+
+  systemctl enable postgresql >/dev/null 2>&1 || true
+  systemctl start postgresql || true
+
+  if command -v pg_lsclusters >/dev/null 2>&1; then
+    while read -r version cluster port status owner data_dir log_file; do
+      [[ -n "${version:-}" ]] || continue
+      [[ "${port:-}" == "$db_port" ]] || continue
+
+      if [[ "$status" != "online" ]]; then
+        pg_ctlcluster "$version" "$cluster" start || true
+      fi
+    done < <(pg_lsclusters --no-header || true)
+  fi
+
+  for attempt in $(seq 1 30); do
+    if command -v pg_isready >/dev/null 2>&1; then
+      if pg_isready -h "$db_host" -p "$db_port" >/dev/null 2>&1; then
+        db_ready="true"
+        break
+      fi
+    elif (echo >/dev/tcp/"$db_host"/"$db_port") >/dev/null 2>&1; then
+      db_ready="true"
+      break
+    fi
+
+    sleep 1
+  done
+
+  if [[ "$db_ready" != "true" ]]; then
+    systemctl status postgresql --no-pager || true
+    if command -v pg_lsclusters >/dev/null 2>&1; then
+      pg_lsclusters || true
+    fi
+    fail "PostgreSQL is not reachable on ${db_host}:${db_port}. Check cluster status and the connection string."
+  fi
+
+  if [[ -n "$db_name" && -n "$db_user" && -n "$db_password" && $(command -v psql) ]]; then
+    if ! PGPASSWORD="$db_password" psql \
+      -h "$db_host" \
+      -p "$db_port" \
+      -U "$db_user" \
+      -d "$db_name" \
+      -Atqc "select current_database(), current_user;" >/dev/null 2>&1; then
+      fail "PostgreSQL is running but application credentials cannot access database '${db_name}' as user '${db_user}'."
+    fi
+  fi
+}
+
 build_and_publish() {
   log "Building frontend and publishing backend"
 
@@ -349,8 +458,30 @@ run_checks() {
 
   systemctl status "$SERVICE_NAME" --no-pager
   systemctl status nginx --no-pager
-  curl --fail --silent --show-error http://127.0.0.1:3001/products >/dev/null
-  curl --fail --silent --show-error -I "http://${DOMAIN}" >/dev/null || true
+
+  local backend_ok="false"
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 5 "$BACKEND_HEALTHCHECK_URL" >/dev/null; then
+      backend_ok="true"
+      break
+    fi
+
+    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+      systemctl status "$SERVICE_NAME" --no-pager || true
+      journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true
+      fail "Backend service left active state while waiting for health check."
+    fi
+
+    sleep 1
+  done
+
+  if [[ "$backend_ok" != "true" ]]; then
+    systemctl status "$SERVICE_NAME" --no-pager || true
+    journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true
+    fail "Backend health check did not pass in time: ${BACKEND_HEALTHCHECK_URL}"
+  fi
+
+  curl --fail --silent --show-error --max-time 10 -I "http://${DOMAIN}" >/dev/null || true
   journalctl -u "$SERVICE_NAME" -n 30 --no-pager || true
 }
 
@@ -391,6 +522,7 @@ main() {
   cleanup_old_runtime
   move_legacy_uploads
   build_and_publish
+  ensure_postgres_ready
   restart_services
   run_checks
   print_summary
