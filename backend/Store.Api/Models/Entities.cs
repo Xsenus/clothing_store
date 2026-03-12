@@ -145,6 +145,9 @@ public class AppSetting
 [Table("telegram_bots")]
 public class TelegramBot
 {
+    public const string UpdateModePolling = "polling";
+    public const string UpdateModeWebhook = "webhook";
+
     [Key]
     [Column("id")]
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -172,6 +175,12 @@ public class TelegramBot
 
     [Column("enabled")]
     public bool Enabled { get; set; } = true;
+
+    [Column("update_mode")]
+    public string UpdateMode { get; set; } = UpdateModePolling;
+
+    [Column("webhook_secret")]
+    public string? WebhookSecret { get; set; }
 
     [Column("use_for_login")]
     public bool UseForLogin { get; set; }

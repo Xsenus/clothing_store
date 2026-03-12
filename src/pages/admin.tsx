@@ -54,6 +54,7 @@ interface TelegramBot {
   tokenMasked?: string;
   hasToken?: boolean;
   enabled: boolean;
+  updateMode?: "polling" | "webhook";
   useForLogin?: boolean;
   autoRepliesEnabled?: boolean;
   commands: TelegramBotCommand[];
@@ -157,6 +158,7 @@ const getInitialTelegramBotForm = () => ({
   username: "",
   tokenMasked: "",
   enabled: true,
+  updateMode: "polling" as "polling" | "webhook",
   useForLogin: false,
   autoRepliesEnabled: true,
   commands: [createEmptyTelegramBotCommand()],
@@ -693,6 +695,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       username: bot.username || "",
       tokenMasked: bot.tokenMasked || "",
       enabled: bot.enabled,
+      updateMode: bot.updateMode === "webhook" ? "webhook" : "polling",
       useForLogin: !!bot.useForLogin,
       autoRepliesEnabled: bot.autoRepliesEnabled ?? true,
       commands: Array.isArray(bot.commands) && bot.commands.length > 0 ? bot.commands : [createEmptyTelegramBotCommand()],
@@ -795,6 +798,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         imageUrl: telegramBotForm.imageUrl.trim(),
         token: enteredToken || undefined,
         enabled: telegramBotForm.enabled,
+        updateMode: telegramBotForm.updateMode,
         useForLogin: telegramBotForm.useForLogin,
         autoRepliesEnabled: telegramBotForm.autoRepliesEnabled,
         commands: telegramBotForm.commands
@@ -1704,6 +1708,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         <div className="text-xs text-slate-400 truncate">{bot.username ? `@${bot.username}` : "username не задан"}</div>
                                         <div className="text-xs text-slate-500">ID: {bot.botInfo?.id || bot.id}</div>
                                         <div className="text-xs text-slate-400">Токен: {bot.tokenMasked || "********"}</div>
+                                        <div className="text-xs text-slate-400">Режим: {bot.updateMode === "webhook" ? "Webhook" : "Polling"}</div>
                                         {bot.useForLogin && (
                                           <div className="mt-1 inline-flex rounded border border-emerald-500 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300">
                                             Используется для авторизации
@@ -2137,6 +2142,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     onCheckedChange={(checked) => setTelegramBotForm((prev) => ({ ...prev, enabled: !!checked }))}
                   />
                   <Label htmlFor="telegram-bot-enabled">Запустить бота сразу после сохранения</Label>
+                </div>
+
+                <div className="space-y-2 rounded border p-3">
+                  <div className="font-medium">Режим получения событий</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <label className="flex items-start gap-2 rounded border p-2">
+                      <input
+                        type="radio"
+                        name="telegram-update-mode"
+                        checked={telegramBotForm.updateMode === "polling"}
+                        onChange={() => setTelegramBotForm((prev) => ({ ...prev, updateMode: "polling" }))}
+                      />
+                      <span className="text-sm">
+                        <span className="font-medium">Polling</span>
+                        <span className="block text-xs text-muted-foreground">Сервер сам постоянно запрашивает обновления у Telegram (getUpdates).</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 rounded border p-2">
+                      <input
+                        type="radio"
+                        name="telegram-update-mode"
+                        checked={telegramBotForm.updateMode === "webhook"}
+                        onChange={() => setTelegramBotForm((prev) => ({ ...prev, updateMode: "webhook" }))}
+                      />
+                      <span className="text-sm">
+                        <span className="font-medium">Webhook</span>
+                        <span className="block text-xs text-muted-foreground">Telegram отправляет события на наш endpoint. Требуется публичный HTTPS адрес.</span>
+                      </span>
+                    </label>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">

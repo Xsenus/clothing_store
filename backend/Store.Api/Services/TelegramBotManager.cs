@@ -17,6 +17,7 @@ public interface ITelegramBotManager
     Task<object?> UpdateBotAsync(string id, TelegramBotPatchPayload payload);
     Task<bool> DeleteBotAsync(string id);
     Task<object?> CheckBotAsync(string id);
+    Task<bool> HandleWebhookUpdateAsync(string id, string? secret, JsonElement update, CancellationToken token);
     Task<object> ValidateTokenAsync(string token);
     Task SyncNowAsync();
 }
@@ -110,6 +111,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         var token = payload.Token?.Trim() ?? string.Empty;
         var commands = NormalizeCommands(payload.Commands);
         var replyTemplates = NormalizeReplyTemplates(payload.ReplyTemplates);
+        var updateMode = NormalizeUpdateMode(payload.UpdateMode);
 
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("Telegram bot token is required");
@@ -126,6 +128,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             ImageUrl = imageUrl,
             Token = token,
             Enabled = payload.Enabled,
+            UpdateMode = updateMode,
+            WebhookSecret = updateMode == TelegramBot.UpdateModeWebhook ? CreateWebhookSecret() : null,
             UseForLogin = payload.UseForLogin,
             AutoRepliesEnabled = payload.AutoRepliesEnabled,
             CommandsJson = SerializeCommands(commands),
@@ -170,6 +174,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             bot.ImageUrl = NormalizeOptional(payload.ImageUrl);
         if (payload.Enabled.HasValue)
             bot.Enabled = payload.Enabled.Value;
+        if (payload.UpdateMode is not null)
+            bot.UpdateMode = NormalizeUpdateMode(payload.UpdateMode);
         if (payload.UseForLogin.HasValue)
             bot.UseForLogin = payload.UseForLogin.Value;
         if (payload.AutoRepliesEnabled.HasValue)
@@ -180,6 +186,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             bot.ReplyTemplatesJson = SerializeReplyTemplates(NormalizeReplyTemplates(payload.ReplyTemplates));
 
         bot.Token = tokenCandidate;
+        bot.WebhookSecret = bot.UpdateMode == TelegramBot.UpdateModeWebhook ? EnsureWebhookSecret(bot.WebhookSecret) : null;
         bot.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         var commands = DeserializeCommands(bot.CommandsJson);
@@ -220,6 +227,26 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         return true;
     }
 
+    public async Task<bool> HandleWebhookUpdateAsync(string id, string? secret, JsonElement update, CancellationToken token)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
+        var bot = await db.TelegramBots.FirstOrDefaultAsync(x => x.Id == id, token);
+        if (bot is null || !bot.Enabled || !string.Equals(bot.UpdateMode, TelegramBot.UpdateModeWebhook, StringComparison.Ordinal))
+            return false;
+
+        var expectedSecret = bot.WebhookSecret?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(expectedSecret) || !string.Equals(secret?.Trim(), expectedSecret, StringComparison.Ordinal))
+            return false;
+
+        if (!update.TryGetProperty("message", out var messageEl))
+            return true;
+
+        var client = _httpClientFactory.CreateClient();
+        await HandleMessageAsync(client, db, bot, messageEl, token);
+        return true;
+    }
+
     public async Task<object?> CheckBotAsync(string id)
     {
         using var scope = _serviceProvider.CreateScope();
@@ -239,7 +266,9 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
         var activeBots = await db.TelegramBots
-            .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Token))
+            .Where(x => x.Enabled
+                && !string.IsNullOrWhiteSpace(x.Token)
+                && x.UpdateMode == TelegramBot.UpdateModePolling)
             .Select(x => x.Id)
             .ToListAsync(token);
         var activeSet = activeBots.ToHashSet();
@@ -456,6 +485,16 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             short_description = bot.ShortDescription ?? string.Empty
         }, cancellationToken);
 
+        if (string.Equals(bot.UpdateMode, TelegramBot.UpdateModeWebhook, StringComparison.Ordinal))
+        {
+            bot.WebhookSecret = EnsureWebhookSecret(bot.WebhookSecret);
+            await SetWebhookAsync(bot, cancellationToken);
+        }
+        else
+        {
+            await DeleteWebhookAsync(bot.Token, cancellationToken);
+        }
+
         if (!string.IsNullOrWhiteSpace(bot.ImageUrl))
             await UpdateBotProfilePhotoAsync(bot, cancellationToken);
 
@@ -515,6 +554,36 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         var client = _httpClientFactory.CreateClient();
         using var res = await client.SendAsync(req, cancellationToken);
         await EnsureSuccessfulTelegramResponseAsync(res, method, cancellationToken);
+    }
+
+    private async Task SetWebhookAsync(TelegramBot bot, CancellationToken cancellationToken)
+    {
+        var baseUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
+            ?? "http://0.0.0.0:3001";
+
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsedBaseUrl))
+            throw new InvalidOperationException("Unable to resolve webhook base URL from ASPNETCORE_URLS");
+
+        if (parsedBaseUrl.Host is "0.0.0.0" or "localhost" or "127.0.0.1")
+            throw new InvalidOperationException("Webhook mode requires a public HTTPS APP_URL/ASPNETCORE_URLS host");
+
+        if (!string.Equals(parsedBaseUrl.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Webhook mode requires HTTPS URL");
+
+        var webhookUrl = new Uri(parsedBaseUrl, $"/integrations/telegram/webhook/{bot.Id}").ToString();
+        await CallTelegramMethodAsync(bot.Token, "setWebhook", new
+        {
+            url = webhookUrl,
+            secret_token = bot.WebhookSecret
+        }, cancellationToken);
+    }
+
+    private async Task DeleteWebhookAsync(string token, CancellationToken cancellationToken)
+    {
+        await CallTelegramMethodAsync(token, "deleteWebhook", new
+        {
+            drop_pending_updates = false
+        }, cancellationToken);
     }
 
     private async Task EnsureSuccessfulTelegramResponseAsync(HttpResponseMessage response, string method, CancellationToken cancellationToken)
@@ -652,6 +721,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             tokenMasked = MaskToken(bot.Token),
             hasToken = !string.IsNullOrWhiteSpace(bot.Token),
             bot.Enabled,
+            bot.UpdateMode,
+            hasWebhookSecret = !string.IsNullOrWhiteSpace(bot.WebhookSecret),
             bot.UseForLogin,
             bot.AutoRepliesEnabled,
             Commands = DeserializeCommands(bot.CommandsJson),
@@ -706,6 +777,28 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return $"{trimmed[..2]}****{trimmed[^2..]}";
 
         return $"{trimmed[..4]}****{trimmed[^4..]}";
+    }
+
+    private static string NormalizeUpdateMode(string? mode)
+    {
+        var normalized = (mode ?? TelegramBot.UpdateModePolling).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            TelegramBot.UpdateModePolling => TelegramBot.UpdateModePolling,
+            TelegramBot.UpdateModeWebhook => TelegramBot.UpdateModeWebhook,
+            _ => throw new InvalidOperationException("Telegram bot update mode must be polling or webhook")
+        };
+    }
+
+    private static string CreateWebhookSecret() => Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+        .Replace("+", "", StringComparison.Ordinal)
+        .Replace("/", "", StringComparison.Ordinal)
+        .Replace("=", "", StringComparison.Ordinal);
+
+    private static string EnsureWebhookSecret(string? secret)
+    {
+        var normalized = secret?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? CreateWebhookSecret() : normalized;
     }
 
     private static string NormalizeRequiredName(string value)
