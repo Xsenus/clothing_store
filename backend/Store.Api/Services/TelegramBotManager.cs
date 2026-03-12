@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -360,7 +361,16 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         if (bot.UseForLogin)
         {
-            var handledPhoneVerification = await TryHandlePhoneVerificationMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+            var handledPhoneVerification = false;
+            try
+            {
+                handledPhoneVerification = await TryHandlePhoneVerificationMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+            }
+            catch (PostgresException ex) when (ex.SqlState == "42P01")
+            {
+                _logger.LogWarning(ex, "Skipping phone verification flow because relation contact_change_requests is missing. Apply pending migrations.");
+            }
+
             if (handledPhoneVerification)
             {
                 await db.SaveChangesAsync(token);
