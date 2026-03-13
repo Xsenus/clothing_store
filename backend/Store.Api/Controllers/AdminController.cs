@@ -343,29 +343,33 @@ public class AdminController : ControllerBase
             return Results.BadRequest(new { detail = "Название обязательно" });
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var description = NormalizeOptionalText(payload.Description);
+        var color = NormalizeOptionalColor(payload.Color);
+        var isActive = payload.IsActive ?? true;
+
         switch (kind.ToLowerInvariant())
         {
             case "sizes":
                 if (await _db.SizeDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Размер уже существует" });
-                var size = new SizeDictionary { Name = name, CreatedAt = now };
+                var size = new SizeDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
                 _db.SizeDictionaries.Add(size);
                 await _db.SaveChangesAsync();
                 return Results.Ok(size);
             case "materials":
                 if (await _db.MaterialDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Материал уже существует" });
-                var material = new MaterialDictionary { Name = name, CreatedAt = now };
+                var material = new MaterialDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
                 _db.MaterialDictionaries.Add(material);
                 await _db.SaveChangesAsync();
                 return Results.Ok(material);
             case "colors":
                 if (await _db.ColorDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Цвет уже существует" });
-                var color = new ColorDictionary { Name = name, CreatedAt = now };
-                _db.ColorDictionaries.Add(color);
+                var colorDictionary = new ColorDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                _db.ColorDictionaries.Add(colorDictionary);
                 await _db.SaveChangesAsync();
-                return Results.Ok(color);
+                return Results.Ok(colorDictionary);
             case "categories":
                 if (await _db.CategoryDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Категория уже существует" });
-                var category = new CategoryDictionary { Name = name, CreatedAt = now };
+                var category = new CategoryDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
                 _db.CategoryDictionaries.Add(category);
                 await _db.SaveChangesAsync();
                 return Results.Ok(category);
@@ -384,6 +388,10 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(name))
             return Results.BadRequest(new { detail = "Название обязательно" });
 
+        var description = NormalizeOptionalText(payload.Description);
+        var colorValue = NormalizeOptionalColor(payload.Color);
+        var isActive = payload.IsActive ?? true;
+
         switch (kind.ToLowerInvariant())
         {
             case "sizes":
@@ -394,6 +402,9 @@ public class AdminController : ControllerBase
                 if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
                     return Results.BadRequest(new { detail = "Размер используется в товарах, редактирование запрещено" });
                 size.Name = name;
+                size.Description = description;
+                size.Color = colorValue;
+                size.IsActive = isActive;
                 break;
             case "materials":
                 var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
@@ -403,6 +414,9 @@ public class AdminController : ControllerBase
                 if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"material\":\"{material.Name}%")))
                     return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
                 material.Name = name;
+                material.Description = description;
+                material.Color = colorValue;
+                material.IsActive = isActive;
                 break;
             case "colors":
                 var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
@@ -412,6 +426,9 @@ public class AdminController : ControllerBase
                 if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"color\":\"{color.Name}%")))
                     return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
                 color.Name = name;
+                color.Description = description;
+                color.Color = colorValue;
+                color.IsActive = isActive;
                 break;
             case "categories":
                 var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
@@ -421,6 +438,9 @@ public class AdminController : ControllerBase
                 if (await _db.Products.AnyAsync(x => x.Category == category.Name))
                     return Results.BadRequest(new { detail = "Категория используется в товарах, редактирование запрещено" });
                 category.Name = name;
+                category.Description = description;
+                category.Color = colorValue;
+                category.IsActive = isActive;
                 break;
             default:
                 return Results.BadRequest(new { detail = "Неизвестный словарь" });
@@ -519,6 +539,25 @@ public class AdminController : ControllerBase
             x.ChangedByUserId,
             changedBy = users.GetValueOrDefault(x.ChangedByUserId)
         }));
+    }
+
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static string? NormalizeOptionalColor(string? value)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return null;
+
+        if (trimmed.StartsWith("#") && trimmed.Length is 7 or 4)
+            return trimmed.ToLowerInvariant();
+
+        return null;
     }
 
     private Task<User?> RequireAdminUserAsync() => _auth.RequireAdminUserAsync(Request);

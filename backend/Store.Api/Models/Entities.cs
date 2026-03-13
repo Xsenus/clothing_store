@@ -510,6 +510,15 @@ public class SizeDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
     [Column("created_at")]
     public long CreatedAt { get; set; }
 }
@@ -523,6 +532,15 @@ public class MaterialDictionary
 
     [Column("name")]
     public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }
@@ -538,6 +556,15 @@ public class ColorDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
     [Column("created_at")]
     public long CreatedAt { get; set; }
 }
@@ -551,6 +578,15 @@ public class CategoryDictionary
 
     [Column("name")]
     public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }

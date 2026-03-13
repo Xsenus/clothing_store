@@ -123,6 +123,6 @@ public record TelegramBotPatchPayload(
 
 public record TelegramBotValidatePayload(string Token);
 
-public record DictionaryItemPayload(string Name);
+public record DictionaryItemPayload(string Name, string? Description, string? Color, bool? IsActive);
 
-public record DictionaryItemPatchPayload(string? Name);
+public record DictionaryItemPatchPayload(string? Name, string? Description, string? Color, bool? IsActive);
