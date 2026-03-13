@@ -308,6 +308,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
+  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -482,6 +483,37 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       if (kind === "categories") setFormData((prev) => ({ ...prev, category: name }));
     } catch (error) {
       toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
+    }
+  };
+
+  const deleteDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
+    if (!confirm(`Удалить «${item.name}»?`)) return;
+    try {
+      await FLOW.adminDeleteDictionaryItem({ input: { kind, id: item.id } });
+      await fetchAdminData();
+      toast.success("Элемент словаря удален");
+    } catch (error) {
+      toast.error((error as Error)?.message || "Не удалось удалить элемент словаря");
+    }
+  };
+
+  const updateDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
+    const nextName = (dictionaryDrafts[item.id] ?? item.name ?? "").trim();
+    if (!nextName) {
+      toast.error("Название обязательно");
+      return;
+    }
+    try {
+      await FLOW.adminUpdateDictionaryItem({ input: { kind, id: item.id, name: nextName } });
+      await fetchAdminData();
+      setDictionaryDrafts((prev) => {
+        const copy = { ...prev };
+        delete copy[item.id];
+        return copy;
+      });
+      toast.success("Элемент словаря обновлен");
+    } catch (error) {
+      toast.error((error as Error)?.message || "Не удалось обновить элемент словаря");
     }
   };
 
@@ -1542,15 +1574,32 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             ] as const).map((group) => (
               <div key={group.key} className="border border-gray-200 p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold">{group.label}</h3>
+                  <div>
+                    <h3 className="text-lg font-bold">{group.label}</h3>
+                    <p className="text-xs text-muted-foreground">Всего: {(dictionaries[group.key] || []).length}</p>
+                  </div>
                   <Button type="button" className="rounded-none" onClick={() => createDictionaryItem(group.key as any)}>
                     <Plus className="w-4 h-4 mr-2" /> Добавить
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {(dictionaries[group.key] || []).map((item: any) => (
-                    <span key={item.id} className="border px-3 py-1">{item.name}</span>
-                  ))}
+                <div className="space-y-2">
+                  {(dictionaries[group.key] || []).map((item: any) => {
+                    const draft = dictionaryDrafts[item.id] ?? item.name;
+                    return (
+                    <div key={item.id} className="border border-gray-200 p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="flex-1">
+                        <Input
+                          value={draft}
+                          onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          className="rounded-none border-black max-w-md"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => updateDictionaryItem(group.key as any, item)}>Сохранить</Button>
+                        <Button type="button" variant="destructive" className="rounded-none" onClick={() => deleteDictionaryItem(group.key as any, item)}>Удалить</Button>
+                      </div>
+                    </div>
+                  )})}
                 </div>
               </div>
             ))}
@@ -2562,7 +2611,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <option value="">Выберите пол</option>
                       <option value="male">мужской</option>
                       <option value="female">женский</option>
-                      <option value="unisex">unisex</option>
                     </select>
                   </div>
                   <div className="space-y-2">

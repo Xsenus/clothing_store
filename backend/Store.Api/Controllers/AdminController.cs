@@ -374,6 +374,62 @@ public class AdminController : ControllerBase
         }
     }
 
+
+
+    [HttpPatch("dictionaries/{kind}/{id}")]
+    public async Task<IResult> UpdateDictionaryItem(string kind, string id, [FromBody] DictionaryItemPatchPayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        var name = payload.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+            return Results.BadRequest(new { detail = "Название обязательно" });
+
+        switch (kind.ToLowerInvariant())
+        {
+            case "sizes":
+                var size = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (size is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                if (await _db.SizeDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
+                    return Results.BadRequest(new { detail = "Размер уже существует" });
+                if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
+                    return Results.BadRequest(new { detail = "Размер используется в товарах, редактирование запрещено" });
+                size.Name = name;
+                break;
+            case "materials":
+                var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (material is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                if (await _db.MaterialDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
+                    return Results.BadRequest(new { detail = "Материал уже существует" });
+                if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"material\":\"{material.Name}%")))
+                    return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
+                material.Name = name;
+                break;
+            case "colors":
+                var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (color is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                if (await _db.ColorDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
+                    return Results.BadRequest(new { detail = "Цвет уже существует" });
+                if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"color\":\"{color.Name}%")))
+                    return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
+                color.Name = name;
+                break;
+            case "categories":
+                var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (category is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                if (await _db.CategoryDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
+                    return Results.BadRequest(new { detail = "Категория уже существует" });
+                if (await _db.Products.AnyAsync(x => x.Category == category.Name))
+                    return Results.BadRequest(new { detail = "Категория используется в товарах, редактирование запрещено" });
+                category.Name = name;
+                break;
+            default:
+                return Results.BadRequest(new { detail = "Неизвестный словарь" });
+        }
+
+        await _db.SaveChangesAsync();
+        return Results.Ok(new { ok = true });
+    }
+
     [HttpDelete("dictionaries/{kind}/{id}")]
     public async Task<IResult> DeleteDictionaryItem(string kind, string id)
     {

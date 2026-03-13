@@ -552,6 +552,12 @@ export const FLOW = {
     method: "DELETE",
   }),
 
+  adminUpdateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name }),
+  }),
+
   adminGetStockHistory: async () => request("/admin/history/stocks"),
 
   adminGetPriceHistory: async () => request("/admin/history/prices"),
