@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Store.Api.Contracts;
@@ -411,7 +412,7 @@ public class AdminController : ControllerBase
                 if (material is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.MaterialDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Материал уже существует" });
-                if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"material\":\"{material.Name}%")))
+                if (await IsProductDataValueInUseAsync("material", material.Name))
                     return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
                 material.Name = name;
                 material.Description = description;
@@ -423,7 +424,7 @@ public class AdminController : ControllerBase
                 if (color is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.ColorDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Цвет уже существует" });
-                if (await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"color\":\"{color.Name}%")))
+                if (await IsProductDataValueInUseAsync("color", color.Name))
                     return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
                 color.Name = name;
                 color.Description = description;
@@ -466,7 +467,7 @@ public class AdminController : ControllerBase
                 var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (material is not null)
                 {
-                    var used = await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"material\":\"{material.Name}%"));
+                    var used = await IsProductDataValueInUseAsync("material", material.Name);
                     if (used) return Results.BadRequest(new { detail = "Материал используется в товарах, удаление запрещено" });
                     _db.MaterialDictionaries.Remove(material);
                 }
@@ -475,7 +476,7 @@ public class AdminController : ControllerBase
                 var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (color is not null)
                 {
-                    var used = await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"color\":\"{color.Name}%"));
+                    var used = await IsProductDataValueInUseAsync("color", color.Name);
                     if (used) return Results.BadRequest(new { detail = "Цвет используется в товарах, удаление запрещено" });
                     _db.ColorDictionaries.Remove(color);
                 }
@@ -542,6 +543,52 @@ public class AdminController : ControllerBase
     }
 
 
+
+
+    private async Task<bool> IsProductDataValueInUseAsync(string field, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var productsData = await _db.Products.AsNoTracking().Select(x => x.Data).ToListAsync();
+        foreach (var data in productsData)
+        {
+            if (TryGetStringFromProductData(data, field, out var current)
+                && string.Equals(current, value, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetStringFromProductData(string data, string field, out string? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(data))
+            return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(data);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+
+            if (!document.RootElement.TryGetProperty(field, out var property))
+                return false;
+
+            if (property.ValueKind != JsonValueKind.String)
+                return false;
+
+            value = property.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
     private static string? NormalizeOptionalText(string? value)
     {
         var trimmed = value?.Trim();

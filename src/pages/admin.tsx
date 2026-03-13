@@ -264,6 +264,24 @@ interface GalleryImage {
 }
 
 
+type DictionaryKind = "sizes" | "materials" | "colors" | "categories";
+
+interface DictionaryDeleteDialogState {
+  open: boolean;
+  kind: DictionaryKind;
+  item: any | null;
+  submitting: boolean;
+  error: string;
+}
+
+interface ActionNoticeState {
+  open: boolean;
+  title: string;
+  message: string;
+  isError?: boolean;
+}
+
+
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
   site_title: "fashiondemon",
@@ -309,8 +327,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
   const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; color: string; description: string; isActive: boolean }>>({});
-  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<"sizes" | "materials" | "colors" | "categories">("sizes");
+  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>("sizes");
   const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
+  const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
+    open: false,
+    kind: "sizes",
+    item: null,
+    submitting: false,
+    error: ""
+  });
+  const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -472,11 +498,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const createDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories") => {
+  const createDictionaryItem = async (kind: DictionaryKind) => {
     const name = window.prompt("Введите значение словаря");
     if (!name) return;
     try {
-      await FLOW.adminCreateDictionaryItem({ input: { kind, name } });
+      await FLOW.adminCreateDictionaryItem({ input: { kind, name, isActive: true } });
       await fetchAdminData();
       toast.success("Элемент словаря добавлен");
       if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
@@ -509,18 +535,41 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const deleteDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
-    if (!confirm(`Удалить «${item.name}»?`)) return;
+  const requestDeleteDictionaryItem = (kind: DictionaryKind, item: any) => {
+    setDictionaryDeleteDialog({
+      open: true,
+      kind,
+      item,
+      submitting: false,
+      error: ""
+    });
+  };
+
+  const closeDeleteDictionaryDialog = () => {
+    setDictionaryDeleteDialog((prev) => ({ ...prev, open: false, submitting: false, error: "" }));
+  };
+
+  const confirmDeleteDictionaryItem = async () => {
+    if (!dictionaryDeleteDialog.item) return;
+
+    setDictionaryDeleteDialog((prev) => ({ ...prev, submitting: true, error: "" }));
     try {
-      await FLOW.adminDeleteDictionaryItem({ input: { kind, id: item.id } });
+      await FLOW.adminDeleteDictionaryItem({ input: { kind: dictionaryDeleteDialog.kind, id: dictionaryDeleteDialog.item.id } });
       await fetchAdminData();
-      toast.success("Элемент словаря удален");
+      closeDeleteDictionaryDialog();
+      setActionNotice({
+        open: true,
+        title: "Готово",
+        message: `Элемент «${dictionaryDeleteDialog.item.name}» успешно удален.`,
+        isError: false
+      });
     } catch (error) {
-      toast.error((error as Error)?.message || "Не удалось удалить элемент словаря");
+      const message = (error as Error)?.message || "Не удалось удалить элемент словаря";
+      setDictionaryDeleteDialog((prev) => ({ ...prev, submitting: false, error: message }));
     }
   };
 
-  const updateDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
+  const updateDictionaryItem = async (kind: DictionaryKind, item: any) => {
     const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
     const nextName = (draft.name ?? item.name ?? "").trim();
     if (!nextName) {
@@ -1625,7 +1674,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <div className="space-y-1">
                     {dictionaryGroups.map((group) => {
                       const isSelected = selectedDictionaryGroup === group.key;
-                      const count = (dictionaries[group.key] || []).length;
+                      const records = dictionaries[group.key] || [];
+                      const count = records.length;
+                      const activeCount = records.filter((entry: any) => entry.isActive !== false).length;
+                      const inactiveCount = Math.max(count - activeCount, 0);
                       return (
                         <button
                           key={group.key}
@@ -1635,7 +1687,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         >
                           <div className="font-semibold">{group.label}</div>
                           <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>{count} записей</div>
-                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>Активно: {count} · Отключено: 0</div>
+                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>Активно: {activeCount} · Отключено: {inactiveCount}</div>
                         </button>
                       );
                     })}
@@ -1661,7 +1713,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
                             <div className="space-y-3">
-                              <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_auto] lg:items-end">
+                              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.85fr)_auto] xl:items-end">
                                 <div className="space-y-1">
                                   <Label className="mb-1 block text-xs">Название *</Label>
                                   <Input
@@ -1672,7 +1724,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 </div>
                                 <div className="space-y-1">
                                   <Label className="mb-1 block text-xs">Цвет</Label>
-                                  <div className="grid grid-cols-[1fr_42px] gap-2">
+                                  <div className="grid grid-cols-[minmax(0,1fr)_42px] gap-2">
                                     <Input
                                       value={draft.color}
                                       onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
@@ -1687,7 +1739,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                     />
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                                   <div className="mr-2 flex items-center gap-2">
                                     <Checkbox
                                       id={`dict-active-${item.id}`}
@@ -1696,10 +1748,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                     />
                                     <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
                                   </div>
-                                  <Button type="button" variant="outline" className="rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
+                                  <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
                                     <X className="mr-2 h-4 w-4" /> Сброс
                                   </Button>
-                                  <Button type="button" className="rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
+                                  <Button type="button" className="min-w-[130px] rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
                                     <Check className="mr-2 h-4 w-4" /> Сохранить
                                   </Button>
                                 </div>
@@ -1721,17 +1773,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="flex items-center gap-2 font-semibold">
                                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                                   {item.name}
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${item.isActive === false ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                                    {item.isActive === false ? "неактивно" : "активно"}
+                                  </span>
                                 </div>
                                 {item.description && (
                                   <div className="mt-1 text-sm text-slate-600">{item.description}</div>
                                 )}
                                 <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                                 <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none" onClick={() => startEditDictionaryItem(item)}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none text-red-500" onClick={() => deleteDictionaryItem(selectedDictionaryGroup, item)}>
+                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none text-red-500" onClick={() => requestDeleteDictionaryItem(selectedDictionaryGroup, item)}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -1773,7 +1828,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "auth" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Авторизация</h3>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="auth-password-policy"
                           checked={isSettingEnabled("auth_password_policy_enabled", true)}
@@ -1840,7 +1895,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "smtp" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Почта (SMTP)</h3>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-enabled"
                           checked={isSettingEnabled("smtp_enabled")}
@@ -1874,7 +1929,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-use-ssl"
                           checked={isSettingEnabled("smtp_use_ssl", true)}
@@ -1895,7 +1950,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         ["metrics_vk_pixel", "VK Pixel"]
                       ].map(([prefix, label]) => (
                         <div key={prefix} className="space-y-2 border p-3">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                             <Checkbox
                               id={`${prefix}-enabled`}
                               checked={isSettingEnabled(`${prefix}_enabled`)}
@@ -1932,7 +1987,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                         <TabsContent value="telegram" className="mt-3 space-y-3">
                           <div className="space-y-3 border p-3">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                               <Checkbox
                                 id="telegram-login-enabled"
                                 checked={isSettingEnabled("telegram_login_enabled")}
@@ -2388,7 +2443,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                   <Checkbox
                     id="telegram-bot-enabled"
                     checked={telegramBotForm.enabled}
@@ -2427,7 +2482,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                   <Checkbox
                     id="telegram-bot-use-for-login"
                     checked={telegramBotForm.useForLogin}
@@ -2443,7 +2498,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       Поддерживаются переменные: <span className="font-mono">{`{bot_name}`}</span>, <span className="font-mono">{`{command}`}</span>, <span className="font-mono">{`{username}`}</span>, <span className="font-mono">{`{first_name}`}</span>, <span className="font-mono">{`{order_number}`}</span>, <span className="font-mono">{`{status}`}</span>, <span className="font-mono">{`{discount_name}`}</span>.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                     <Checkbox
                       id="telegram-bot-auto-replies"
                       checked={telegramBotForm.autoRepliesEnabled}
@@ -2464,7 +2519,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <p className="text-xs text-muted-foreground">{template.description}</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                             <Checkbox
                               id={`telegram-template-${template.key}`}
                               checked={template.enabled}
@@ -2789,6 +2844,55 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </DialogContent>
           </Dialog>
 
+
+
+          <Dialog open={dictionaryDeleteDialog.open} onOpenChange={(open) => { if (!dictionaryDeleteDialog.submitting) setDictionaryDeleteDialog((prev) => ({ ...prev, open, error: open ? prev.error : "" })); }}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Подтверждение удаления</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Удалить элемент «{dictionaryDeleteDialog.item?.name}» из справочника «{dictionaryGroups.find((group) => group.key === dictionaryDeleteDialog.kind)?.label}»?
+                </p>
+                <p className="text-muted-foreground">Удаление возможно только если элемент не используется в товарах.</p>
+                {dictionaryDeleteDialog.error && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+                    {dictionaryDeleteDialog.error}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={closeDeleteDictionaryDialog} disabled={dictionaryDeleteDialog.submitting}>
+                  Отмена
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-none bg-red-600 text-white hover:bg-red-700"
+                  onClick={confirmDeleteDictionaryItem}
+                  disabled={dictionaryDeleteDialog.submitting}
+                >
+                  {dictionaryDeleteDialog.submitting ? "Удаление..." : "Удалить"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={actionNotice.open} onOpenChange={(open) => setActionNotice((prev) => ({ ...prev, open }))}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">{actionNotice.title || "Уведомление"}</DialogTitle>
+              </DialogHeader>
+              <div className={`rounded border px-3 py-2 text-sm ${actionNotice.isError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                {actionNotice.message}
+              </div>
+              <DialogFooter>
+                <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-800" onClick={() => setActionNotice((prev) => ({ ...prev, open: false }))}>
+                  Понятно
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog open={isMediaGalleryPickerOpen} onOpenChange={setIsMediaGalleryPickerOpen}>
             <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
               <DialogHeader>
