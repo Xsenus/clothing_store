@@ -309,6 +309,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
   const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, string>>({});
+  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<"sizes" | "materials" | "colors" | "categories">("sizes");
+  const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -486,6 +488,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const startEditDictionaryItem = (item: any) => {
+    setEditingDictionaryItemId(item.id);
+    setDictionaryDrafts((prev) => ({ ...prev, [item.id]: item.name || "" }));
+  };
+
+  const cancelEditDictionaryItem = (item: any) => {
+    setEditingDictionaryItemId(null);
+    setDictionaryDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[item.id];
+      return copy;
+    });
+  };
+
   const deleteDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
     if (!confirm(`Удалить «${item.name}»?`)) return;
     try {
@@ -512,6 +528,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         return copy;
       });
       toast.success("Элемент словаря обновлен");
+      setEditingDictionaryItemId(null);
     } catch (error) {
       toast.error((error as Error)?.message || "Не удалось обновить элемент словаря");
     }
@@ -931,6 +948,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "legal", label: "Юридические тексты" },
     { id: "general", label: "Общие" }
   ] as const;
+
+  const dictionaryGroups = [
+    { key: "sizes", label: "Размеры" },
+    { key: "materials", label: "Материалы" },
+    { key: "colors", label: "Цвета" },
+    { key: "categories", label: "Категории" }
+  ] as const;
+
+  const activeDictionaryGroup = dictionaryGroups.find((group) => group.key === selectedDictionaryGroup) || dictionaryGroups[0];
+
+  const getDictionaryDotColor = (name: string) => {
+    const colors = ["#3b82f6", "#22c55e", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#f59e0b"];
+    const idx = Array.from(name || "").reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % colors.length;
+    return colors[idx];
+  };
 
   const buildMediaFromProduct = (product: Product) => {
     if (product.media && product.media.length > 0) return product.media;
@@ -1565,44 +1597,99 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           </TabsContent>
 
 
-          <TabsContent value="dictionaries" className="mt-0 space-y-6">
-            {([
-              { key: "sizes", label: "Размеры" },
-              { key: "materials", label: "Материалы" },
-              { key: "colors", label: "Цвета" },
-              { key: "categories", label: "Категории" }
-            ] as const).map((group) => (
-              <div key={group.key} className="border border-gray-200 bg-[#f5f5f5] p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-3xl font-black tracking-tight">{group.label}</h3>
-                    <p className="text-sm text-muted-foreground">Всего: {(dictionaries[group.key] || []).length}</p>
+          <TabsContent value="dictionaries" className="mt-0">
+            <div className="space-y-4">
+              <h2 className="text-5xl font-black tracking-tight">Справочники</h2>
+              <p className="text-lg text-muted-foreground">Управляйте справочниками системы</p>
+
+              <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+                <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Наименования</div>
+                  <div className="space-y-1">
+                    {dictionaryGroups.map((group) => {
+                      const isSelected = selectedDictionaryGroup === group.key;
+                      const count = (dictionaries[group.key] || []).length;
+                      return (
+                        <button
+                          key={group.key}
+                          type="button"
+                          onClick={() => setSelectedDictionaryGroup(group.key)}
+                          className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${isSelected ? "border-slate-900 bg-slate-900 text-white" : "border-transparent hover:bg-slate-100"}`}
+                        >
+                          <div className="font-semibold">{group.label}</div>
+                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>{count} записей</div>
+                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>Активно: {count} · Отключено: 0</div>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-900" onClick={() => createDictionaryItem(group.key as any)}>
-                    <Plus className="w-4 h-4 mr-2" /> Добавить
-                  </Button>
                 </div>
-                <div className="space-y-2">
-                  {(dictionaries[group.key] || []).map((item: any) => {
-                    const draft = dictionaryDrafts[item.id] ?? item.name;
-                    return (
-                    <div key={item.id} className="border border-gray-300 bg-[#f7f7f7] p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div className="flex-1 pr-2">
-                        <Input
-                          value={draft}
-                          onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                          className="rounded-none border-black bg-[#f5f5f5] max-w-xl"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button type="button" variant="outline" className="rounded-none border-gray-300 bg-white" onClick={() => updateDictionaryItem(group.key as any, item)}>Сохранить</Button>
-                        <Button type="button" className="rounded-none bg-red-500 text-white hover:bg-red-600" onClick={() => deleteDictionaryItem(group.key as any, item)}>Удалить</Button>
-                      </div>
+
+                <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-4">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-3xl font-black tracking-tight">{activeDictionaryGroup.label}</h3>
+                      <p className="text-sm text-muted-foreground">Всего: {(dictionaries[selectedDictionaryGroup] || []).length}</p>
                     </div>
-                  )})}
+                    <Button type="button" className="rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => createDictionaryItem(selectedDictionaryGroup)}>
+                      <Plus className="mr-2 h-4 w-4" /> Добавить
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(dictionaries[selectedDictionaryGroup] || []).map((item: any) => {
+                      const isEditing = editingDictionaryItemId === item.id;
+                      const draft = dictionaryDrafts[item.id] ?? item.name;
+                      return (
+                        <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+                                <div>
+                                  <Label className="mb-1 block text-xs">Название *</Label>
+                                  <Input
+                                    value={draft}
+                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    className="rounded-md border-slate-300"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button type="button" variant="outline" className="rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
+                                    <X className="mr-2 h-4 w-4" /> Сброс
+                                  </Button>
+                                  <Button type="button" className="rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
+                                    <Check className="mr-2 h-4 w-4" /> Сохранить
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 font-semibold">
+                                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: getDictionaryDotColor(item.name) }} />
+                                  {item.name}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none" onClick={() => startEditDictionaryItem(item)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none text-red-500" onClick={() => deleteDictionaryItem(selectedDictionaryGroup, item)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            ))}
+            </div>
           </TabsContent>
 
           <TabsContent value="settings" className="mt-0">
