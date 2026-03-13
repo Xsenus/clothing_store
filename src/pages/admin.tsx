@@ -2611,6 +2611,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <option value="">Выберите пол</option>
                       <option value="male">мужской</option>
                       <option value="female">женский</option>
+                      <option value="unisex">unisex</option>
                     </select>
                   </div>
                   <div className="space-y-2">
