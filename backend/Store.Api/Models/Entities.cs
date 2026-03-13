@@ -500,6 +500,167 @@ public class Product
     public string Data { get; set; } = "{}";
 }
 
+[Table("size_dictionaries")]
+public class SizeDictionary
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+[Table("material_dictionaries")]
+public class MaterialDictionary
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+[Table("color_dictionaries")]
+public class ColorDictionary
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+[Table("category_dictionaries")]
+public class CategoryDictionary
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+[Table("product_size_stocks")]
+public class ProductSizeStock
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("size_id")]
+    public string SizeId { get; set; } = string.Empty;
+
+    [Column("stock")]
+    public int Stock { get; set; }
+}
+
+[Table("stock_change_history")]
+public class StockChangeHistory
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("size_id")]
+    public string SizeId { get; set; } = string.Empty;
+
+    [Column("changed_by_user_id")]
+    public string ChangedByUserId { get; set; } = string.Empty;
+
+    [Column("old_value")]
+    public int OldValue { get; set; }
+
+    [Column("new_value")]
+    public int NewValue { get; set; }
+
+    [Column("changed_at")]
+    public long ChangedAt { get; set; }
+}
+
+[Table("price_change_history")]
+public class PriceChangeHistory
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("changed_by_user_id")]
+    public string ChangedByUserId { get; set; } = string.Empty;
+
+    [Column("field_name")]
+    public string FieldName { get; set; } = string.Empty;
+
+    [Column("old_value")]
+    public decimal? OldValue { get; set; }
+
+    [Column("new_value")]
+    public decimal? NewValue { get; set; }
+
+    [Column("changed_at")]
+    public long ChangedAt { get; set; }
+}
+
 /// <summary>
 /// Представляет элемент корзины.
 /// </summary>

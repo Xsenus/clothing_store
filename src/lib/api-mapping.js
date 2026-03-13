@@ -175,10 +175,16 @@ const sortProducts = (products, sortBy) => {
 const normalizeProduct = (product) => {
   if (!product) return product;
   const productId = product._id || product.id;
+  const images = Array.isArray(product.images) ? product.images.map(toAbsoluteMediaUrl) : [];
+  const media = Array.isArray(product.media)
+    ? product.media.map((item) => ({ ...item, url: toAbsoluteMediaUrl(item?.url) }))
+    : [];
   return {
     ...product,
     _id: productId,
     id: productId,
+    images,
+    media,
   };
 };
 
@@ -532,6 +538,29 @@ export const FLOW = {
   adminCheckTelegramBot: async ({ input }) => request(`/admin/telegram-bots/${input.id}/check`, {
     method: "POST",
   }),
+
+
+  adminGetDictionaries: async () => request("/admin/dictionaries"),
+
+  adminCreateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name }),
+  }),
+
+  adminDeleteDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
+    method: "DELETE",
+  }),
+
+  adminUpdateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name, color: input.color, description: input.description, isActive: input.isActive }),
+  }),
+
+  adminGetStockHistory: async () => request("/admin/history/stocks"),
+
+  adminGetPriceHistory: async () => request("/admin/history/prices"),
 
   adminGetSettings: async () => request("/admin/settings"),
 

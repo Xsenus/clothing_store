@@ -231,6 +231,9 @@ interface Product {
   slug: string;
   description: string;
   price: number;
+  basePrice?: number;
+  discountPercent?: number;
+  discountedPrice?: number;
   images: string[];
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
@@ -258,6 +261,24 @@ interface GalleryImage {
   fileSize: number;
   existsOnDisk: boolean;
   createdAt?: number;
+}
+
+
+type DictionaryKind = "sizes" | "materials" | "colors" | "categories";
+
+interface DictionaryDeleteDialogState {
+  open: boolean;
+  kind: DictionaryKind;
+  item: any | null;
+  submitting: boolean;
+  error: string;
+}
+
+interface ActionNoticeState {
+  open: boolean;
+  title: string;
+  message: string;
+  isError?: boolean;
 }
 
 
@@ -304,6 +325,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
+  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; color: string; description: string; isActive: boolean }>>({});
+  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>("sizes");
+  const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
+  const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
+    open: false,
+    kind: "sizes",
+    item: null,
+    submitting: false,
+    error: ""
+  });
+  const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -328,7 +361,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     name: "",
     slug: "",
     description: "",
-    price: "",
+    basePrice: "",
+    discountPercent: "0",
+    discountedPrice: "",
     category: "",
     images: "",
     videos: "",
@@ -394,18 +429,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes, dictionariesRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
         FLOW.adminGetTelegramBots(),
-        FLOW.getAdminGalleryImages()
+        FLOW.getAdminGalleryImages(),
+        FLOW.adminGetDictionaries()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
       setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
+      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [] });
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -459,6 +496,108 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const createDictionaryItem = async (kind: DictionaryKind) => {
+    const name = window.prompt("Введите значение словаря");
+    if (!name) return;
+    try {
+      await FLOW.adminCreateDictionaryItem({ input: { kind, name, isActive: true } });
+      await fetchAdminData();
+      toast.success("Элемент словаря добавлен");
+      if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
+      if (kind === "materials") setFormData((prev) => ({ ...prev, material: name }));
+      if (kind === "colors") setFormData((prev) => ({ ...prev, color: name }));
+      if (kind === "categories") setFormData((prev) => ({ ...prev, category: name }));
+    } catch (error) {
+      toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
+    }
+  };
+
+  const getDictionaryDraftDefaults = (item: any) => ({
+    name: item.name || "",
+    color: item.color || getDictionaryDotColor(item.name || ""),
+    description: item.description || "",
+    isActive: item.isActive ?? true
+  });
+
+  const startEditDictionaryItem = (item: any) => {
+    setEditingDictionaryItemId(item.id);
+    setDictionaryDrafts((prev) => ({ ...prev, [item.id]: getDictionaryDraftDefaults(item) }));
+  };
+
+  const cancelEditDictionaryItem = (item: any) => {
+    setEditingDictionaryItemId(null);
+    setDictionaryDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[item.id];
+      return copy;
+    });
+  };
+
+  const requestDeleteDictionaryItem = (kind: DictionaryKind, item: any) => {
+    setDictionaryDeleteDialog({
+      open: true,
+      kind,
+      item,
+      submitting: false,
+      error: ""
+    });
+  };
+
+  const closeDeleteDictionaryDialog = () => {
+    setDictionaryDeleteDialog((prev) => ({ ...prev, open: false, submitting: false, error: "" }));
+  };
+
+  const confirmDeleteDictionaryItem = async () => {
+    if (!dictionaryDeleteDialog.item) return;
+
+    setDictionaryDeleteDialog((prev) => ({ ...prev, submitting: true, error: "" }));
+    try {
+      await FLOW.adminDeleteDictionaryItem({ input: { kind: dictionaryDeleteDialog.kind, id: dictionaryDeleteDialog.item.id } });
+      await fetchAdminData();
+      closeDeleteDictionaryDialog();
+      setActionNotice({
+        open: true,
+        title: "Готово",
+        message: `Элемент «${dictionaryDeleteDialog.item.name}» успешно удален.`,
+        isError: false
+      });
+    } catch (error) {
+      const message = (error as Error)?.message || "Не удалось удалить элемент словаря";
+      setDictionaryDeleteDialog((prev) => ({ ...prev, submitting: false, error: message }));
+    }
+  };
+
+  const updateDictionaryItem = async (kind: DictionaryKind, item: any) => {
+    const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
+    const nextName = (draft.name ?? item.name ?? "").trim();
+    if (!nextName) {
+      toast.error("Название обязательно");
+      return;
+    }
+    try {
+      await FLOW.adminUpdateDictionaryItem({
+        input: {
+          kind,
+          id: item.id,
+          name: nextName,
+          color: draft.color,
+          description: draft.description,
+          isActive: draft.isActive
+        }
+      });
+      await fetchAdminData();
+      setDictionaryDrafts((prev) => {
+        const copy = { ...prev };
+        delete copy[item.id];
+        return copy;
+      });
+      toast.success("Элемент словаря обновлен");
+      setEditingDictionaryItemId(null);
+    } catch (error) {
+      toast.error((error as Error)?.message || "Не удалось обновить элемент словаря");
+    }
   };
 
   const handleFaviconUpload = async (file: File | null) => {
@@ -876,6 +1015,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "general", label: "Общие" }
   ] as const;
 
+  const dictionaryGroups = [
+    { key: "sizes", label: "Размеры" },
+    { key: "materials", label: "Материалы" },
+    { key: "colors", label: "Цвета" },
+    { key: "categories", label: "Категории" }
+  ] as const;
+
+  const activeDictionaryGroup = dictionaryGroups.find((group) => group.key === selectedDictionaryGroup) || dictionaryGroups[0];
+
+  const getDictionaryDotColor = (name: string) => {
+    const colors = ["#3b82f6", "#22c55e", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#f59e0b"];
+    const idx = Array.from(name || "").reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % colors.length;
+    return colors[idx];
+  };
+
   const buildMediaFromProduct = (product: Product) => {
     if (product.media && product.media.length > 0) return product.media;
     const images = (product.images || []).map((url) => ({ type: "image" as const, url }));
@@ -892,7 +1046,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: product.name,
         slug: product.slug,
         description: product.description,
-        price: product.price.toString(),
+        basePrice: String(product.basePrice ?? product.price ?? ""),
+        discountPercent: String(product.discountPercent ?? 0),
+        discountedPrice: String(product.discountedPrice ?? product.price ?? ""),
         category: product.category,
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
@@ -916,7 +1072,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         description: "",
-        price: "",
+        basePrice: "",
+    discountPercent: "0",
+    discountedPrice: "",
         category: "",
         images: "",
         videos: "",
@@ -947,7 +1105,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: formData.name,
         slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
         description: formData.description,
-        price: parseFloat(formData.price),
+        basePrice: parseFloat(formData.basePrice || "0"),
+        discountPercent: parseFloat(formData.discountPercent || "0"),
+        discountedPrice: parseFloat(formData.discountedPrice || "0"),
         category: formData.category,
         images: imagesFromMedia,
         videos: videosFromMedia,
@@ -1028,6 +1188,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       return { ...prev, sizeStock: nextStock };
     });
   }, [formData.sizes]);
+
+  useEffect(() => {
+    const base = Number(formData.basePrice || 0);
+    const discount = Math.min(100, Math.max(0, Number(formData.discountPercent || 0)));
+    const discounted = discount > 0 ? Math.max(0, Math.round(base * (1 - discount / 100))) : base;
+    setFormData((prev) => ({ ...prev, discountedPrice: String(discounted) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.basePrice, formData.discountPercent]);
 
   const updateSizeStock = (size: string, value: string) => {
     const numeric = Math.max(0, Number(value || 0));
@@ -1208,6 +1376,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
               <TabsTrigger value="gallery" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ГАЛЕРЕЯ</TabsTrigger>
+              <TabsTrigger value="dictionaries" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">СЛОВАРИ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
             </TabsList>
 
@@ -1228,14 +1397,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 {products.map((product) => (
                   <TableRow key={product._id}>
                     <TableCell>
-                      {product.images?.[0] ? (
-                        <img src={product.images[0]} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
+                      {(product.images?.[0] || product.media?.find((m) => m.type === "image")?.url) ? (
+                        <img src={product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
                       ) : (
                         <div className="w-12 h-16 bg-gray-200" />
                       )}
                     </TableCell>
                     <TableCell className="font-bold">{product.name}</TableCell>
-                    <TableCell>{Math.round(product.price)}₽</TableCell>
+                    <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
                     <TableCell className="uppercase text-xs tracking-wide">{product.category}</TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
@@ -1493,6 +1662,145 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </TabsContent>
 
+
+          <TabsContent value="dictionaries" className="mt-0">
+            <div className="space-y-4">
+              <h2 className="text-5xl font-black tracking-tight">Справочники</h2>
+              <p className="text-lg text-muted-foreground">Управляйте справочниками системы</p>
+
+              <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+                <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Наименования</div>
+                  <div className="space-y-1">
+                    {dictionaryGroups.map((group) => {
+                      const isSelected = selectedDictionaryGroup === group.key;
+                      const records = dictionaries[group.key] || [];
+                      const count = records.length;
+                      const activeCount = records.filter((entry: any) => entry.isActive !== false).length;
+                      const inactiveCount = Math.max(count - activeCount, 0);
+                      return (
+                        <button
+                          key={group.key}
+                          type="button"
+                          onClick={() => setSelectedDictionaryGroup(group.key)}
+                          className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${isSelected ? "border-slate-900 bg-slate-900 text-white" : "border-transparent hover:bg-slate-100"}`}
+                        >
+                          <div className="font-semibold">{group.label}</div>
+                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>{count} записей</div>
+                          <div className={`text-xs ${isSelected ? "text-slate-300" : "text-slate-500"}`}>Активно: {activeCount} · Отключено: {inactiveCount}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-4">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-3xl font-black tracking-tight">{activeDictionaryGroup.label}</h3>
+                      <p className="text-sm text-muted-foreground">Всего: {(dictionaries[selectedDictionaryGroup] || []).length}</p>
+                    </div>
+                    <Button type="button" className="rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => createDictionaryItem(selectedDictionaryGroup)}>
+                      <Plus className="mr-2 h-4 w-4" /> Добавить
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(dictionaries[selectedDictionaryGroup] || []).map((item: any) => {
+                      const isEditing = editingDictionaryItemId === item.id;
+                      const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
+                      return (
+                        <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.85fr)_auto] xl:items-end">
+                                <div className="space-y-1">
+                                  <Label className="mb-1 block text-xs">Название *</Label>
+                                  <Input
+                                    value={draft.name}
+                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, name: e.target.value } }))}
+                                    className="rounded-md border-slate-300"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="mb-1 block text-xs">Цвет</Label>
+                                  <div className="grid grid-cols-[minmax(0,1fr)_42px] gap-2">
+                                    <Input
+                                      value={draft.color}
+                                      onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
+                                      className="rounded-md border-slate-300"
+                                      placeholder="#3b82f6"
+                                    />
+                                    <input
+                                      type="color"
+                                      value={draft.color || "#3b82f6"}
+                                      onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
+                                      className="h-10 w-10 cursor-pointer rounded border border-slate-300 bg-white p-1"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                                  <div className="mr-2 flex items-center gap-2">
+                                    <Checkbox
+                                      id={`dict-active-${item.id}`}
+                                      checked={draft.isActive}
+                                      onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
+                                    />
+                                    <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
+                                  </div>
+                                  <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
+                                    <X className="mr-2 h-4 w-4" /> Сброс
+                                  </Button>
+                                  <Button type="button" className="min-w-[130px] rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
+                                    <Check className="mr-2 h-4 w-4" /> Сохранить
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="mb-1 block text-xs">Описание</Label>
+                                <Textarea
+                                  value={draft.description}
+                                  onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, description: e.target.value } }))}
+                                  className="min-h-[76px] rounded-md border-slate-300"
+                                  placeholder="Описание словарного значения"
+                                />
+                              </div>
+                              <div className="text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 font-semibold">
+                                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
+                                  {item.name}
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${item.isActive === false ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                                    {item.isActive === false ? "неактивно" : "активно"}
+                                  </span>
+                                </div>
+                                {item.description && (
+                                  <div className="mt-1 text-sm text-slate-600">{item.description}</div>
+                                )}
+                                <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none" onClick={() => startEditDictionaryItem(item)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none text-red-500" onClick={() => requestDeleteDictionaryItem(selectedDictionaryGroup, item)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
           <TabsContent value="settings" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Настройки</h2>
@@ -1520,7 +1828,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "auth" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Авторизация</h3>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="auth-password-policy"
                           checked={isSettingEnabled("auth_password_policy_enabled", true)}
@@ -1587,7 +1895,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "smtp" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Почта (SMTP)</h3>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-enabled"
                           checked={isSettingEnabled("smtp_enabled")}
@@ -1621,7 +1929,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-use-ssl"
                           checked={isSettingEnabled("smtp_use_ssl", true)}
@@ -1642,7 +1950,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         ["metrics_vk_pixel", "VK Pixel"]
                       ].map(([prefix, label]) => (
                         <div key={prefix} className="space-y-2 border p-3">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                             <Checkbox
                               id={`${prefix}-enabled`}
                               checked={isSettingEnabled(`${prefix}_enabled`)}
@@ -1679,7 +1987,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                         <TabsContent value="telegram" className="mt-3 space-y-3">
                           <div className="space-y-3 border p-3">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                               <Checkbox
                                 id="telegram-login-enabled"
                                 checked={isSettingEnabled("telegram_login_enabled")}
@@ -2135,7 +2443,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                   <Checkbox
                     id="telegram-bot-enabled"
                     checked={telegramBotForm.enabled}
@@ -2174,7 +2482,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                   <Checkbox
                     id="telegram-bot-use-for-login"
                     checked={telegramBotForm.useForLogin}
@@ -2190,7 +2498,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       Поддерживаются переменные: <span className="font-mono">{`{bot_name}`}</span>, <span className="font-mono">{`{command}`}</span>, <span className="font-mono">{`{username}`}</span>, <span className="font-mono">{`{first_name}`}</span>, <span className="font-mono">{`{order_number}`}</span>, <span className="font-mono">{`{status}`}</span>, <span className="font-mono">{`{discount_name}`}</span>.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                     <Checkbox
                       id="telegram-bot-auto-replies"
                       checked={telegramBotForm.autoRepliesEnabled}
@@ -2211,7 +2519,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <p className="text-xs text-muted-foreground">{template.description}</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                             <Checkbox
                               id={`telegram-template-${template.key}`}
                               checked={template.enabled}
@@ -2311,14 +2619,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="prod-discount">Скидка (%)</Label>
+                    <Input id="prod-discount" type="number" min="0" max="100" value={formData.discountPercent} onChange={(e) => setFormData({...formData, discountPercent: e.target.value})} className="rounded-none border-black"/>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="prod-discounted">Цена со скидкой</Label>
+                    <Input id="prod-discounted" type="number" value={formData.discountedPrice} onChange={(e) => setFormData({...formData, discountedPrice: e.target.value})} className="rounded-none border-black"/>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="prod-cat">Категория</Label>
-                    <Input 
-                      id="prod-cat" 
-                      value={formData.category}
-                      onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      required
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-cat" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите категорию</option>
+                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2387,14 +2703,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Размеры</Label>
                   <div className="flex flex-wrap gap-4">
-                    {['S', 'M', 'L', 'XL', 'XXL'].map((size) => (
-                      <div key={size} className="flex items-center space-x-2">
+                    {(dictionaries.sizes || []).map((sizeItem: any) => (
+                      <div key={sizeItem.name} className="flex items-center space-x-2">
                         <Checkbox 
-                          id={`size-${size}`} 
-                          checked={formData.sizes.includes(size)}
-                          onCheckedChange={() => toggleSize(size)}
+                          id={`size-${sizeItem.name}`} 
+                          checked={formData.sizes.includes(sizeItem.name)}
+                          onCheckedChange={() => toggleSize(sizeItem.name)}
                         />
-                        <Label htmlFor={`size-${size}`} className="cursor-pointer">{size}</Label>
+                        <Label htmlFor={`size-${sizeItem.name}`} className="cursor-pointer">{sizeItem.name}</Label>
                       </div>
                     ))}
                   </div>
@@ -2403,7 +2719,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Остатки по размерам</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {['S', 'M', 'L', 'XL', 'XXL'].map((size) => (
+                    {(dictionaries.sizes || []).map((sizeItem: any) => {
+                      const size = sizeItem.name;
+                      return (
                       <div key={`stock-${size}`} className="space-y-1">
                         <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
                         <Input
@@ -2415,7 +2733,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           className="rounded-none border-black"
                         />
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2450,12 +2769,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-material">Материал</Label>
-                    <Input
-                      id="prod-material"
-                      value={formData.material}
-                      onChange={(e) => setFormData({...formData, material: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-material" value={formData.material} onChange={(e) => setFormData({...formData, material: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите материал</option>
+                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2483,21 +2803,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="prod-gender">Пол</Label>
-                    <Input
-                      id="prod-gender"
-                      value={formData.gender}
-                      onChange={(e) => setFormData({...formData, gender: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <select id="prod-gender" value={formData.gender} onChange={(e) => setFormData({...formData, gender: e.target.value})} className="h-10 w-full border border-black px-3">
+                      <option value="">Выберите пол</option>
+                      <option value="male">мужской</option>
+                      <option value="female">женский</option>
+                      <option value="unisex">unisex</option>
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-color">Цвет</Label>
-                    <Input
-                      id="prod-color"
-                      value={formData.color}
-                      onChange={(e) => setFormData({...formData, color: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-color" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите цвет</option>
+                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2509,31 +2830,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     onChange={(e) => setFormData({...formData, shipping: e.target.value})}
                     className="rounded-none border-black"
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Отзывы</Label>
-                  {editingProduct?.reviews && editingProduct.reviews.length > 0 ? (
-                    <div className="space-y-3">
-                      {editingProduct.reviews.map((review: any) => (
-                        <div key={review.id || `${review.author}-${review.date}`} className="border border-gray-200 p-3">
-                          <div className="text-sm font-bold">{review.author}</div>
-                          <div className="text-xs text-gray-500">{review.date}</div>
-                          <div className="text-sm text-gray-700 mt-2">{review.text}</div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="mt-3 rounded-none"
-                            onClick={() => handleDeleteReview(review.id)}
-                          >
-                            Удалить
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-500">Отзывов пока нет</div>
-                  )}
                 </div>
 
                 <DialogFooter>
@@ -2548,6 +2844,55 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </DialogContent>
           </Dialog>
 
+
+
+          <Dialog open={dictionaryDeleteDialog.open} onOpenChange={(open) => { if (!dictionaryDeleteDialog.submitting) setDictionaryDeleteDialog((prev) => ({ ...prev, open, error: open ? prev.error : "" })); }}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Подтверждение удаления</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Удалить элемент «{dictionaryDeleteDialog.item?.name}» из справочника «{dictionaryGroups.find((group) => group.key === dictionaryDeleteDialog.kind)?.label}»?
+                </p>
+                <p className="text-muted-foreground">Удаление возможно только если элемент не используется в товарах.</p>
+                {dictionaryDeleteDialog.error && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+                    {dictionaryDeleteDialog.error}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={closeDeleteDictionaryDialog} disabled={dictionaryDeleteDialog.submitting}>
+                  Отмена
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-none bg-red-600 text-white hover:bg-red-700"
+                  onClick={confirmDeleteDictionaryItem}
+                  disabled={dictionaryDeleteDialog.submitting}
+                >
+                  {dictionaryDeleteDialog.submitting ? "Удаление..." : "Удалить"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={actionNotice.open} onOpenChange={(open) => setActionNotice((prev) => ({ ...prev, open }))}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">{actionNotice.title || "Уведомление"}</DialogTitle>
+              </DialogHeader>
+              <div className={`rounded border px-3 py-2 text-sm ${actionNotice.isError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                {actionNotice.message}
+              </div>
+              <DialogFooter>
+                <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-800" onClick={() => setActionNotice((prev) => ({ ...prev, open: false }))}>
+                  Понятно
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog open={isMediaGalleryPickerOpen} onOpenChange={setIsMediaGalleryPickerOpen}>
             <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
               <DialogHeader>

@@ -44,6 +44,13 @@ public class StoreDbContext : DbContext
     /// Возвращает набор товаров.
     /// </summary>
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<SizeDictionary> SizeDictionaries => Set<SizeDictionary>();
+    public DbSet<MaterialDictionary> MaterialDictionaries => Set<MaterialDictionary>();
+    public DbSet<ColorDictionary> ColorDictionaries => Set<ColorDictionary>();
+    public DbSet<CategoryDictionary> CategoryDictionaries => Set<CategoryDictionary>();
+    public DbSet<ProductSizeStock> ProductSizeStocks => Set<ProductSizeStock>();
+    public DbSet<StockChangeHistory> StockChangeHistories => Set<StockChangeHistory>();
+    public DbSet<PriceChangeHistory> PriceChangeHistories => Set<PriceChangeHistory>();
     /// <summary>
     /// Возвращает набор элементов корзины.
     /// </summary>
@@ -74,6 +81,13 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<Like>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
+        modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<MaterialDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<ColorDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<CategoryDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<ProductSizeStock>().HasIndex(x => new { x.ProductId, x.SizeId }).IsUnique();
+        modelBuilder.Entity<StockChangeHistory>().HasIndex(x => x.ChangedAt);
+        modelBuilder.Entity<PriceChangeHistory>().HasIndex(x => x.ChangedAt);
         modelBuilder.Entity<TelegramBot>().HasIndex(x => x.Username);
         modelBuilder.Entity<TelegramBotSubscriber>().HasIndex(x => new { x.BotId, x.ChatId }).IsUnique();
         modelBuilder.Entity<TelegramAuthRequest>().HasIndex(x => x.State).IsUnique();
@@ -124,6 +138,36 @@ public class StoreDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Like>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductSizeStock>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductSizeStock>()
+            .HasOne<SizeDictionary>()
+            .WithMany()
+            .HasForeignKey(x => x.SizeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockChangeHistory>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<StockChangeHistory>()
+            .HasOne<SizeDictionary>()
+            .WithMany()
+            .HasForeignKey(x => x.SizeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PriceChangeHistory>()
             .HasOne<Product>()
             .WithMany()
             .HasForeignKey(x => x.ProductId)
