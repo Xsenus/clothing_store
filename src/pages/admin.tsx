@@ -1572,13 +1572,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               { key: "colors", label: "Цвета" },
               { key: "categories", label: "Категории" }
             ] as const).map((group) => (
-              <div key={group.key} className="border border-gray-200 p-4 space-y-3">
+              <div key={group.key} className="border border-gray-200 bg-[#f5f5f5] p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-bold">{group.label}</h3>
-                    <p className="text-xs text-muted-foreground">Всего: {(dictionaries[group.key] || []).length}</p>
+                    <h3 className="text-3xl font-black tracking-tight">{group.label}</h3>
+                    <p className="text-sm text-muted-foreground">Всего: {(dictionaries[group.key] || []).length}</p>
                   </div>
-                  <Button type="button" className="rounded-none" onClick={() => createDictionaryItem(group.key as any)}>
+                  <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-900" onClick={() => createDictionaryItem(group.key as any)}>
                     <Plus className="w-4 h-4 mr-2" /> Добавить
                   </Button>
                 </div>
@@ -1586,17 +1586,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {(dictionaries[group.key] || []).map((item: any) => {
                     const draft = dictionaryDrafts[item.id] ?? item.name;
                     return (
-                    <div key={item.id} className="border border-gray-200 p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div className="flex-1">
+                    <div key={item.id} className="border border-gray-300 bg-[#f7f7f7] p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="flex-1 pr-2">
                         <Input
                           value={draft}
                           onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                          className="rounded-none border-black max-w-md"
+                          className="rounded-none border-black bg-[#f5f5f5] max-w-xl"
                         />
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => updateDictionaryItem(group.key as any, item)}>Сохранить</Button>
-                        <Button type="button" variant="destructive" className="rounded-none" onClick={() => deleteDictionaryItem(group.key as any, item)}>Удалить</Button>
+                        <Button type="button" variant="outline" className="rounded-none border-gray-300 bg-white" onClick={() => updateDictionaryItem(group.key as any, item)}>Сохранить</Button>
+                        <Button type="button" className="rounded-none bg-red-500 text-white hover:bg-red-600" onClick={() => deleteDictionaryItem(group.key as any, item)}>Удалить</Button>
                       </div>
                     </div>
                   )})}
