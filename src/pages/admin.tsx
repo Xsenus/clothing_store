@@ -2474,7 +2474,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Остатки по размерам</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {(dictionaries.sizes || []).map((sizeItem: any) => (
+                    {(dictionaries.sizes || []).map((sizeItem: any) => {
+                      const size = sizeItem.name;
+                      return (
                       <div key={`stock-${size}`} className="space-y-1">
                         <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
                         <Input
@@ -2486,7 +2488,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           className="rounded-none border-black"
                         />
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
