@@ -231,6 +231,9 @@ interface Product {
   slug: string;
   description: string;
   price: number;
+  basePrice?: number;
+  discountPercent?: number;
+  discountedPrice?: number;
   images: string[];
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
@@ -304,6 +307,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -328,7 +332,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     name: "",
     slug: "",
     description: "",
-    price: "",
+    basePrice: "",
+    discountPercent: "0",
+    discountedPrice: "",
     category: "",
     images: "",
     videos: "",
@@ -394,18 +400,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes, dictionariesRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
         FLOW.adminGetTelegramBots(),
-        FLOW.getAdminGalleryImages()
+        FLOW.getAdminGalleryImages(),
+        FLOW.adminGetDictionaries()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
       setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
+      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [] });
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
     }
@@ -459,6 +467,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const createDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories") => {
+    const name = window.prompt("Введите значение словаря");
+    if (!name) return;
+    try {
+      await FLOW.adminCreateDictionaryItem({ input: { kind, name } });
+      await fetchAdminData();
+      toast.success("Элемент словаря добавлен");
+      if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
+      if (kind === "materials") setFormData((prev) => ({ ...prev, material: name }));
+      if (kind === "colors") setFormData((prev) => ({ ...prev, color: name }));
+      if (kind === "categories") setFormData((prev) => ({ ...prev, category: name }));
+    } catch (error) {
+      toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
+    }
   };
 
   const handleFaviconUpload = async (file: File | null) => {
@@ -892,7 +916,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: product.name,
         slug: product.slug,
         description: product.description,
-        price: product.price.toString(),
+        basePrice: String(product.basePrice ?? product.price ?? ""),
+        discountPercent: String(product.discountPercent ?? 0),
+        discountedPrice: String(product.discountedPrice ?? product.price ?? ""),
         category: product.category,
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
@@ -916,7 +942,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         description: "",
-        price: "",
+        basePrice: "",
+    discountPercent: "0",
+    discountedPrice: "",
         category: "",
         images: "",
         videos: "",
@@ -947,7 +975,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: formData.name,
         slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
         description: formData.description,
-        price: parseFloat(formData.price),
+        basePrice: parseFloat(formData.basePrice || "0"),
+        discountPercent: parseFloat(formData.discountPercent || "0"),
+        discountedPrice: parseFloat(formData.discountedPrice || "0"),
         category: formData.category,
         images: imagesFromMedia,
         videos: videosFromMedia,
@@ -1028,6 +1058,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       return { ...prev, sizeStock: nextStock };
     });
   }, [formData.sizes]);
+
+  useEffect(() => {
+    const base = Number(formData.basePrice || 0);
+    const discount = Math.min(100, Math.max(0, Number(formData.discountPercent || 0)));
+    const discounted = discount > 0 ? Math.max(0, Math.round(base * (1 - discount / 100))) : base;
+    setFormData((prev) => ({ ...prev, discountedPrice: String(discounted) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.basePrice, formData.discountPercent]);
 
   const updateSizeStock = (size: string, value: string) => {
     const numeric = Math.max(0, Number(value || 0));
@@ -1208,6 +1246,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
               <TabsTrigger value="gallery" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ГАЛЕРЕЯ</TabsTrigger>
+              <TabsTrigger value="dictionaries" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">СЛОВАРИ</TabsTrigger>
               <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
             </TabsList>
 
@@ -1228,14 +1267,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 {products.map((product) => (
                   <TableRow key={product._id}>
                     <TableCell>
-                      {product.images?.[0] ? (
-                        <img src={product.images[0]} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
+                      {(product.images?.[0] || product.media?.find((m) => m.type === "image")?.url) ? (
+                        <img src={product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
                       ) : (
                         <div className="w-12 h-16 bg-gray-200" />
                       )}
                     </TableCell>
                     <TableCell className="font-bold">{product.name}</TableCell>
-                    <TableCell>{Math.round(product.price)}₽</TableCell>
+                    <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
                     <TableCell className="uppercase text-xs tracking-wide">{product.category}</TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
@@ -1491,6 +1530,30 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </TableBody>
               </Table>
             </div>
+          </TabsContent>
+
+
+          <TabsContent value="dictionaries" className="mt-0 space-y-6">
+            {([
+              { key: "sizes", label: "Размеры" },
+              { key: "materials", label: "Материалы" },
+              { key: "colors", label: "Цвета" },
+              { key: "categories", label: "Категории" }
+            ] as const).map((group) => (
+              <div key={group.key} className="border border-gray-200 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold">{group.label}</h3>
+                  <Button type="button" className="rounded-none" onClick={() => createDictionaryItem(group.key as any)}>
+                    <Plus className="w-4 h-4 mr-2" /> Добавить
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(dictionaries[group.key] || []).map((item: any) => (
+                    <span key={item.id} className="border px-3 py-1">{item.name}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
           </TabsContent>
 
           <TabsContent value="settings" className="mt-0">
@@ -2311,14 +2374,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="prod-discount">Скидка (%)</Label>
+                    <Input id="prod-discount" type="number" min="0" max="100" value={formData.discountPercent} onChange={(e) => setFormData({...formData, discountPercent: e.target.value})} className="rounded-none border-black"/>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="prod-discounted">Цена со скидкой</Label>
+                    <Input id="prod-discounted" type="number" value={formData.discountedPrice} onChange={(e) => setFormData({...formData, discountedPrice: e.target.value})} className="rounded-none border-black"/>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="prod-cat">Категория</Label>
-                    <Input 
-                      id="prod-cat" 
-                      value={formData.category}
-                      onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      required
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-cat" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите категорию</option>
+                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2387,14 +2458,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Размеры</Label>
                   <div className="flex flex-wrap gap-4">
-                    {['S', 'M', 'L', 'XL', 'XXL'].map((size) => (
-                      <div key={size} className="flex items-center space-x-2">
+                    {(dictionaries.sizes || []).map((sizeItem: any) => (
+                      <div key={sizeItem.name} className="flex items-center space-x-2">
                         <Checkbox 
-                          id={`size-${size}`} 
-                          checked={formData.sizes.includes(size)}
-                          onCheckedChange={() => toggleSize(size)}
+                          id={`size-${sizeItem.name}`} 
+                          checked={formData.sizes.includes(sizeItem.name)}
+                          onCheckedChange={() => toggleSize(sizeItem.name)}
                         />
-                        <Label htmlFor={`size-${size}`} className="cursor-pointer">{size}</Label>
+                        <Label htmlFor={`size-${sizeItem.name}`} className="cursor-pointer">{sizeItem.name}</Label>
                       </div>
                     ))}
                   </div>
@@ -2403,7 +2474,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Остатки по размерам</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {['S', 'M', 'L', 'XL', 'XXL'].map((size) => (
+                    {(dictionaries.sizes || []).map((sizeItem: any) => (
                       <div key={`stock-${size}`} className="space-y-1">
                         <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
                         <Input
@@ -2450,12 +2521,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-material">Материал</Label>
-                    <Input
-                      id="prod-material"
-                      value={formData.material}
-                      onChange={(e) => setFormData({...formData, material: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-material" value={formData.material} onChange={(e) => setFormData({...formData, material: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите материал</option>
+                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2483,21 +2555,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="prod-gender">Пол</Label>
-                    <Input
-                      id="prod-gender"
-                      value={formData.gender}
-                      onChange={(e) => setFormData({...formData, gender: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <select id="prod-gender" value={formData.gender} onChange={(e) => setFormData({...formData, gender: e.target.value})} className="h-10 w-full border border-black px-3">
+                      <option value="">Выберите пол</option>
+                      <option value="male">мужской</option>
+                      <option value="female">женский</option>
+                      <option value="unisex">unisex</option>
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-color">Цвет</Label>
-                    <Input
-                      id="prod-color"
-                      value={formData.color}
-                      onChange={(e) => setFormData({...formData, color: e.target.value})}
-                      className="rounded-none border-black"
-                    />
+                    <div className="flex gap-2">
+                      <select id="prod-color" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="h-10 flex-1 border border-black px-3">
+                        <option value="">Выберите цвет</option>
+                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                      </select>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                    </div>
                   </div>
                 </div>
 
@@ -2509,31 +2582,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     onChange={(e) => setFormData({...formData, shipping: e.target.value})}
                     className="rounded-none border-black"
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Отзывы</Label>
-                  {editingProduct?.reviews && editingProduct.reviews.length > 0 ? (
-                    <div className="space-y-3">
-                      {editingProduct.reviews.map((review: any) => (
-                        <div key={review.id || `${review.author}-${review.date}`} className="border border-gray-200 p-3">
-                          <div className="text-sm font-bold">{review.author}</div>
-                          <div className="text-xs text-gray-500">{review.date}</div>
-                          <div className="text-sm text-gray-700 mt-2">{review.text}</div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="mt-3 rounded-none"
-                            onClick={() => handleDeleteReview(review.id)}
-                          >
-                            Удалить
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-500">Отзывов пока нет</div>
-                  )}
                 </div>
 
                 <DialogFooter>

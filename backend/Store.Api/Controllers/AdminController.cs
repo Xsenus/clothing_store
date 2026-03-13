@@ -319,6 +319,152 @@ public class AdminController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
+
+
+    [HttpGet("dictionaries")]
+    public async Task<IResult> GetDictionaries()
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        return Results.Ok(new
+        {
+            sizes = await _db.SizeDictionaries.OrderBy(x => x.Name).ToListAsync(),
+            materials = await _db.MaterialDictionaries.OrderBy(x => x.Name).ToListAsync(),
+            colors = await _db.ColorDictionaries.OrderBy(x => x.Name).ToListAsync(),
+            categories = await _db.CategoryDictionaries.OrderBy(x => x.Name).ToListAsync()
+        });
+    }
+
+    [HttpPost("dictionaries/{kind}")]
+    public async Task<IResult> CreateDictionaryItem(string kind, [FromBody] DictionaryItemPayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        var name = payload.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+            return Results.BadRequest(new { detail = "Название обязательно" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        switch (kind.ToLowerInvariant())
+        {
+            case "sizes":
+                if (await _db.SizeDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Размер уже существует" });
+                var size = new SizeDictionary { Name = name, CreatedAt = now };
+                _db.SizeDictionaries.Add(size);
+                await _db.SaveChangesAsync();
+                return Results.Ok(size);
+            case "materials":
+                if (await _db.MaterialDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Материал уже существует" });
+                var material = new MaterialDictionary { Name = name, CreatedAt = now };
+                _db.MaterialDictionaries.Add(material);
+                await _db.SaveChangesAsync();
+                return Results.Ok(material);
+            case "colors":
+                if (await _db.ColorDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Цвет уже существует" });
+                var color = new ColorDictionary { Name = name, CreatedAt = now };
+                _db.ColorDictionaries.Add(color);
+                await _db.SaveChangesAsync();
+                return Results.Ok(color);
+            case "categories":
+                if (await _db.CategoryDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Категория уже существует" });
+                var category = new CategoryDictionary { Name = name, CreatedAt = now };
+                _db.CategoryDictionaries.Add(category);
+                await _db.SaveChangesAsync();
+                return Results.Ok(category);
+            default:
+                return Results.BadRequest(new { detail = "Неизвестный словарь" });
+        }
+    }
+
+    [HttpDelete("dictionaries/{kind}/{id}")]
+    public async Task<IResult> DeleteDictionaryItem(string kind, string id)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        switch (kind.ToLowerInvariant())
+        {
+            case "sizes":
+                if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
+                    return Results.BadRequest(new { detail = "Размер используется в товарах, удаление запрещено" });
+                var size = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (size is not null) _db.SizeDictionaries.Remove(size);
+                break;
+            case "materials":
+                var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (material is not null)
+                {
+                    var used = await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"material\":\"{material.Name}%"));
+                    if (used) return Results.BadRequest(new { detail = "Материал используется в товарах, удаление запрещено" });
+                    _db.MaterialDictionaries.Remove(material);
+                }
+                break;
+            case "colors":
+                var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (color is not null)
+                {
+                    var used = await _db.Products.AnyAsync(x => EF.Functions.ILike(x.Data, $"%\"color\":\"{color.Name}%"));
+                    if (used) return Results.BadRequest(new { detail = "Цвет используется в товарах, удаление запрещено" });
+                    _db.ColorDictionaries.Remove(color);
+                }
+                break;
+            case "categories":
+                var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (category is not null)
+                {
+                    var used = await _db.Products.AnyAsync(x => x.Category == category.Name);
+                    if (used) return Results.BadRequest(new { detail = "Категория используется в товарах, удаление запрещено" });
+                    _db.CategoryDictionaries.Remove(category);
+                }
+                break;
+            default:
+                return Results.BadRequest(new { detail = "Неизвестный словарь" });
+        }
+
+        await _db.SaveChangesAsync();
+        return Results.Ok(new { ok = true });
+    }
+
+    [HttpGet("history/stocks")]
+    public async Task<IResult> GetStockHistory()
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        var users = await _db.Users.ToDictionaryAsync(x => x.Id, x => x.Email);
+        var products = await _db.Products.ToDictionaryAsync(x => x.Id, x => x.Slug);
+        var sizes = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
+        var history = await _db.StockChangeHistories.OrderByDescending(x => x.ChangedAt).Take(500).ToListAsync();
+        return Results.Ok(history.Select(x => new
+        {
+            x.Id,
+            x.ProductId,
+            product = products.GetValueOrDefault(x.ProductId),
+            x.SizeId,
+            size = sizes.GetValueOrDefault(x.SizeId),
+            x.OldValue,
+            x.NewValue,
+            x.ChangedAt,
+            x.ChangedByUserId,
+            changedBy = users.GetValueOrDefault(x.ChangedByUserId)
+        }));
+    }
+
+    [HttpGet("history/prices")]
+    public async Task<IResult> GetPriceHistory()
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+        var users = await _db.Users.ToDictionaryAsync(x => x.Id, x => x.Email);
+        var products = await _db.Products.ToDictionaryAsync(x => x.Id, x => x.Slug);
+        var history = await _db.PriceChangeHistories.OrderByDescending(x => x.ChangedAt).Take(500).ToListAsync();
+        return Results.Ok(history.Select(x => new
+        {
+            x.Id,
+            x.ProductId,
+            product = products.GetValueOrDefault(x.ProductId),
+            x.FieldName,
+            x.OldValue,
+            x.NewValue,
+            x.ChangedAt,
+            x.ChangedByUserId,
+            changedBy = users.GetValueOrDefault(x.ChangedByUserId)
+        }));
+    }
+
     private Task<User?> RequireAdminUserAsync() => _auth.RequireAdminUserAsync(Request);
 }
 

@@ -83,6 +83,7 @@ public class DatabaseInitializer
         await EnsureDefaultUserAsync(db);
         await EnsureAdminUserAsync(db);
         await EnsureDefaultAppSettingsAsync(db);
+        await EnsureDictionariesSeededAsync(db);
         await EnsureLegacyTelegramBotMigratedAsync(db);
         await EnsureTestDataAsync(db);
     }
@@ -168,6 +169,45 @@ public class DatabaseInitializer
         ");
     }
 
+
+    private static async Task EnsureDictionariesSeededAsync(StoreDbContext db)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var defaultSizes = new[] { "XS", "S", "M", "L", "XL", "XXL" };
+        var defaultMaterials = new[] { "Хлопок", "Полиэстер", "Футер", "Деним" };
+        var defaultColors = new[] { "Черный", "Белый", "Серый", "Бежевый" };
+        var defaultCategories = new[] { "hoodie", "t-shirt", "pants", "jacket" };
+
+        await SeedDictionaryAsync(db.SizeDictionaries, defaultSizes, now);
+        await SeedDictionaryAsync(db.MaterialDictionaries, defaultMaterials, now);
+        await SeedDictionaryAsync(db.ColorDictionaries, defaultColors, now);
+        await SeedDictionaryAsync(db.CategoryDictionaries, defaultCategories, now);
+
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
+    {
+        var existing = await set.AsQueryable().Select(x => EF.Property<string>(x, "Name")).ToListAsync();
+        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+        foreach (var value in values)
+        {
+            var name = value.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            if (normalized.Contains(name.ToLowerInvariant()))
+                continue;
+
+            var item = Activator.CreateInstance<T>();
+            if (item is null)
+                continue;
+
+            typeof(T).GetProperty("Name")?.SetValue(item, name);
+            typeof(T).GetProperty("CreatedAt")?.SetValue(item, createdAt);
+            set.Add(item);
+        }
+    }
     private async Task EnsureAdminUserAsync(StoreDbContext db)
     {
         var adminEmail = (_configuration["AdminUser:Email"] ?? string.Empty).Trim().ToLowerInvariant();

@@ -122,3 +122,7 @@ public record TelegramBotPatchPayload(
 
 
 public record TelegramBotValidatePayload(string Token);
+
+public record DictionaryItemPayload(string Name);
+
+public record DictionaryItemPatchPayload(string? Name);
