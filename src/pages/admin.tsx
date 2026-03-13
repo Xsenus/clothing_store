@@ -308,7 +308,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
-  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, string>>({});
+  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; color: string; description: string; isActive: boolean }>>({});
   const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<"sizes" | "materials" | "colors" | "categories">("sizes");
   const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -488,9 +488,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const getDictionaryDraftDefaults = (item: any) => ({
+    name: item.name || "",
+    color: item.color || getDictionaryDotColor(item.name || ""),
+    description: item.description || "",
+    isActive: item.isActive ?? true
+  });
+
   const startEditDictionaryItem = (item: any) => {
     setEditingDictionaryItemId(item.id);
-    setDictionaryDrafts((prev) => ({ ...prev, [item.id]: item.name || "" }));
+    setDictionaryDrafts((prev) => ({ ...prev, [item.id]: getDictionaryDraftDefaults(item) }));
   };
 
   const cancelEditDictionaryItem = (item: any) => {
@@ -514,13 +521,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const updateDictionaryItem = async (kind: "sizes" | "materials" | "colors" | "categories", item: any) => {
-    const nextName = (dictionaryDrafts[item.id] ?? item.name ?? "").trim();
+    const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
+    const nextName = (draft.name ?? item.name ?? "").trim();
     if (!nextName) {
       toast.error("Название обязательно");
       return;
     }
     try {
-      await FLOW.adminUpdateDictionaryItem({ input: { kind, id: item.id, name: nextName } });
+      await FLOW.adminUpdateDictionaryItem({
+        input: {
+          kind,
+          id: item.id,
+          name: nextName,
+          color: draft.color,
+          description: draft.description,
+          isActive: draft.isActive
+        }
+      });
       await fetchAdminData();
       setDictionaryDrafts((prev) => {
         const copy = { ...prev };
@@ -1639,21 +1656,46 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <div className="space-y-3">
                     {(dictionaries[selectedDictionaryGroup] || []).map((item: any) => {
                       const isEditing = editingDictionaryItemId === item.id;
-                      const draft = dictionaryDrafts[item.id] ?? item.name;
+                      const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
                       return (
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
                             <div className="space-y-3">
-                              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-                                <div>
+                              <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_auto] lg:items-end">
+                                <div className="space-y-1">
                                   <Label className="mb-1 block text-xs">Название *</Label>
                                   <Input
-                                    value={draft}
-                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    value={draft.name}
+                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, name: e.target.value } }))}
                                     className="rounded-md border-slate-300"
                                   />
                                 </div>
+                                <div className="space-y-1">
+                                  <Label className="mb-1 block text-xs">Цвет</Label>
+                                  <div className="grid grid-cols-[1fr_42px] gap-2">
+                                    <Input
+                                      value={draft.color}
+                                      onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
+                                      className="rounded-md border-slate-300"
+                                      placeholder="#3b82f6"
+                                    />
+                                    <input
+                                      type="color"
+                                      value={draft.color || "#3b82f6"}
+                                      onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
+                                      className="h-10 w-10 cursor-pointer rounded border border-slate-300 bg-white p-1"
+                                    />
+                                  </div>
+                                </div>
                                 <div className="flex items-center gap-2">
+                                  <div className="mr-2 flex items-center gap-2">
+                                    <Checkbox
+                                      id={`dict-active-${item.id}`}
+                                      checked={draft.isActive}
+                                      onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
+                                    />
+                                    <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
+                                  </div>
                                   <Button type="button" variant="outline" className="rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
                                     <X className="mr-2 h-4 w-4" /> Сброс
                                   </Button>
@@ -1662,15 +1704,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   </Button>
                                 </div>
                               </div>
+                              <div className="space-y-1">
+                                <Label className="mb-1 block text-xs">Описание</Label>
+                                <Textarea
+                                  value={draft.description}
+                                  onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, description: e.target.value } }))}
+                                  className="min-h-[76px] rounded-md border-slate-300"
+                                  placeholder="Описание словарного значения"
+                                />
+                              </div>
                               <div className="text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                             </div>
                           ) : (
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2 font-semibold">
-                                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: getDictionaryDotColor(item.name) }} />
+                                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                                   {item.name}
                                 </div>
+                                {item.description && (
+                                  <div className="mt-1 text-sm text-slate-600">{item.description}</div>
+                                )}
                                 <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                               </div>
                               <div className="flex items-center gap-2">

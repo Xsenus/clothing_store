@@ -555,7 +555,7 @@ export const FLOW = {
   adminUpdateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name }),
+    body: JSON.stringify({ name: input.name, color: input.color, description: input.description, isActive: input.isActive }),
   }),
 
   adminGetStockHistory: async () => request("/admin/history/stocks"),
