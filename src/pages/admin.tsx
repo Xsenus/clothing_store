@@ -29,7 +29,7 @@ import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
   command: string;
@@ -353,6 +353,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotTokenVisible, setTelegramBotTokenVisible] = useState(false);
   const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isStandaloneAdmin = !embedded;
+  const isCreateProductRoute = isStandaloneAdmin && location.pathname === "/admin/products/new";
+  const editProductRouteMatch = isStandaloneAdmin
+    ? location.pathname.match(/^\/admin\/products\/([^/]+)\/edit$/)
+    : null;
+  const routeEditingProductId = editProductRouteMatch?.[1] || null;
 
   // Form State
   const [isOpen, setIsOpen] = useState(false);
@@ -1037,7 +1044,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return [...images, ...videos];
   };
 
-  const handleOpen = (product?: Product) => {
+  const openProductForm = (product?: Product) => {
     if (product) {
       setEditingId(product._id);
       setEditingProduct(product);
@@ -1073,8 +1080,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         slug: "",
         description: "",
         basePrice: "",
-    discountPercent: "0",
-    discountedPrice: "",
+        discountPercent: "0",
+        discountedPrice: "",
         category: "",
         images: "",
         videos: "",
@@ -1094,6 +1101,47 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
     setIsOpen(true);
   };
+
+  const closeProductForm = () => {
+    setIsOpen(false);
+    if (isStandaloneAdmin && location.pathname !== "/admin") {
+      navigate("/admin");
+    }
+  };
+
+  const handleOpen = (product?: Product) => {
+    if (isStandaloneAdmin) {
+      if (product?._id) {
+        navigate(`/admin/products/${product._id}/edit`);
+      } else {
+        navigate('/admin/products/new');
+      }
+      return;
+    }
+    openProductForm(product);
+  };
+
+  useEffect(() => {
+    if (!isStandaloneAdmin) return;
+
+    if (isCreateProductRoute) {
+      openProductForm();
+      return;
+    }
+
+    if (routeEditingProductId) {
+      const targetProduct = products.find((p) => p._id === routeEditingProductId || (p as any).id === routeEditingProductId);
+      if (targetProduct) {
+        openProductForm(targetProduct);
+      } else if (!loading) {
+        toast.error('Товар не найден');
+        navigate('/admin');
+      }
+      return;
+    }
+
+    setIsOpen(false);
+  }, [isStandaloneAdmin, isCreateProductRoute, routeEditingProductId, products, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1144,7 +1192,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         toast.success("Товар создан");
       }
       
-      setIsOpen(false);
+      if (isStandaloneAdmin) {
+        navigate('/admin');
+      } else {
+        setIsOpen(false);
+      }
       fetchProducts();
     } catch (error) {
       toast.error("Операция не удалась. Проверьте формат данных.");
@@ -2573,7 +2625,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <h2 className="text-2xl font-black uppercase tracking-tighter">
                 {editingId ? 'Редактировать товар' : 'Добавить новый товар'}
               </h2>
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} className="rounded-none">
+              <Button type="button" variant="outline" onClick={closeProductForm} className="rounded-none">
                 НАЗАД К СПИСКУ
               </Button>
             </div>
@@ -2837,7 +2889,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setIsOpen(false)} className="rounded-none">
+                  <Button type="button" variant="outline" onClick={closeProductForm} className="rounded-none">
                     ОТМЕНА
                   </Button>
                   <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest">
