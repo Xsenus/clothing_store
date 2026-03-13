@@ -14,6 +14,7 @@ const PrivacyPage = lazy(() => import("./pages/privacy"));
 const TermsPage = lazy(() => import("./pages/terms"));
 const OfferPage = lazy(() => import("./pages/offer"));
 const NotFound = lazy(() => import("./pages/not-found"));
+const AdminPage = lazy(() => import("./pages/admin"));
 
 const routeFallback = (
   <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
@@ -31,7 +32,9 @@ export default function App() {
         <Route path="/cart" element={<CartPage />} />
         <Route path="/checkout" element={<CheckoutPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/admin" element={<Navigate to="/profile" replace />} />
+        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/products/new" element={<AdminPage />} />
+        <Route path="/admin/products/:id/edit" element={<AdminPage />} />
         <Route path="/admin-login" element={<Navigate to="/profile" replace />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
