@@ -40,10 +40,12 @@ interface FilterContentProps {
   sortOptions: { value: string; label: string }[];
   sortBy: string;
   onSortChange: (value: string) => void;
+  showCategoryFilter: boolean;
   categories: { value: string; label: string }[];
   selectedCategories: string[];
   onToggleCategory: (value: string) => void;
   onClearCategories: () => void;
+  showSizeFilter: boolean;
   sizes: string[];
   selectedSizes: string[];
   onToggleSize: (value: string) => void;
@@ -60,10 +62,12 @@ function FilterContent({
   sortOptions,
   sortBy,
   onSortChange,
+  showCategoryFilter,
   categories,
   selectedCategories,
   onToggleCategory,
   onClearCategories,
+  showSizeFilter,
   sizes,
   selectedSizes,
   onToggleSize,
@@ -100,6 +104,7 @@ function FilterContent({
         </div>
       </div>
 
+      {showCategoryFilter && (
       <div>
         <h3 className="text-lg font-bold mb-4 uppercase">КАТЕГОРИЯ</h3>
         <div className="flex flex-col gap-2">
@@ -124,7 +129,9 @@ function FilterContent({
           ))}
         </div>
       </div>
+      )}
 
+      {showSizeFilter && (
       <div>
         <h3 className="text-lg font-bold mb-4 uppercase">РАЗМЕРЫ</h3>
         <div className="flex flex-col gap-2">
@@ -149,6 +156,7 @@ function FilterContent({
           ))}
         </div>
       </div>
+      )}
 
       <div>
         <h3 className="text-lg font-bold mb-4 uppercase">ЦЕНА</h3>
@@ -192,6 +200,7 @@ function FilterContent({
 }
 
 export default function CatalogPage() {
+  const SORT_STORAGE_KEY = 'catalog_sort_by';
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,6 +213,10 @@ export default function CatalogPage() {
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("0");
   const [maxPriceInput, setMaxPriceInput] = useState("999999");
+  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [sizes, setSizes] = useState<string[]>([]);
+  const [showCategoryFilter, setShowCategoryFilter] = useState(true);
+  const [showSizeFilter, setShowSizeFilter] = useState(true);
 
   const sortOptions = [
     { value: 'popular', label: 'Популярные' },
@@ -213,32 +226,68 @@ export default function CatalogPage() {
     { value: 'price-desc', label: 'Дороже' },
   ];
 
-  const categories = [
-    { value: 'outerwear', label: 'Верхняя одежда' },
-    { value: 'hoodie', label: 'Толстовки (худи)' },
-    { value: 'sweatshirt', label: 'Кофты' },
-    { value: 'shirt', label: 'Рубашки' },
-    { value: 't-shirt', label: 'Футболки' },
-    { value: 'top', label: 'Топы' },
-    { value: 'suit', label: 'Костюмы' },
-    { value: 'pants', label: 'Штаны' },
-    { value: 'shorts', label: 'Шорты' },
-    { value: 'skirt', label: 'Юбки' },
-    { value: 'underwear', label: 'Нижнее белье' },
-    { value: 'shoes', label: 'Обувь' },
-    { value: 'bags', label: 'Сумки' },
-    { value: 'accessories', label: 'Аксессуары' },
-    { value: 'mystery-box', label: 'Мистери боксы' },
-  ];
-
-  const sizes = ["S", "M", "L", "XL", "XXL"];
-
   useEffect(() => {
     // Check URL params for initial sort
     const params = new URLSearchParams(location.search);
     const sortParam = params.get('sort');
-    if (sortParam) setSortBy(sortParam);
+    const storedSort = localStorage.getItem(SORT_STORAGE_KEY);
+    if (sortParam) {
+      setSortBy(sortParam);
+      return;
+    }
+    if (storedSort && sortOptions.some((option) => option.value === storedSort)) {
+      setSortBy(storedSort);
+    }
   }, [location.search]);
+
+  useEffect(() => {
+    localStorage.setItem(SORT_STORAGE_KEY, sortBy);
+  }, [sortBy]);
+
+  useEffect(() => {
+    const fetchCatalogFilters = async () => {
+      try {
+        const response = await FLOW.getCatalogFilters();
+        const nextCategories = Array.isArray(response?.categories)
+          ? response.categories
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({ value: item.value, label: item.label }))
+          : [];
+        const nextSizes = Array.isArray(response?.sizes)
+          ? response.sizes.filter((value: any) => typeof value === 'string')
+          : [];
+
+        setCategories(nextCategories);
+        setSizes(nextSizes);
+        setShowCategoryFilter(response?.visibility?.categories !== false);
+        setShowSizeFilter(response?.visibility?.sizes !== false);
+      } catch (error) {
+        console.error('Failed to fetch catalog filters:', error);
+      }
+    };
+
+    fetchCatalogFilters();
+  }, []);
+
+  useEffect(() => {
+    if (!showCategoryFilter) {
+      setSelectedCategories([]);
+      return;
+    }
+
+    const available = new Set(categories.map((item) => item.value));
+    setSelectedCategories((prev) => prev.filter((value) => available.has(value)));
+  }, [categories, showCategoryFilter]);
+
+  useEffect(() => {
+    if (!showSizeFilter) {
+      setSelectedSizes([]);
+      return;
+    }
+
+    const available = new Set(sizes);
+    setSelectedSizes((prev) => prev.filter((value) => available.has(value)));
+  }, [sizes, showSizeFilter]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -305,6 +354,7 @@ export default function CatalogPage() {
     setPriceRange({ min: 0, max: 999999 });
     setMinPriceInput("0");
     setMaxPriceInput("999999");
+    localStorage.removeItem(SORT_STORAGE_KEY);
   };
 
   const applyPriceInputs = () => {
@@ -357,10 +407,12 @@ export default function CatalogPage() {
                   sortOptions={sortOptions}
                   sortBy={sortBy}
                   onSortChange={setSortBy}
+                  showCategoryFilter={showCategoryFilter}
                   categories={categories}
                   selectedCategories={selectedCategories}
                   onToggleCategory={toggleCategory}
                   onClearCategories={() => setSelectedCategories([])}
+                  showSizeFilter={showSizeFilter}
                   sizes={sizes}
                   selectedSizes={selectedSizes}
                   onToggleSize={toggleSize}
@@ -385,10 +437,12 @@ export default function CatalogPage() {
                 sortOptions={sortOptions}
                 sortBy={sortBy}
                 onSortChange={setSortBy}
+                showCategoryFilter={showCategoryFilter}
                 categories={categories}
                 selectedCategories={selectedCategories}
                 onToggleCategory={toggleCategory}
                 onClearCategories={() => setSelectedCategories([])}
+                showSizeFilter={showSizeFilter}
                 sizes={sizes}
                 selectedSizes={selectedSizes}
                 onToggleSize={toggleSize}

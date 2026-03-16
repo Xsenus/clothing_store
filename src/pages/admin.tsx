@@ -312,10 +312,17 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_login_enabled: "false",
   telegram_bot_username: "",
   telegram_bot_token: "",
+  catalog_filter_categories_enabled: "true",
+  catalog_filter_sizes_enabled: "true",
   dadata_api_key: "",
   yandex_delivery_base_cost: "350",
   yandex_delivery_cost_per_kg: "40",
   yandex_delivery_markup_percent: "0"
+};
+
+const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = {
+  categories: "catalog_filter_categories_enabled",
+  sizes: "catalog_filter_sizes_enabled"
 };
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
@@ -503,6 +510,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateDictionaryFilterVisibility = (kind: DictionaryKind, enabled: boolean) => {
+    const key = DICTIONARY_FILTER_SETTING_KEYS[kind];
+    if (!key) return;
+    updateSetting(key, enabled ? "true" : "false");
   };
 
   const createDictionaryItem = async (kind: DictionaryKind) => {
@@ -1758,6 +1771,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <Plus className="mr-2 h-4 w-4" /> Добавить
                     </Button>
                   </div>
+
+                  {DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] && (
+                    <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3">
+                      <div>
+                        <p className="text-sm font-semibold">Показывать фильтр в каталоге</p>
+                        <p className="text-xs text-muted-foreground">Управляет отображением блока «{activeDictionaryGroup.label}» на странице каталога.</p>
+                      </div>
+                      <Checkbox
+                        checked={isSettingEnabled(DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] as string, true)}
+                        onCheckedChange={(checked) => updateDictionaryFilterVisibility(selectedDictionaryGroup, !!checked)}
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-3">
                     {(dictionaries[selectedDictionaryGroup] || []).map((item: any) => {
