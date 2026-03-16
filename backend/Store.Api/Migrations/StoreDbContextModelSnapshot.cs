@@ -371,58 +371,19 @@ namespace Store.Api.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("CustomerEmail")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_email");
-
-                    b.Property<string>("CustomerName")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_name");
-
-                    b.Property<string>("CustomerPhone")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_phone");
-
                     b.Property<string>("ItemsJson")
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("items_json");
-
-                    b.Property<string>("PaymentMethod")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("payment_method");
-
-                    b.Property<string>("PurchaseChannel")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("purchase_channel");
-
-                    b.Property<string>("ShippingAddress")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("shipping_address");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status");
 
-                    b.Property<string>("StatusHistoryJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("status_history_json");
-
                     b.Property<double>("TotalAmount")
                         .HasColumnType("double precision")
                         .HasColumnName("total_amount");
-
-                    b.Property<long>("UpdatedAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("updated_at");
 
                     b.Property<string>("UserId")
                         .IsRequired()
