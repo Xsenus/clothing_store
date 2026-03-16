@@ -15,6 +15,7 @@ interface Product {
   slug: string;
   price: number;
   images: string[];
+  sizeStock?: Record<string, number>;
 }
 
 export default function CartPage() {
@@ -47,6 +48,13 @@ export default function CartPage() {
     const product = products[item.productId];
     return sum + (product ? product.price * item.quantity : 0);
   }, 0);
+
+  const hasUnavailableItems = cartItems.some((item) => {
+    const product = products[item.productId];
+    if (!product) return true;
+    if (!product?.sizeStock) return false;
+    return (product.sizeStock[item.size] ?? 0) < item.quantity;
+  });
 
   if (isLoading || fetchingProducts) return (
     <>
@@ -102,15 +110,22 @@ export default function CartPage() {
                 </Button>
               </div>
 
-              <div className="space-y-0">
-                {cartItems.map((item) => (
-                  <CartItemCard 
-                    key={item.cartId} 
-                    item={item} 
-                    product={products[item.productId]} 
-                  />
-                ))}
-              </div>
+                <div className="space-y-0">
+                  {cartItems.map((item) => {
+                    const product = products[item.productId];
+                    const available = product?.sizeStock ? (product.sizeStock[item.size] ?? 0) : (product ? null : 0);
+                    const isOutOfStock = !product || (available !== null && available < item.quantity);
+                    return (
+                      <CartItemCard
+                        key={item.cartId}
+                        item={item}
+                        product={product}
+                        isOutOfStock={isOutOfStock}
+                        availableStock={available}
+                      />
+                    );
+                  })}
+                </div>
             </div>
 
             {/* Order Summary */}
@@ -136,11 +151,14 @@ export default function CartPage() {
                   </div>
                 </div>
 
-                <Link to="/checkout" className="block w-full">
-                  <Button className="w-full py-6 text-lg font-black uppercase tracking-widest bg-black hover:bg-gray-800 text-white transition-all hover:scale-[1.02]">
+                <Link to="/checkout" className={`block w-full ${hasUnavailableItems ? "pointer-events-none" : ""}`}>
+                  <Button disabled={hasUnavailableItems} className="w-full py-6 text-lg font-black uppercase tracking-widest bg-black hover:bg-gray-800 text-white transition-all hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100">
                     ОФОРМИТЬ ЗАКАЗ
                   </Button>
                 </Link>
+                {hasUnavailableItems && (
+                  <p className="mt-3 text-xs text-red-600">В корзине есть позиции без остатка. Удалите их или уменьшите количество.</p>
+                )}
                 
                 <p className="text-xs text-center text-gray-400 mt-4 uppercase tracking-widest">
                   Безопасная оплата

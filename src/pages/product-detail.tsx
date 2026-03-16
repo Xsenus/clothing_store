@@ -27,20 +27,47 @@ interface Product {
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
   sizes: string[];
-  category: string;
+  category?: string;
+  categories?: string[];
   isNew?: boolean;
   likesCount?: number;
   sku?: string;
   material?: string;
+  materials?: string[];
   printType?: string;
   fit?: string;
   gender?: string;
   color?: string;
+  colors?: string[];
   shipping?: string;
   reviews?: { id?: string; author: string; date: string; text: string; media?: string[] }[];
   commentsCount?: number;
   sizeStock?: Record<string, number>;
 }
+
+const normalizeProductValues = (values?: string[] | null, fallback?: string | null) => {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  (values || []).forEach((value) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(trimmed);
+  });
+
+  const fallbackValue = fallback?.trim();
+  if (fallbackValue) {
+    const fallbackKey = fallbackValue.toLowerCase();
+    if (!seen.has(fallbackKey)) {
+      result.unshift(fallbackValue);
+    }
+  }
+
+  return result;
+};
 
 export default function ProductDetailPage() {
   const { slug } = useParams();
@@ -64,6 +91,9 @@ export default function ProductDetailPage() {
   const productDescription = product
     ? truncateText(product.description || `${product.name} от fashiondemon`, 160)
     : "Страница товара fashiondemon.";
+  const productCategories = product ? normalizeProductValues(product.categories, product.category) : [];
+  const productMaterials = product ? normalizeProductValues(product.materials, product.material) : [];
+  const productColors = product ? normalizeProductValues(product.colors, product.color) : [];
   const hasStock = product
     ? product.sizeStock
       ? Object.values(product.sizeStock).some((value) => Number(value) > 0)
@@ -286,7 +316,7 @@ export default function ProductDetailPage() {
         image={productImage}
         type="product"
         robots={seoRobots}
-        keywords={[product.name, product.category, product.sku, 'fashiondemon', 'купить одежду'].filter(Boolean)}
+        keywords={[product.name, ...productCategories, product.sku, 'fashiondemon', 'купить одежду'].filter(Boolean)}
         structuredData={({ canonicalUrl, siteTitle }) => ({
           "@context": "https://schema.org",
           "@type": "Product",
@@ -294,9 +324,9 @@ export default function ProductDetailPage() {
           description: productDescription,
           image: productImages.length > 0 ? productImages : [resolveUrl(productImage)],
           sku: product.sku || product.slug,
-          category: product.category,
-          color: product.color || undefined,
-          material: product.material || undefined,
+          category: productCategories.join(", ") || undefined,
+          color: productColors.join(", ") || undefined,
+          material: productMaterials.join(", ") || undefined,
           brand: {
             "@type": "Brand",
             name: siteTitle,
@@ -474,7 +504,7 @@ export default function ProductDetailPage() {
                 <div className="text-gray-500">Артикул</div>
                 <div className="text-black">{product.sku || "-"}</div>
                 <div className="text-gray-500">Материал</div>
-                <div className="text-black">{product.material || "-"}</div>
+                <div className="text-black">{productMaterials.join(", ") || "-"}</div>
                 <div className="text-gray-500">Принт</div>
                 <div className="text-black">{product.printType || "-"}</div>
                 <div className="text-gray-500">Лекала</div>
@@ -482,7 +512,7 @@ export default function ProductDetailPage() {
                 <div className="text-gray-500">Пол</div>
                 <div className="text-black">{product.gender || "-"}</div>
                 <div className="text-gray-500">Цвет</div>
-                <div className="text-black">{product.color || "-"}</div>
+                <div className="text-black">{productColors.join(", ") || "-"}</div>
                 <div className="text-gray-500">Отправка</div>
                 <div className="text-black">{product.shipping || "-"}</div>
               </div>
@@ -555,7 +585,7 @@ export default function ProductDetailPage() {
             </div>
 
             <div className="text-xs text-gray-400 uppercase tracking-widest pt-4">
-              <p>Категория: {product.category}</p>
+              <p>Категория: {productCategories.join(", ") || "-"}</p>
               <p>Артикул: {product.slug}</p>
             </div>
           </div>

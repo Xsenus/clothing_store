@@ -52,6 +52,11 @@ export default function CheckoutPage() {
   }, 0);
 
   const total = subtotal + shipping;
+  const hasUnavailableItems = cartItems.some((item) => {
+    const product = products[item.productId];
+    if (!product?.sizeStock) return false;
+    return (product.sizeStock[item.size] ?? 0) < item.quantity;
+  });
 
 
   useEffect(() => {
@@ -110,6 +115,10 @@ export default function CheckoutPage() {
     e.preventDefault();
     if (cartItems.length === 0) {
       toast.error("Ваша корзина пуста");
+      return;
+    }
+    if (hasUnavailableItems) {
+      toast.error("В корзине есть товары без остатка. Обновите количество.");
       return;
     }
     
@@ -246,10 +255,13 @@ export default function CheckoutPage() {
                 <Button 
                   type="submit" 
                   className="w-full h-16 text-xl font-black uppercase tracking-widest bg-black text-white hover:bg-gray-800 rounded-none transition-all"
-                  disabled={loading}
+                  disabled={loading || hasUnavailableItems}
                 >
                   {loading ? "Обработка..." : `ОФОРМИТЬ ЗАКАЗ - $${total.toFixed(2)}`}
                 </Button>
+                {hasUnavailableItems && (
+                  <p className="text-sm text-red-600">Некоторые товары закончились. Вернитесь в корзину и скорректируйте заказ.</p>
+                )}
               </form>
             </div>
 
@@ -266,6 +278,9 @@ export default function CheckoutPage() {
                       <div>
                         <p className="font-bold">{product.name}</p>
                         <p className="text-gray-500 text-xs">Размер: {item.size} x {item.quantity}</p>
+                        {product?.sizeStock && (product.sizeStock[item.size] ?? 0) < item.quantity && (
+                          <p className="text-red-600 text-xs">Закончился (доступно: {product.sizeStock[item.size] ?? 0})</p>
+                        )}
                       </div>
                       <span className="font-bold">${(product.price * item.quantity).toFixed(2)}</span>
                     </div>

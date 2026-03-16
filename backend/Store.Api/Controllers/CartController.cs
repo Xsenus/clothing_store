@@ -45,7 +45,16 @@ public class CartController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
+        if (payload.Quantity <= 0) return Results.BadRequest(new { detail = "Количество должно быть больше нуля" });
+
         var existing = await _db.CartItems.FirstOrDefaultAsync(x => x.UserId == user.Id && x.ProductId == payload.ProductId && x.Size == payload.Size);
+        var requestedQuantity = payload.Quantity + (existing?.Quantity ?? 0);
+        var availableStock = await GetAvailableStockAsync(payload.ProductId, payload.Size);
+        if (!availableStock.HasValue)
+            return Results.BadRequest(new { detail = $"Размер {payload.Size} недоступен для товара" });
+        if (availableStock.HasValue && requestedQuantity > availableStock.Value)
+            return Results.BadRequest(new { detail = $"Недостаточно остатка для размера {payload.Size}. Доступно: {availableStock.Value}" });
+
         if (existing is null)
         {
             existing = new CartItem { UserId = user.Id, ProductId = payload.ProductId, Size = payload.Size, Quantity = payload.Quantity, Id = Guid.NewGuid().ToString("N") };
@@ -68,8 +77,16 @@ public class CartController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
+        if (payload.Quantity <= 0) return Results.BadRequest(new { detail = "Количество должно быть больше нуля" });
         var item = await _db.CartItems.FirstOrDefaultAsync(x => x.Id == itemId && x.UserId == user.Id);
         if (item is null) return Results.NotFound(new { detail = "Item not found" });
+
+        var availableStock = await GetAvailableStockAsync(item.ProductId, item.Size);
+        if (!availableStock.HasValue)
+            return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара" });
+        if (availableStock.HasValue && payload.Quantity > availableStock.Value)
+            return Results.BadRequest(new { detail = $"Недостаточно остатка для размера {item.Size}. Доступно: {availableStock.Value}" });
+
         item.Quantity = payload.Quantity;
         await _db.SaveChangesAsync();
         return Results.Json(item);
@@ -105,5 +122,17 @@ public class CartController : ControllerBase
         _db.CartItems.RemoveRange(items);
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
+    }
+
+    private async Task<int?> GetAvailableStockAsync(string productId, string sizeName)
+    {
+        var normalizedSize = sizeName.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedSize)) return null;
+
+        var sizeDictionary = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Name.ToLower() == normalizedSize);
+        if (sizeDictionary is null) return null;
+
+        var stock = await _db.ProductSizeStocks.FirstOrDefaultAsync(x => x.ProductId == productId && x.SizeId == sizeDictionary.Id);
+        return stock?.Stock;
     }
 }

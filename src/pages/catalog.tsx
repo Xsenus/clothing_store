@@ -30,9 +30,12 @@ interface Product {
   price: number;
   images: string[];
   sizes: string[];
-  category: string;
+  category?: string;
+  categories?: string[];
   material?: string;
+  materials?: string[];
   color?: string;
+  colors?: string[];
   isNew?: boolean;
   isPopular?: boolean;
   likesCount?: number;
@@ -440,17 +443,27 @@ export default function CatalogPage() {
     return () => clearTimeout(timeout);
   }, [minPriceInput, maxPriceInput]);
 
-  const matchesDictionaryOption = (productValue: string | undefined, selectedValues: string[], options: DictionaryOption[]) => {
-    if (!productValue)
+  const matchesDictionaryOption = (productValues: string[], selectedValues: string[], options: DictionaryOption[]) => {
+    if (productValues.length === 0)
       return false;
 
-    const normalizedProductValue = productValue.trim().toLowerCase();
-    if (selectedValues.some((value) => value.trim().toLowerCase() === normalizedProductValue))
-      return true;
+    const normalizedProductValues = productValues
+      .map((value) => value?.trim().toLowerCase())
+      .filter((value): value is string => !!value);
+
+    if (normalizedProductValues.length === 0) {
+      return false;
+    }
 
     return selectedValues.some((selectedValue) => {
+      const normalizedSelectedValue = selectedValue.trim().toLowerCase();
+      if (normalizedProductValues.includes(normalizedSelectedValue)) {
+        return true;
+      }
+
       const option = options.find((item) => item.value === selectedValue);
-      return option?.label?.trim().toLowerCase() === normalizedProductValue;
+      const normalizedLabel = option?.label?.trim().toLowerCase();
+      return !!normalizedLabel && normalizedProductValues.includes(normalizedLabel);
     });
   };
 
@@ -461,7 +474,12 @@ export default function CatalogPage() {
     result = result.filter(p => p.price >= priceRange.min && p.price <= priceRange.max);
 
     if (selectedCategories.length > 0) {
-      result = result.filter((product) => matchesDictionaryOption(product.category, selectedCategories, categories));
+      result = result.filter((product) => {
+        const productCategories = Array.isArray(product.categories) && product.categories.length > 0
+          ? product.categories
+          : (product.category ? [product.category] : []);
+        return matchesDictionaryOption(productCategories, selectedCategories, categories);
+      });
     }
 
     if (selectedSizes.length > 0) {
@@ -469,11 +487,21 @@ export default function CatalogPage() {
     }
 
     if (selectedMaterials.length > 0) {
-      result = result.filter((product) => matchesDictionaryOption(product.material, selectedMaterials, materials));
+      result = result.filter((product) => {
+        const productMaterials = Array.isArray(product.materials) && product.materials.length > 0
+          ? product.materials
+          : (product.material ? [product.material] : []);
+        return matchesDictionaryOption(productMaterials, selectedMaterials, materials);
+      });
     }
 
     if (selectedColors.length > 0) {
-      result = result.filter((product) => matchesDictionaryOption(product.color, selectedColors, colors));
+      result = result.filter((product) => {
+        const productColors = Array.isArray(product.colors) && product.colors.length > 0
+          ? product.colors
+          : (product.color ? [product.color] : []);
+        return matchesDictionaryOption(productColors, selectedColors, colors);
+      });
     }
 
     setFilteredProducts(result);

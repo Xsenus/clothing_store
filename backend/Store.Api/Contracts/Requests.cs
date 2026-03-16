@@ -141,6 +141,6 @@ public record TelegramBotPatchPayload(
 
 public record TelegramBotValidatePayload(string Token);
 
-public record DictionaryItemPayload(string Name, string Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter);
+public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter);
 
 public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter);

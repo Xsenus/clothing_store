@@ -238,16 +238,19 @@ interface Product {
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
   sizes: string[];
-  category: string;
+  category?: string;
+  categories?: string[];
   isNew: boolean;
   isPopular: boolean;
   likesCount: number;
   sku?: string;
   material?: string;
+  materials?: string[];
   printType?: string;
   fit?: string;
   gender?: string;
   color?: string;
+  colors?: string[];
   shipping?: string;
   reviews?: { author: string; date: string; text: string }[];
   sizeStock?: Record<string, number>;
@@ -363,6 +366,50 @@ interface ActionNoticeState {
   isError?: boolean;
 }
 
+interface ProductDictionarySelectorState {
+  open: boolean;
+  kind: DictionaryKind;
+}
+
+interface StockHistoryEntry {
+  id: string;
+  productId: string;
+  product?: string;
+  sizeId: string;
+  size?: string;
+  oldValue: number;
+  newValue: number;
+  changedAt: number;
+  changedByUserId?: string;
+  changedBy?: string;
+  reason?: string;
+  orderId?: string | null;
+}
+
+const normalizeDictionaryValues = (values?: string[] | null, fallback?: string | null) => {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  (values || []).forEach((value) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(trimmed);
+  });
+
+  const fallbackValue = fallback?.trim();
+  if (fallbackValue) {
+    const fallbackKey = fallbackValue.toLowerCase();
+    if (!seen.has(fallbackKey)) {
+      result.unshift(fallbackValue);
+    }
+  }
+
+  return result;
+};
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
@@ -415,6 +462,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [stockHistory, setStockHistory] = useState<StockHistoryEntry[]>([]);
   const [usersSearch, setUsersSearch] = useState("");
   const [usersRoleFilter, setUsersRoleFilter] = useState<"all" | "admin" | "user">("all");
   const [usersStatusFilter, setUsersStatusFilter] = useState<"all" | "active" | "blocked">("all");
@@ -440,6 +488,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     error: ""
   });
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
+  const [productDictionarySelector, setProductDictionarySelector] = useState<ProductDictionarySelectorState>({ open: false, kind: "sizes" });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
@@ -486,7 +535,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     basePrice: "",
     discountPercent: "0",
     discountedPrice: "",
-    category: "",
+    categories: [] as string[],
     images: "",
     videos: "",
     media: [] as { type: "image" | "video"; url: string }[],
@@ -494,11 +543,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     isNew: false,
     isPopular: false,
     sku: "",
-    material: "",
+    materials: [] as string[],
     printType: "",
     fit: "",
     gender: "",
-    color: "",
+    colors: [] as string[],
     shipping: "",
     sizeStock: {} as Record<string, number>
   });
@@ -551,16 +600,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async () => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes, dictionariesRes] = await Promise.all([
+      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes, dictionariesRes, stockHistoryRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
         FLOW.adminGetTelegramBots(),
         FLOW.getAdminGalleryImages(),
-        FLOW.adminGetDictionaries()
+        FLOW.adminGetDictionaries(),
+        FLOW.adminGetStockHistory()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setOrders(Array.isArray(ordersRes) ? ordersRes : []);
+      setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
       setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
       setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
@@ -697,16 +748,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const createDictionaryItem = async (kind: DictionaryKind) => {
     const name = window.prompt("Введите отображаемое название (например, Хлопок)");
     if (!name) return;
-    const slug = window.prompt("Введите slug на английском (например, cotton)");
-    if (!slug) return;
+    const slug = window.prompt("Введите slug на английском (можно оставить пустым для автогенерации)") || undefined;
     try {
       await FLOW.adminCreateDictionaryItem({ input: { kind, name, slug, isActive: true, showInCatalogFilter: true } });
       await fetchAdminData();
       toast.success("Элемент словаря добавлен");
       if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
-      if (kind === "materials") setFormData((prev) => ({ ...prev, material: slug }));
-      if (kind === "colors") setFormData((prev) => ({ ...prev, color: slug }));
-      if (kind === "categories") setFormData((prev) => ({ ...prev, category: slug }));
+      if (kind === "materials") setFormData((prev) => ({ ...prev, materials: normalizeDictionaryValues([...(prev.materials || []), name]) }));
+      if (kind === "colors") setFormData((prev) => ({ ...prev, colors: normalizeDictionaryValues([...(prev.colors || []), name]) }));
+      if (kind === "categories") setFormData((prev) => ({ ...prev, categories: normalizeDictionaryValues([...(prev.categories || []), name]) }));
     } catch (error) {
       toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
     }
@@ -1103,6 +1153,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return fallback;
   };
 
+  const getStockHistoryReasonLabel = (reason?: string) => {
+    switch ((reason || "").toLowerCase()) {
+      case "purchase":
+        return "Покупка";
+      case "admin_manual":
+        return "Ручное изменение";
+      case "admin_create":
+        return "Создание товара";
+      case "admin_update":
+        return "Изменение товара";
+      case "admin_remove_size":
+        return "Удаление размера";
+      default:
+        return reason || "Ручное изменение";
+    }
+  };
+
   const maskTokenPreview = (token: string) => {
     const value = token.trim();
     if (!value) return "";
@@ -1409,7 +1476,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         basePrice: String(product.basePrice ?? product.price ?? ""),
         discountPercent: String(product.discountPercent ?? 0),
         discountedPrice: String(product.discountedPrice ?? product.price ?? ""),
-        category: product.category,
+        categories: normalizeDictionaryValues(product.categories, product.category),
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
         media: mediaList.length > 0 ? mediaList : [{ type: "image", url: "" }],
@@ -1417,11 +1484,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         isNew: product.isNew,
         isPopular: product.isPopular,
         sku: product.sku || "",
-        material: product.material || "",
+        materials: normalizeDictionaryValues(product.materials, product.material),
         printType: product.printType || "",
         fit: product.fit || "",
         gender: product.gender || "",
-        color: product.color || "",
+        colors: normalizeDictionaryValues(product.colors, product.color),
         shipping: product.shipping || "",
         sizeStock: product.sizeStock || {}
       });
@@ -1435,7 +1502,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         basePrice: "",
         discountPercent: "0",
         discountedPrice: "",
-        category: "",
+        categories: [],
         images: "",
         videos: "",
         media: [{ type: "image", url: "" }],
@@ -1443,11 +1510,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         isNew: false,
         isPopular: false,
         sku: "",
-        material: "",
+        materials: [],
         printType: "",
         fit: "",
         gender: "",
-        color: "",
+        colors: [],
         shipping: "",
         sizeStock: {}
       });
@@ -1509,7 +1576,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         basePrice: parseFloat(formData.basePrice || "0"),
         discountPercent: parseFloat(formData.discountPercent || "0"),
         discountedPrice: parseFloat(formData.discountedPrice || "0"),
-        category: formData.category,
+        category: formData.categories[0] || "",
+        categories: formData.categories,
         images: imagesFromMedia,
         videos: videosFromMedia,
         media: mediaList,
@@ -1517,11 +1585,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         isNew: formData.isNew,
         isPopular: formData.isPopular,
         sku: formData.sku,
-        material: formData.material,
+        material: formData.materials[0] || "",
+        materials: formData.materials,
         printType: formData.printType,
         fit: formData.fit,
         gender: formData.gender,
-        color: formData.color,
+        color: formData.colors[0] || "",
+        colors: formData.colors,
         shipping: formData.shipping,
         sizeStock: formData.sizeStock
       };
@@ -1608,6 +1678,79 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       ...prev,
       sizeStock: { ...prev.sizeStock, [size]: numeric }
     }));
+  };
+
+  const openProductDictionarySelector = (kind: DictionaryKind) => {
+    setProductDictionarySelector({ open: true, kind });
+  };
+
+  const closeProductDictionarySelector = () => {
+    setProductDictionarySelector((prev) => ({ ...prev, open: false }));
+  };
+
+  const addDictionaryValueToProduct = (kind: DictionaryKind, name: string) => {
+    const normalizedName = name.trim();
+    if (!normalizedName) return;
+
+    setFormData((prev) => {
+      if (kind === "sizes") {
+        if (prev.sizes.includes(normalizedName)) return prev;
+        return {
+          ...prev,
+          sizes: [...prev.sizes, normalizedName],
+          sizeStock: { ...prev.sizeStock, [normalizedName]: prev.sizeStock[normalizedName] ?? 0 }
+        };
+      }
+
+      if (kind === "categories") {
+        return { ...prev, categories: normalizeDictionaryValues([...(prev.categories || []), normalizedName]) };
+      }
+
+      if (kind === "materials") {
+        return { ...prev, materials: normalizeDictionaryValues([...(prev.materials || []), normalizedName]) };
+      }
+
+      if (kind === "colors") {
+        return { ...prev, colors: normalizeDictionaryValues([...(prev.colors || []), normalizedName]) };
+      }
+
+      return prev;
+    });
+  };
+
+  const removeDictionaryValueFromProduct = (kind: DictionaryKind, name?: string) => {
+    setFormData((prev) => {
+      if (kind === "sizes" && name) {
+        const nextStock = { ...prev.sizeStock };
+        delete nextStock[name];
+        return {
+          ...prev,
+          sizes: prev.sizes.filter((item) => item !== name),
+          sizeStock: nextStock
+        };
+      }
+
+      if (kind === "categories" && name) {
+        return { ...prev, categories: prev.categories.filter((item) => item !== name) };
+      }
+
+      if (kind === "materials" && name) {
+        return { ...prev, materials: prev.materials.filter((item) => item !== name) };
+      }
+
+      if (kind === "colors" && name) {
+        return { ...prev, colors: prev.colors.filter((item) => item !== name) };
+      }
+
+      return prev;
+    });
+  };
+
+  const getProductDictionarySelected = (kind: DictionaryKind, name: string) => {
+    if (kind === "sizes") return formData.sizes.includes(name);
+    if (kind === "categories") return formData.categories.includes(name);
+    if (kind === "materials") return formData.materials.includes(name);
+    return formData.colors.includes(name);
   };
 
   const setMediaSlot = (index: number, type: "image" | "video", url: string) => {
@@ -1811,7 +1954,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </TableCell>
                       <TableCell className="font-bold">{product.name}</TableCell>
                       <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
-                      <TableCell className="uppercase text-xs tracking-wide">{product.category}</TableCell>
+                      <TableCell className="uppercase text-xs tracking-wide">{normalizeDictionaryValues(product.categories, product.category).join(", ") || "-"}</TableCell>
                       <TableCell>
                         <div className="flex gap-1 flex-wrap">
                           {product.isNew && <span className="px-2 py-0.5 bg-black text-white text-[10px] uppercase font-bold">Новинка</span>}
@@ -2404,6 +2547,50 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+
+              <div className="mt-6 border border-gray-200 p-4">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-black uppercase">История остатков</h2>
+                    <p className="text-sm text-muted-foreground">Кто, когда и почему изменил остаток по размеру.</p>
+                  </div>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">Записей: {stockHistory.length}</span>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Дата</TableHead>
+                      <TableHead>Товар</TableHead>
+                      <TableHead>Размер</TableHead>
+                      <TableHead>Было</TableHead>
+                      <TableHead>Стало</TableHead>
+                      <TableHead>Причина</TableHead>
+                      <TableHead>Кто</TableHead>
+                      <TableHead>Заказ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stockHistory.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground">История остатков пока пуста</TableCell>
+                      </TableRow>
+                    ) : (
+                      stockHistory.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("ru-RU") : "—"}</TableCell>
+                          <TableCell>{entry.product || entry.productId}</TableCell>
+                          <TableCell>{entry.size || entry.sizeId}</TableCell>
+                          <TableCell>{entry.oldValue}</TableCell>
+                          <TableCell>{entry.newValue}</TableCell>
+                          <TableCell>{getStockHistoryReasonLabel(entry.reason)}</TableCell>
+                          <TableCell>{entry.changedBy || entry.changedByUserId || "—"}</TableCell>
+                          <TableCell className="max-w-[180px] truncate">{entry.orderId || "—"}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </TabsContent>
 
@@ -3384,8 +3571,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <Input 
                       id="prod-price" 
                       type="number"
-                      value={formData.price}
-                      onChange={(e) => setFormData({...formData, price: e.target.value})}
+                      value={formData.basePrice}
+                      onChange={(e) => setFormData({...formData, basePrice: e.target.value})}
                       required
                       className="rounded-none border-black"
                     />
@@ -3400,12 +3587,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-cat">Категория</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-cat" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите категорию</option>
-                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("categories")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                      </div>
+                      {formData.categories.length > 0 ? (
+                        <div className="space-y-2">
+                          {formData.categories.map((category) => (
+                            <div key={category} className="flex items-center justify-between border border-black px-3 py-2">
+                              <span>{category}</span>
+                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("categories", category)}>Удалить</Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Категория не выбрана</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3474,25 +3672,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-2">
                   <Label>Размеры</Label>
-                  <div className="flex flex-wrap gap-4">
-                    {(dictionaries.sizes || []).map((sizeItem: any) => (
-                      <div key={sizeItem.name} className="flex items-center space-x-2">
-                        <Checkbox 
-                          id={`size-${sizeItem.name}`} 
-                          checked={formData.sizes.includes(sizeItem.name)}
-                          onCheckedChange={() => toggleSize(sizeItem.name)}
-                        />
-                        <Label htmlFor={`size-${sizeItem.name}`} className="cursor-pointer">{sizeItem.name}</Label>
+                  <div className="space-y-2">
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("sizes")}>Словарь</Button>
+                    {formData.sizes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Размеры не выбраны</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {formData.sizes.map((size) => (
+                          <div key={size} className="flex items-center justify-between border border-black px-3 py-2">
+                            <span>{size}</span>
+                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("sizes", size)}>Удалить</Button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label>Остатки по размерам</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {(dictionaries.sizes || []).map((sizeItem: any) => {
-                      const size = sizeItem.name;
+                    {(formData.sizes || []).map((size) => {
                       return (
                       <div key={`stock-${size}`} className="space-y-1">
                         <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
@@ -3541,12 +3741,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-material">Материал</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-material" value={formData.material} onChange={(e) => setFormData({...formData, material: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите материал</option>
-                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("materials")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                      </div>
+                      {formData.materials.length > 0 ? (
+                        <div className="space-y-2">
+                          {formData.materials.map((material) => (
+                            <div key={material} className="flex items-center justify-between border border-black px-3 py-2">
+                              <span>{material}</span>
+                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("materials", material)}>Удалить</Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Материал не выбран</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3584,12 +3795,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-color">Цвет</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-color" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите цвет</option>
-                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("colors")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                      </div>
+                      {formData.colors.length > 0 ? (
+                        <div className="space-y-2">
+                          {formData.colors.map((color) => (
+                            <div key={color} className="flex items-center justify-between border border-black px-3 py-2">
+                              <span>{color}</span>
+                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("colors", color)}>Удалить</Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Цвет не выбран</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3617,6 +3839,46 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           )}
 
 
+
+          <Dialog open={productDictionarySelector.open} onOpenChange={(open) => setProductDictionarySelector((prev) => ({ ...prev, open }))}>
+            <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">
+                  Справочник: {dictionaryGroups.find((group) => group.key === productDictionarySelector.kind)?.label}
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                {(dictionaries[productDictionarySelector.kind] || []).map((item: any) => {
+                  const selected = getProductDictionarySelected(productDictionarySelector.kind, item.name);
+                  return (
+                    <div key={`${productDictionarySelector.kind}-${item.id}`} className="flex items-center justify-between border border-gray-200 px-4 py-3">
+                      <div>
+                        <div className="flex items-center gap-2 font-semibold">
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
+                          <span>{item.name}</span>
+                        </div>
+                        {item.description && <p className="text-xs text-muted-foreground mt-1">{item.description}</p>}
+                      </div>
+                      <Button
+                        type="button"
+                        variant={selected ? "secondary" : "outline"}
+                        className="rounded-none"
+                        onClick={() => addDictionaryValueToProduct(productDictionarySelector.kind, item.name)}
+                        disabled={selected}
+                      >
+                        {selected ? "Выбрано" : "Выбрать"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={closeProductDictionarySelector}>Закрыть</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={dictionaryDeleteDialog.open} onOpenChange={(open) => { if (!dictionaryDeleteDialog.submitting) setDictionaryDeleteDialog((prev) => ({ ...prev, open, error: open ? prev.error : "" })); }}>
             <DialogContent className="max-w-md rounded-none border-black">

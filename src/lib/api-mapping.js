@@ -217,9 +217,20 @@ export const FLOW = {
 
   getSimilarProducts: async ({ input }) => {
     const products = normalizeProducts(await request("/products"));
-    return products.filter(
-      (p) => p.category === input.category && p._id !== input.productId
-    ).slice(0, 4);
+    const targetCategory = String(input.category || "").trim().toLowerCase();
+    if (!targetCategory) {
+      return [];
+    }
+
+    return products.filter((product) => {
+      if (product._id === input.productId) return false;
+
+      const categories = Array.isArray(product.categories) && product.categories.length > 0
+        ? product.categories
+        : (product.category ? [product.category] : []);
+
+      return categories.some((category) => String(category || "").trim().toLowerCase() === targetCategory);
+    }).slice(0, 4);
   },
 
   toggleLike: async ({ input }) => request("/likes/toggle", {
