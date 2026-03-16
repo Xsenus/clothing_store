@@ -70,7 +70,6 @@ public class DatabaseInitializer
 
         _logger.LogInformation("Database schema is ready (migrations applied).");
 
-        await EnsureDictionarySchemaCompatibilityAsync(db);
         await EnsureGalleryTableAsync(db);
 
         await CleanupExpiredDataAsync(db);
@@ -87,31 +86,6 @@ public class DatabaseInitializer
         await EnsureDictionariesSeededAsync(db);
         await EnsureLegacyTelegramBotMigratedAsync(db);
         await EnsureTestDataAsync(db);
-    }
-
-
-    private static async Task EnsureDictionarySchemaCompatibilityAsync(StoreDbContext db)
-    {
-        await db.Database.ExecuteSqlRawAsync(@"
-ALTER TABLE IF EXISTS size_dictionaries ADD COLUMN IF NOT EXISTS slug text;
-ALTER TABLE IF EXISTS size_dictionaries ADD COLUMN IF NOT EXISTS show_in_catalog_filter boolean NOT NULL DEFAULT true;
-
-ALTER TABLE IF EXISTS material_dictionaries ADD COLUMN IF NOT EXISTS slug text;
-ALTER TABLE IF EXISTS material_dictionaries ADD COLUMN IF NOT EXISTS show_in_catalog_filter boolean NOT NULL DEFAULT true;
-
-ALTER TABLE IF EXISTS color_dictionaries ADD COLUMN IF NOT EXISTS slug text;
-ALTER TABLE IF EXISTS color_dictionaries ADD COLUMN IF NOT EXISTS show_in_catalog_filter boolean NOT NULL DEFAULT true;
-
-ALTER TABLE IF EXISTS category_dictionaries ADD COLUMN IF NOT EXISTS slug text;
-ALTER TABLE IF EXISTS category_dictionaries ADD COLUMN IF NOT EXISTS show_in_catalog_filter boolean NOT NULL DEFAULT true;
-");
-
-        await db.Database.ExecuteSqlRawAsync(@"
-UPDATE size_dictionaries SET slug = COALESCE(NULLIF(slug, ''), lower(name));
-UPDATE material_dictionaries SET slug = COALESCE(NULLIF(slug, ''), lower(name));
-UPDATE color_dictionaries SET slug = COALESCE(NULLIF(slug, ''), lower(name));
-UPDATE category_dictionaries SET slug = COALESCE(NULLIF(slug, ''), lower(name));
-");
     }
 
     private async Task EnsureDatabaseExistsAsync(StoreDbContext db)
