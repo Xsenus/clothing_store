@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -384,18 +385,7 @@ public class ProductsController : ControllerBase
 
         foreach (var (sizeName, stock) in requested)
         {
-            var normalized = sizeName.ToLowerInvariant();
-            if (!dictionaries.TryGetValue(normalized, out var dictionary))
-            {
-                dictionary = new SizeDictionary
-                {
-                    Name = sizeName,
-                    CreatedAt = now
-                };
-                _db.SizeDictionaries.Add(dictionary);
-                await _db.SaveChangesAsync();
-                dictionaries[normalized] = dictionary;
-            }
+            var dictionary = await EnsureSizeDictionaryAsync(dictionaries, sizeName, now);
 
             var row = existing.FirstOrDefault(x => x.SizeId == dictionary.Id);
             if (row is null)
@@ -450,6 +440,47 @@ public class ProductsController : ControllerBase
 
         await _db.SaveChangesAsync();
     }
+
+    private async Task<SizeDictionary> EnsureSizeDictionaryAsync(
+        Dictionary<string, SizeDictionary> dictionaries,
+        string sizeName,
+        long createdAt)
+    {
+        var normalized = NormalizeLookupValue(sizeName);
+        if (dictionaries.TryGetValue(normalized, out var existingDictionary))
+            return existingDictionary;
+
+        var dictionary = new SizeDictionary
+        {
+            Name = sizeName,
+            CreatedAt = createdAt
+        };
+
+        _db.SizeDictionaries.Add(dictionary);
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueSizeNameViolation(ex))
+        {
+            _db.Entry(dictionary).State = EntityState.Detached;
+            dictionary = await _db.SizeDictionaries.FirstAsync(x => x.Name.Trim().ToLower() == normalized);
+        }
+
+        dictionaries[normalized] = dictionary;
+        return dictionary;
+    }
+
+    private static bool IsUniqueSizeNameViolation(DbUpdateException ex)
+        => ex.InnerException is PostgresException
+        {
+            SqlState: "23505",
+            ConstraintName: "IX_size_dictionaries_name"
+        };
+
+    private static string NormalizeLookupValue(string value)
+        => value.Trim().ToLowerInvariant();
 
     private async Task SavePriceHistoryAsync(string productId, JsonObject before, JsonObject after, string changedByUserId)
     {
