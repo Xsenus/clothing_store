@@ -513,7 +513,16 @@ export const FLOW = {
   adminUpdateUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isAdmin: input.isAdmin, isBlocked: input.isBlocked }),
+    body: JSON.stringify({
+      isAdmin: input.isAdmin,
+      isBlocked: input.isBlocked,
+      email: input.email,
+      name: input.name,
+      phone: input.phone,
+      nickname: input.nickname,
+      shippingAddress: input.shippingAddress,
+      password: input.password,
+    }),
   }),
 
   adminDeleteUser: async ({ input }) => request(`/admin/users/${input.userId}`, {

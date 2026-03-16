@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net.Mail;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -181,7 +182,7 @@ public class AdminController : ControllerBase
             u.IsSystem,
             u.CreatedAt,
             profile = profiles.TryGetValue(u.Id, out var p)
-                ? new { p.Name, p.Phone, p.Nickname }
+                ? new { p.Name, p.Phone, p.Nickname, p.ShippingAddress, p.PhoneVerified }
                 : null
         }));
     }
@@ -202,6 +203,70 @@ public class AdminController : ControllerBase
             user.IsBlocked = payload.IsBlocked.Value;
         if (payload.IsAdmin.HasValue && !user.IsSystem)
             user.IsAdmin = payload.IsAdmin.Value;
+
+        var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == userId);
+        if (profile is null)
+        {
+            profile = new Profile
+            {
+                UserId = userId,
+                Email = user.Email
+            };
+            _db.Profiles.Add(profile);
+        }
+
+        if (!string.IsNullOrWhiteSpace(payload.Email))
+        {
+            var normalizedEmail = payload.Email.Trim().ToLowerInvariant();
+            if (!IsValidEmail(normalizedEmail))
+                return Results.BadRequest(new { detail = "Invalid email" });
+
+            var currentEmail = (user.Email ?? string.Empty).Trim().ToLowerInvariant();
+            if (!string.Equals(normalizedEmail, currentEmail, StringComparison.Ordinal))
+            {
+                if (await _db.Users.AnyAsync(x => x.Email == normalizedEmail && x.Id != userId))
+                    return Results.BadRequest(new { detail = "Email already in use" });
+
+                user.Email = normalizedEmail;
+                user.Verified = true;
+                profile.Email = normalizedEmail;
+            }
+        }
+
+        if (payload.Name is not null)
+            profile.Name = NormalizeOptionalText(payload.Name);
+
+        if (payload.Nickname is not null)
+            profile.Nickname = NormalizeOptionalText(payload.Nickname);
+
+        if (payload.ShippingAddress is not null)
+            profile.ShippingAddress = NormalizeOptionalText(payload.ShippingAddress);
+
+        if (payload.Phone is not null)
+        {
+            var normalizedPhone = NormalizeOptionalText(payload.Phone);
+            var currentPhone = NormalizeOptionalText(profile.Phone);
+            if (!string.Equals(normalizedPhone, currentPhone, StringComparison.Ordinal))
+            {
+                profile.Phone = normalizedPhone;
+                profile.PhoneVerified = false;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(payload.Password))
+        {
+            var trimmedPassword = payload.Password.Trim();
+            if (!IsStrongPassword(trimmedPassword))
+                return Results.BadRequest(new { detail = "Password is too weak" });
+
+            var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
+            var (hash, salt) = AuthService.HashPassword(trimmedPassword, iterations);
+            user.PasswordHash = hash;
+            user.Salt = salt;
+
+            _db.Sessions.RemoveRange(_db.Sessions.Where(x => x.UserId == userId));
+            _db.RefreshSessions.RemoveRange(_db.RefreshSessions.Where(x => x.UserId == userId));
+        }
 
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
@@ -739,6 +804,28 @@ public class AdminController : ControllerBase
         return null;
     }
 
+    private static bool IsValidEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        try
+        {
+            var address = new MailAddress(email);
+            return string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsStrongPassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 10) return false;
+        return password.Any(char.IsUpper)
+               && password.Any(char.IsLower)
+               && password.Any(char.IsDigit);
+    }
+
     private Task<User?> RequireAdminUserAsync() => _auth.RequireAdminUserAsync(Request);
 }
 
@@ -746,4 +833,10 @@ public class AdminUserPatchPayload
 {
     public bool? IsAdmin { get; set; }
     public bool? IsBlocked { get; set; }
+    public string? Email { get; set; }
+    public string? Name { get; set; }
+    public string? Phone { get; set; }
+    public string? Nickname { get; set; }
+    public string? ShippingAddress { get; set; }
+    public string? Password { get; set; }
 }
