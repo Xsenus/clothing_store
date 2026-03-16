@@ -253,6 +253,42 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
+interface AdminUser {
+  id: string;
+  email: string;
+  verified: boolean;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  isSystem: boolean;
+  createdAt?: string;
+  profile?: {
+    name?: string | null;
+    phone?: string | null;
+    nickname?: string | null;
+    shippingAddress?: string | null;
+    phoneVerified?: boolean;
+  } | null;
+}
+
+interface AdminOrder {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  totalAmount: number;
+  status: string;
+  createdAt?: string | number;
+  itemsJson?: string;
+  items?: unknown;
+  paymentMethod?: string;
+  purchaseChannel?: string;
+  shippingAddress?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  statusHistoryJson?: string;
+  updatedAt?: string | number;
+}
+
 interface GalleryImage {
   id: string;
   name: string;
@@ -363,8 +399,8 @@ const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = 
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -382,7 +418,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<any | null>(null);
+  const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderForm, setOrderForm] = useState({
@@ -512,7 +548,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const formatOrderStatus = (value: string) => ORDER_STATUS_LABELS[value] || value || "—";
 
-  const getOrderItemsSummary = (order: any) => {
+  const getOrderItemsSummary = (order: AdminOrder) => {
     const items = parseOrderItems(order?.itemsJson || order?.items);
     if (!items.length) return "—";
 
@@ -525,7 +561,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }).join(", ");
   };
 
-  const openOrderEditor = (order: any) => {
+  const openOrderEditor = (order: AdminOrder) => {
     setEditingOrder(order);
     setOrderForm({
       status: order?.status || "created",
@@ -568,7 +604,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const toggleUserBlock = async (user: any) => {
+  const toggleUserBlock = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
       await fetchAdminData();
@@ -577,7 +613,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const toggleUserAdmin = async (user: any) => {
+  const toggleUserAdmin = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isAdmin: !user.isAdmin } });
       await fetchAdminData();
@@ -586,7 +622,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const deleteUser = async (user: any) => {
+  const deleteUser = async (user: AdminUser) => {
     if (!confirm(`Удалить пользователя ${user.email}?`)) return;
     try {
       await FLOW.adminDeleteUser({ input: { userId: user.id } });
