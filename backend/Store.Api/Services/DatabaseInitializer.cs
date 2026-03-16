@@ -183,10 +183,10 @@ public class DatabaseInitializer
             "suit", "pants", "shorts", "skirt", "underwear", "shoes", "bags", "accessories", "mystery-box"
         };
 
-        await SeedDictionaryAsync(db.SizeDictionaries, defaultSizes, now);
-        await SeedDictionaryAsync(db.MaterialDictionaries, defaultMaterials, now);
-        await SeedDictionaryAsync(db.ColorDictionaries, defaultColors, now);
-        await SeedDictionaryAsync(db.CategoryDictionaries, defaultCategories, now);
+        await SeedDictionaryAsync(db, db.SizeDictionaries, defaultSizes, now);
+        await SeedDictionaryAsync(db, db.MaterialDictionaries, defaultMaterials, now);
+        await SeedDictionaryAsync(db, db.ColorDictionaries, defaultColors, now);
+        await SeedDictionaryAsync(db, db.CategoryDictionaries, defaultCategories, now);
         await EnsureCategoryRussianDescriptionsAsync(db);
         await SeedCategoriesFromProductsAsync(db, now);
         await SeedSizesFromProductsAsync(db, now);
@@ -196,12 +196,7 @@ public class DatabaseInitializer
 
     private static async Task SeedCategoriesFromProductsAsync(StoreDbContext db, long createdAt)
     {
-        var existingCategories = await db.CategoryDictionaries
-            .Select(x => x.Name)
-            .ToListAsync();
-        var normalizedExisting = existingCategories
-            .Select(x => x.Trim().ToLowerInvariant())
-            .ToHashSet();
+        var normalizedExisting = await GetNormalizedNamesAsync(db, db.CategoryDictionaries);
 
         var categoriesFromProducts = await db.Products
             .Select(x => x.Category)
@@ -211,8 +206,11 @@ public class DatabaseInitializer
 
         foreach (var category in categoriesFromProducts)
         {
-            var normalized = category!.Trim().ToLowerInvariant();
-            if (string.IsNullOrWhiteSpace(normalized) || normalizedExisting.Contains(normalized))
+            if (string.IsNullOrWhiteSpace(category))
+                continue;
+
+            var normalized = NormalizeDictionaryName(category);
+            if (string.IsNullOrWhiteSpace(normalized) || !normalizedExisting.Add(normalized))
                 continue;
 
             db.CategoryDictionaries.Add(new CategoryDictionary
@@ -221,18 +219,12 @@ public class DatabaseInitializer
                 IsActive = true,
                 CreatedAt = createdAt
             });
-            normalizedExisting.Add(normalized);
         }
     }
 
     private static async Task SeedSizesFromProductsAsync(StoreDbContext db, long createdAt)
     {
-        var existingSizes = await db.SizeDictionaries
-            .Select(x => x.Name)
-            .ToListAsync();
-        var normalizedExisting = existingSizes
-            .Select(x => x.Trim().ToLowerInvariant())
-            .ToHashSet();
+        var normalizedExisting = await GetNormalizedNamesAsync(db, db.SizeDictionaries);
 
         var products = await db.Products
             .Select(x => x.Data)
@@ -259,8 +251,8 @@ public class DatabaseInitializer
                 if (string.IsNullOrWhiteSpace(sizeName))
                     continue;
 
-                var normalized = sizeName.ToLowerInvariant();
-                if (normalizedExisting.Contains(normalized))
+                var normalized = NormalizeDictionaryName(sizeName);
+                if (!normalizedExisting.Add(normalized))
                     continue;
 
                 db.SizeDictionaries.Add(new SizeDictionary
@@ -269,7 +261,6 @@ public class DatabaseInitializer
                     IsActive = true,
                     CreatedAt = createdAt
                 });
-                normalizedExisting.Add(normalized);
             }
         }
     }
@@ -295,7 +286,12 @@ public class DatabaseInitializer
             ["mystery-box"] = "Мистери боксы"
         };
 
-        var categories = await db.CategoryDictionaries.ToListAsync();
+        await db.CategoryDictionaries.LoadAsync();
+        var categories = db.ChangeTracker.Entries<CategoryDictionary>()
+            .Where(x => x.State != EntityState.Deleted)
+            .Select(x => x.Entity)
+            .ToList();
+
         foreach (var category in categories)
         {
             if (!labels.TryGetValue(category.Name, out var label))
@@ -308,16 +304,16 @@ public class DatabaseInitializer
         }
     }
 
-    private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
+    private static async Task SeedDictionaryAsync<T>(DbContext db, DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
     {
-        var existing = await set.AsQueryable().Select(x => EF.Property<string>(x, "Name")).ToListAsync();
-        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+        var normalized = await GetNormalizedNamesAsync(db, set);
+
         foreach (var value in values)
         {
             var name = value.Trim();
             if (string.IsNullOrWhiteSpace(name))
                 continue;
-            if (normalized.Contains(name.ToLowerInvariant()))
+            if (!normalized.Add(NormalizeDictionaryName(name)))
                 continue;
 
             var item = Activator.CreateInstance<T>();
@@ -329,6 +325,28 @@ public class DatabaseInitializer
             set.Add(item);
         }
     }
+
+    private static async Task<HashSet<string>> GetNormalizedNamesAsync<T>(DbContext db, DbSet<T> set) where T : class
+    {
+        var persistedNames = await set.AsQueryable()
+            .Select(x => EF.Property<string>(x, "Name"))
+            .ToListAsync();
+
+        var trackedNames = db.ChangeTracker.Entries<T>()
+            .Where(x => x.State != EntityState.Deleted)
+            .Select(x => x.Property<string>("Name").CurrentValue)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(NormalizeDictionaryName);
+
+        return persistedNames
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(NormalizeDictionaryName)
+            .Concat(trackedNames)
+            .ToHashSet();
+    }
+
+    private static string NormalizeDictionaryName(string value)
+        => value.Trim().ToLowerInvariant();
     private async Task EnsureAdminUserAsync(StoreDbContext db)
     {
         var adminEmail = (_configuration["AdminUser:Email"] ?? string.Empty).Trim().ToLowerInvariant();
