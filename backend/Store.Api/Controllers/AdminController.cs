@@ -97,9 +97,70 @@ public class AdminController : ControllerBase
             userEmail = users.GetValueOrDefault(o.UserId),
             o.TotalAmount,
             o.Status,
+            o.PaymentMethod,
+            o.PurchaseChannel,
+            o.ShippingAddress,
+            o.CustomerName,
+            o.CustomerEmail,
+            o.CustomerPhone,
+            o.StatusHistoryJson,
             o.CreatedAt,
+            o.UpdatedAt,
             o.ItemsJson
         }));
+    }
+
+    [HttpPatch("orders/{orderId}")]
+    public async Task<IResult> UpdateOrder(string orderId, [FromBody] AdminOrderPatchPayload payload)
+    {
+        var admin = await RequireAdminUserAsync();
+        if (admin is null) return Results.Unauthorized();
+
+        var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId);
+        if (order is null) return Results.NotFound(new { detail = "Order not found" });
+
+        var nextStatus = string.IsNullOrWhiteSpace(payload.Status)
+            ? order.Status
+            : payload.Status.Trim().ToLowerInvariant();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var hasStatusChange = !string.Equals(order.Status, nextStatus, StringComparison.OrdinalIgnoreCase);
+
+        order.Status = nextStatus;
+        if (payload.ShippingAddress is not null) order.ShippingAddress = payload.ShippingAddress.Trim();
+        if (payload.PaymentMethod is not null) order.PaymentMethod = payload.PaymentMethod.Trim();
+        if (payload.CustomerName is not null) order.CustomerName = payload.CustomerName.Trim();
+        if (payload.CustomerEmail is not null) order.CustomerEmail = payload.CustomerEmail.Trim();
+        if (payload.CustomerPhone is not null) order.CustomerPhone = payload.CustomerPhone.Trim();
+
+        if (hasStatusChange)
+        {
+            List<Dictionary<string, object?>> history;
+            try
+            {
+                history = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(order.StatusHistoryJson) ?? [];
+            }
+            catch
+            {
+                history = [];
+            }
+
+            history.Add(new Dictionary<string, object?>
+            {
+                ["status"] = nextStatus,
+                ["changedAt"] = now,
+                ["changedBy"] = admin.Email,
+                ["comment"] = string.IsNullOrWhiteSpace(payload.ManagerComment)
+                    ? "Статус изменен администратором"
+                    : payload.ManagerComment.Trim()
+            });
+
+            order.StatusHistoryJson = JsonSerializer.Serialize(history);
+        }
+
+        order.UpdatedAt = now;
+        await _db.SaveChangesAsync();
+
+        return Results.Ok(new { ok = true });
     }
 
     [HttpGet("users")]

@@ -230,6 +230,12 @@ export const FLOW = {
 
   getUserOrders: async () => request("/orders"),
 
+  createOrder: async ({ input }) => request("/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   getUserLikes: async () => request("/likes"),
 
   checkLike: async ({ input }) => {
@@ -495,6 +501,12 @@ export const FLOW = {
   adminMe: async () => request("/admin/me"),
 
   adminGetOrders: async () => request("/admin/orders"),
+
+  adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input.payload),
+  }),
 
   adminGetUsers: async () => request("/admin/users"),
 
