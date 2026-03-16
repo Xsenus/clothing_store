@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Store.Api.Contracts;
@@ -343,34 +344,43 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(name))
             return Results.BadRequest(new { detail = "Название обязательно" });
 
+        var slug = NormalizeSlug(payload.Slug);
+        if (string.IsNullOrWhiteSpace(slug))
+            return Results.BadRequest(new { detail = "Slug обязателен и должен быть латиницей" });
+
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var description = NormalizeOptionalText(payload.Description);
         var color = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
+        var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
 
         switch (kind.ToLowerInvariant())
         {
             case "sizes":
                 if (await _db.SizeDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Размер уже существует" });
-                var size = new SizeDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                if (await _db.SizeDictionaries.AnyAsync(x => x.Slug.ToLower() == slug.ToLower())) return Results.BadRequest(new { detail = "Slug уже существует" });
+                var size = new SizeDictionary { Name = name, Slug = slug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.SizeDictionaries.Add(size);
                 await _db.SaveChangesAsync();
                 return Results.Ok(size);
             case "materials":
                 if (await _db.MaterialDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Материал уже существует" });
-                var material = new MaterialDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                if (await _db.MaterialDictionaries.AnyAsync(x => x.Slug.ToLower() == slug.ToLower())) return Results.BadRequest(new { detail = "Slug уже существует" });
+                var material = new MaterialDictionary { Name = name, Slug = slug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.MaterialDictionaries.Add(material);
                 await _db.SaveChangesAsync();
                 return Results.Ok(material);
             case "colors":
                 if (await _db.ColorDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Цвет уже существует" });
-                var colorDictionary = new ColorDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                if (await _db.ColorDictionaries.AnyAsync(x => x.Slug.ToLower() == slug.ToLower())) return Results.BadRequest(new { detail = "Slug уже существует" });
+                var colorDictionary = new ColorDictionary { Name = name, Slug = slug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.ColorDictionaries.Add(colorDictionary);
                 await _db.SaveChangesAsync();
                 return Results.Ok(colorDictionary);
             case "categories":
                 if (await _db.CategoryDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Категория уже существует" });
-                var category = new CategoryDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                if (await _db.CategoryDictionaries.AnyAsync(x => x.Slug.ToLower() == slug.ToLower())) return Results.BadRequest(new { detail = "Slug уже существует" });
+                var category = new CategoryDictionary { Name = name, Slug = slug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.CategoryDictionaries.Add(category);
                 await _db.SaveChangesAsync();
                 return Results.Ok(category);
@@ -389,9 +399,14 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(name))
             return Results.BadRequest(new { detail = "Название обязательно" });
 
+        var slug = NormalizeSlug(payload.Slug);
+        if (string.IsNullOrWhiteSpace(slug))
+            return Results.BadRequest(new { detail = "Slug обязателен и должен быть латиницей" });
+
         var description = NormalizeOptionalText(payload.Description);
         var colorValue = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
+        var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
 
         switch (kind.ToLowerInvariant())
         {
@@ -400,48 +415,64 @@ public class AdminController : ControllerBase
                 if (size is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.SizeDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Размер уже существует" });
+                if (await _db.SizeDictionaries.AnyAsync(x => x.Id != id && x.Slug.ToLower() == slug.ToLower()))
+                    return Results.BadRequest(new { detail = "Slug уже существует" });
                 if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
                     return Results.BadRequest(new { detail = "Размер используется в товарах, редактирование запрещено" });
                 size.Name = name;
+                size.Slug = slug;
                 size.Description = description;
                 size.Color = colorValue;
                 size.IsActive = isActive;
+                size.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "materials":
                 var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (material is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.MaterialDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Материал уже существует" });
+                if (await _db.MaterialDictionaries.AnyAsync(x => x.Id != id && x.Slug.ToLower() == slug.ToLower()))
+                    return Results.BadRequest(new { detail = "Slug уже существует" });
                 if (await IsProductDataValueInUseAsync("material", material.Name))
                     return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
                 material.Name = name;
+                material.Slug = slug;
                 material.Description = description;
                 material.Color = colorValue;
                 material.IsActive = isActive;
+                material.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "colors":
                 var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (color is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.ColorDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Цвет уже существует" });
+                if (await _db.ColorDictionaries.AnyAsync(x => x.Id != id && x.Slug.ToLower() == slug.ToLower()))
+                    return Results.BadRequest(new { detail = "Slug уже существует" });
                 if (await IsProductDataValueInUseAsync("color", color.Name))
                     return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
                 color.Name = name;
+                color.Slug = slug;
                 color.Description = description;
                 color.Color = colorValue;
                 color.IsActive = isActive;
+                color.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "categories":
                 var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (category is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.CategoryDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Категория уже существует" });
+                if (await _db.CategoryDictionaries.AnyAsync(x => x.Id != id && x.Slug.ToLower() == slug.ToLower()))
+                    return Results.BadRequest(new { detail = "Slug уже существует" });
                 if (await _db.Products.AnyAsync(x => x.Category == category.Name))
                     return Results.BadRequest(new { detail = "Категория используется в товарах, редактирование запрещено" });
                 category.Name = name;
+                category.Slug = slug;
                 category.Description = description;
                 category.Color = colorValue;
                 category.IsActive = isActive;
+                category.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             default:
                 return Results.BadRequest(new { detail = "Неизвестный словарь" });
@@ -589,6 +620,16 @@ public class AdminController : ControllerBase
             return false;
         }
     }
+
+    private static string NormalizeSlug(string? value)
+    {
+        var trimmed = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return string.Empty;
+
+        return Regex.IsMatch(trimmed, "^[a-z0-9]+(?:-[a-z0-9]+)*$") ? trimmed : string.Empty;
+    }
+
     private static string? NormalizeOptionalText(string? value)
     {
         var trimmed = value?.Trim();

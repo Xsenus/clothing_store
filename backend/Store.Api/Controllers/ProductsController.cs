@@ -104,16 +104,16 @@ public class ProductsController : ControllerBase
         }
 
         var categoryDictionaryItems = await _db.CategoryDictionaries
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && x.ShowInCatalogFilter)
             .ToListAsync();
         var categories = categoryDictionaryItems
-            .Where(x => usedCategories.Contains(x.Name))
-            .OrderBy(x => ResolveCategoryLabel(x.Name, x.Description))
-            .Select(x => new { value = x.Name, label = ResolveCategoryLabel(x.Name, x.Description) })
+            .Where(x => usedCategories.Contains(x.Slug) || usedCategories.Contains(x.Name))
+            .OrderBy(x => x.Name)
+            .Select(x => new { value = x.Slug, label = x.Name })
             .ToList();
 
         var sizesList = await _db.SizeDictionaries
-            .Where(x => x.IsActive && usedSizes.Contains(x.Name))
+            .Where(x => x.IsActive && x.ShowInCatalogFilter && usedSizes.Contains(x.Name))
             .OrderBy(x => x.Name)
             .Select(x => x.Name)
             .ToListAsync();
@@ -185,33 +185,6 @@ public class ProductsController : ControllerBase
             "off" => false,
             "no" => false,
             _ => fallback
-        };
-    }
-
-    private static string ResolveCategoryLabel(string value, string? description)
-    {
-        var customLabel = description?.Trim();
-        if (!string.IsNullOrWhiteSpace(customLabel))
-            return customLabel;
-
-        return value.Trim().ToLowerInvariant() switch
-        {
-            "outerwear" => "Верхняя одежда",
-            "hoodie" => "Толстовки (худи)",
-            "sweatshirt" => "Кофты",
-            "shirt" => "Рубашки",
-            "t-shirt" => "Футболки",
-            "top" => "Топы",
-            "suit" => "Костюмы",
-            "pants" => "Штаны",
-            "shorts" => "Шорты",
-            "skirt" => "Юбки",
-            "underwear" => "Нижнее бельё",
-            "shoes" => "Обувь",
-            "bags" => "Сумки",
-            "accessories" => "Аксессуары",
-            "mystery-box" => "Мистери боксы",
-            _ => value
         };
     }
 
@@ -390,6 +363,8 @@ public class ProductsController : ControllerBase
                 dictionary = new SizeDictionary
                 {
                     Name = sizeName,
+                    Slug = sizeName.Trim().ToLowerInvariant(),
+                    ShowInCatalogFilter = true,
                     CreatedAt = now
                 };
                 _db.SizeDictionaries.Add(dictionary);
