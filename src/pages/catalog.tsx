@@ -31,9 +31,17 @@ interface Product {
   images: string[];
   sizes: string[];
   category: string;
+  material?: string;
+  color?: string;
   isNew?: boolean;
   isPopular?: boolean;
   likesCount?: number;
+}
+
+interface DictionaryOption {
+  value: string;
+  label: string;
+  color?: string | null;
 }
 
 interface FilterContentProps {
@@ -41,7 +49,7 @@ interface FilterContentProps {
   sortBy: string;
   onSortChange: (value: string) => void;
   showCategoryFilter: boolean;
-  categories: { value: string; label: string }[];
+  categories: DictionaryOption[];
   selectedCategories: string[];
   onToggleCategory: (value: string) => void;
   onClearCategories: () => void;
@@ -50,6 +58,16 @@ interface FilterContentProps {
   selectedSizes: string[];
   onToggleSize: (value: string) => void;
   onClearSizes: () => void;
+  showMaterialFilter: boolean;
+  materials: DictionaryOption[];
+  selectedMaterials: string[];
+  onToggleMaterial: (value: string) => void;
+  onClearMaterials: () => void;
+  showColorFilter: boolean;
+  colors: DictionaryOption[];
+  selectedColors: string[];
+  onToggleColor: (value: string) => void;
+  onClearColors: () => void;
   minPriceInput: string;
   maxPriceInput: string;
   onMinPriceInputChange: (value: string) => void;
@@ -72,6 +90,16 @@ function FilterContent({
   selectedSizes,
   onToggleSize,
   onClearSizes,
+  showMaterialFilter,
+  materials,
+  selectedMaterials,
+  onToggleMaterial,
+  onClearMaterials,
+  showColorFilter,
+  colors,
+  selectedColors,
+  onToggleColor,
+  onClearColors,
   minPriceInput,
   maxPriceInput,
   onMinPriceInputChange,
@@ -158,6 +186,60 @@ function FilterContent({
       </div>
       )}
 
+      {showMaterialFilter && (
+      <div>
+        <h3 className="text-lg font-bold mb-4 uppercase">МАТЕРИАЛ</h3>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="ghost"
+            className="justify-start uppercase font-bold tracking-widest"
+            onClick={onClearMaterials}
+          >
+            ВЫБРАТЬ ВСЁ
+          </Button>
+          {materials.map((material) => (
+            <div key={material.value} className="flex items-center space-x-2">
+              <Checkbox
+                id={`material-${material.value}`}
+                checked={selectedMaterials.includes(material.value)}
+                onCheckedChange={() => onToggleMaterial(material.value)}
+              />
+              <Label htmlFor={`material-${material.value}`} className="cursor-pointer font-medium">
+                {material.label}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {showColorFilter && (
+      <div>
+        <h3 className="text-lg font-bold mb-4 uppercase">ЦВЕТ</h3>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="ghost"
+            className="justify-start uppercase font-bold tracking-widest"
+            onClick={onClearColors}
+          >
+            ВЫБРАТЬ ВСЁ
+          </Button>
+          {colors.map((color) => (
+            <div key={color.value} className="flex items-center space-x-2">
+              <Checkbox
+                id={`color-${color.value}`}
+                checked={selectedColors.includes(color.value)}
+                onCheckedChange={() => onToggleColor(color.value)}
+              />
+              <Label htmlFor={`color-${color.value}`} className="cursor-pointer font-medium">
+                {color.label}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
       <div>
         <h3 className="text-lg font-bold mb-4 uppercase">ЦЕНА</h3>
         <div className="flex gap-4 items-center">
@@ -211,12 +293,18 @@ export default function CatalogPage() {
   const [priceRange, setPriceRange] = useState({ min: 0, max: 999999 });
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
+  const [selectedMaterials, setSelectedMaterials] = useState<string[]>([]);
+  const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("0");
   const [maxPriceInput, setMaxPriceInput] = useState("999999");
-  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [categories, setCategories] = useState<DictionaryOption[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
+  const [materials, setMaterials] = useState<DictionaryOption[]>([]);
+  const [colors, setColors] = useState<DictionaryOption[]>([]);
   const [showCategoryFilter, setShowCategoryFilter] = useState(true);
   const [showSizeFilter, setShowSizeFilter] = useState(true);
+  const [showMaterialFilter, setShowMaterialFilter] = useState(true);
+  const [showColorFilter, setShowColorFilter] = useState(true);
 
   const sortOptions = [
     { value: 'popular', label: 'Популярные' },
@@ -256,11 +344,25 @@ export default function CatalogPage() {
         const nextSizes = Array.isArray(response?.sizes)
           ? response.sizes.filter((value: any) => typeof value === 'string')
           : [];
+        const nextMaterials = Array.isArray(response?.materials)
+          ? response.materials
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({ value: item.value, label: item.label }))
+          : [];
+        const nextColors = Array.isArray(response?.colors)
+          ? response.colors
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({ value: item.value, label: item.label, color: item.color ?? null }))
+          : [];
 
         setCategories(nextCategories);
         setSizes(nextSizes);
+        setMaterials(nextMaterials);
+        setColors(nextColors);
         setShowCategoryFilter(response?.visibility?.categories !== false);
         setShowSizeFilter(response?.visibility?.sizes !== false);
+        setShowMaterialFilter(response?.visibility?.materials !== false);
+        setShowColorFilter(response?.visibility?.colors !== false);
       } catch (error) {
         console.error('Failed to fetch catalog filters:', error);
       }
@@ -290,6 +392,26 @@ export default function CatalogPage() {
   }, [sizes, showSizeFilter]);
 
   useEffect(() => {
+    if (!showMaterialFilter) {
+      setSelectedMaterials([]);
+      return;
+    }
+
+    const available = new Set(materials.map((item) => item.value));
+    setSelectedMaterials((prev) => prev.filter((value) => available.has(value)));
+  }, [materials, showMaterialFilter]);
+
+  useEffect(() => {
+    if (!showColorFilter) {
+      setSelectedColors([]);
+      return;
+    }
+
+    const available = new Set(colors.map((item) => item.value));
+    setSelectedColors((prev) => prev.filter((value) => available.has(value)));
+  }, [colors, showColorFilter]);
+
+  useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
       try {
@@ -309,7 +431,7 @@ export default function CatalogPage() {
 
   useEffect(() => {
     applyFilters(products);
-  }, [priceRange, selectedCategories, selectedSizes]);
+  }, [priceRange, selectedCategories, selectedSizes, selectedMaterials, selectedColors]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -318,6 +440,20 @@ export default function CatalogPage() {
     return () => clearTimeout(timeout);
   }, [minPriceInput, maxPriceInput]);
 
+  const matchesDictionaryOption = (productValue: string | undefined, selectedValues: string[], options: DictionaryOption[]) => {
+    if (!productValue)
+      return false;
+
+    const normalizedProductValue = productValue.trim().toLowerCase();
+    if (selectedValues.some((value) => value.trim().toLowerCase() === normalizedProductValue))
+      return true;
+
+    return selectedValues.some((selectedValue) => {
+      const option = options.find((item) => item.value === selectedValue);
+      return option?.label?.trim().toLowerCase() === normalizedProductValue;
+    });
+  };
+
   const applyFilters = (items: Product[]) => {
     let result = [...items];
 
@@ -325,11 +461,19 @@ export default function CatalogPage() {
     result = result.filter(p => p.price >= priceRange.min && p.price <= priceRange.max);
 
     if (selectedCategories.length > 0) {
-      result = result.filter(p => selectedCategories.includes(p.category));
+      result = result.filter((product) => matchesDictionaryOption(product.category, selectedCategories, categories));
     }
 
     if (selectedSizes.length > 0) {
       result = result.filter(p => (p.sizes || []).some(size => selectedSizes.includes(size)));
+    }
+
+    if (selectedMaterials.length > 0) {
+      result = result.filter((product) => matchesDictionaryOption(product.material, selectedMaterials, materials));
+    }
+
+    if (selectedColors.length > 0) {
+      result = result.filter((product) => matchesDictionaryOption(product.color, selectedColors, colors));
     }
 
     setFilteredProducts(result);
@@ -347,10 +491,24 @@ export default function CatalogPage() {
     );
   };
 
+  const toggleMaterial = (material: string) => {
+    setSelectedMaterials((prev) =>
+      prev.includes(material) ? prev.filter((value) => value !== material) : [...prev, material]
+    );
+  };
+
+  const toggleColor = (color: string) => {
+    setSelectedColors((prev) =>
+      prev.includes(color) ? prev.filter((value) => value !== color) : [...prev, color]
+    );
+  };
+
   const resetFilters = () => {
     setSortBy('popular');
     setSelectedCategories([]);
     setSelectedSizes([]);
+    setSelectedMaterials([]);
+    setSelectedColors([]);
     setPriceRange({ min: 0, max: 999999 });
     setMinPriceInput("0");
     setMaxPriceInput("999999");
@@ -417,6 +575,16 @@ export default function CatalogPage() {
                   selectedSizes={selectedSizes}
                   onToggleSize={toggleSize}
                   onClearSizes={() => setSelectedSizes([])}
+                  showMaterialFilter={showMaterialFilter}
+                  materials={materials}
+                  selectedMaterials={selectedMaterials}
+                  onToggleMaterial={toggleMaterial}
+                  onClearMaterials={() => setSelectedMaterials([])}
+                  showColorFilter={showColorFilter}
+                  colors={colors}
+                  selectedColors={selectedColors}
+                  onToggleColor={toggleColor}
+                  onClearColors={() => setSelectedColors([])}
                   minPriceInput={minPriceInput}
                   maxPriceInput={maxPriceInput}
                   onMinPriceInputChange={handleMinPriceInputChange}
@@ -447,6 +615,16 @@ export default function CatalogPage() {
                 selectedSizes={selectedSizes}
                 onToggleSize={toggleSize}
                 onClearSizes={() => setSelectedSizes([])}
+                showMaterialFilter={showMaterialFilter}
+                materials={materials}
+                selectedMaterials={selectedMaterials}
+                onToggleMaterial={toggleMaterial}
+                onClearMaterials={() => setSelectedMaterials([])}
+                showColorFilter={showColorFilter}
+                colors={colors}
+                selectedColors={selectedColors}
+                onToggleColor={toggleColor}
+                onClearColors={() => setSelectedColors([])}
                 minPriceInput={minPriceInput}
                 maxPriceInput={maxPriceInput}
                 onMinPriceInputChange={handleMinPriceInputChange}
@@ -477,6 +655,8 @@ export default function CatalogPage() {
                     setPriceRange({ min: 0, max: 999999 });
                     setSelectedSizes([]);
                     setSelectedCategories([]);
+                    setSelectedMaterials([]);
+                    setSelectedColors([]);
                     setMinPriceInput("0");
                     setMaxPriceInput("999999");
                   }}

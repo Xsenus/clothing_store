@@ -576,7 +576,14 @@ export const FLOW = {
   adminCreateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name }),
+    body: JSON.stringify({
+      name: input.name,
+      slug: input.slug,
+      color: input.color,
+      description: input.description,
+      isActive: input.isActive,
+      showInCatalogFilter: input.showInCatalogFilter,
+    }),
   }),
 
   adminDeleteDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
@@ -586,7 +593,14 @@ export const FLOW = {
   adminUpdateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name, color: input.color, description: input.description, isActive: input.isActive }),
+    body: JSON.stringify({
+      name: input.name,
+      slug: input.slug,
+      color: input.color,
+      description: input.description,
+      isActive: input.isActive,
+      showInCatalogFilter: input.showInCatalogFilter,
+    }),
   }),
 
   adminGetStockHistory: async () => request("/admin/history/stocks"),

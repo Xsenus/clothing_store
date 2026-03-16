@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { setCachedPublicSettings } from '@/lib/site-settings';
+import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle, Search, ShieldAlert, ShieldX, UserCog } from 'lucide-react';
@@ -396,15 +396,19 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_bot_token: "",
   catalog_filter_categories_enabled: "true",
   catalog_filter_sizes_enabled: "true",
+  catalog_filter_materials_enabled: "true",
+  catalog_filter_colors_enabled: "true",
   dadata_api_key: "",
   yandex_delivery_base_cost: "350",
   yandex_delivery_cost_per_kg: "40",
   yandex_delivery_markup_percent: "0"
 };
 
-const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = {
+const DICTIONARY_FILTER_SETTING_KEYS: Record<DictionaryKind, string> = {
   categories: "catalog_filter_categories_enabled",
-  sizes: "catalog_filter_sizes_enabled"
+  sizes: "catalog_filter_sizes_enabled",
+  materials: "catalog_filter_materials_enabled",
+  colors: "catalog_filter_colors_enabled"
 };
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
@@ -673,10 +677,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const updateDictionaryFilterVisibility = (kind: DictionaryKind, enabled: boolean) => {
+  const updateDictionaryFilterVisibility = async (kind: DictionaryKind, enabled: boolean) => {
     const key = DICTIONARY_FILTER_SETTING_KEYS[kind];
     if (!key) return;
-    updateSetting(key, enabled ? "true" : "false");
+    const nextValue = enabled ? "true" : "false";
+    const previousValue = settings[key] ?? DEFAULT_APP_SETTINGS[key];
+
+    updateSetting(key, nextValue);
+
+    try {
+      await FLOW.adminSaveSettings({ input: { [key]: nextValue } });
+      setCachedPublicSettings({ ...getCachedPublicSettings(), [key]: nextValue });
+    } catch (error) {
+      updateSetting(key, previousValue);
+      toast.error("Не удалось сохранить настройку фильтра каталога");
+    }
   };
 
   const createDictionaryItem = async (kind: DictionaryKind) => {
@@ -2501,14 +2516,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       />
                                       <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <Checkbox
-                                        id={`dict-filter-${item.id}`}
-                                        checked={draft.showInCatalogFilter}
-                                        onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, showInCatalogFilter: !!checked } }))}
-                                      />
-                                      <Label htmlFor={`dict-filter-${item.id}`} className="text-sm">В фильтрах каталога</Label>
-                                    </div>
                                   </div>
                                   <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
                                     <X className="mr-2 h-4 w-4" /> Сброс
@@ -2543,7 +2550,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 {item.description && (
                                   <div className="mt-1 text-sm text-slate-600">{item.description}</div>
                                 )}
-                                <div className="mt-1 text-xs text-slate-500">В фильтрах каталога: {item.showInCatalogFilter === false ? "нет" : "да"}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                               </div>
                               <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">

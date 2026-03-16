@@ -718,6 +718,8 @@ public class DatabaseInitializer
 
         await EnsureAppSettingExistsAsync(db, "catalog_filter_categories_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "catalog_filter_sizes_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_materials_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_colors_enabled", "true");
 
         await db.SaveChangesAsync();
     }
