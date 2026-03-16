@@ -71,6 +71,7 @@ public class OrdersController : ControllerBase
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var orderId = Guid.NewGuid().ToString("N");
         foreach (var item in normalizedItems)
         {
             var sizeDictionary = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Name.ToLower() == item.Size.Trim().ToLowerInvariant());
@@ -88,7 +89,9 @@ public class OrdersController : ControllerBase
             {
                 ProductId = item.ProductId,
                 SizeId = sizeDictionary.Id,
-                ChangedByUserId = $"purchase:{user.Id}",
+                ChangedByUserId = user.Id,
+                Reason = "purchase",
+                OrderId = orderId,
                 OldValue = oldValue,
                 NewValue = row.Stock,
                 ChangedAt = now
@@ -97,7 +100,7 @@ public class OrdersController : ControllerBase
 
         var order = new Order
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = orderId,
             UserId = user.Id,
             ItemsJson = JsonSerializer.Serialize(payload.Items),
             TotalAmount = payload.TotalAmount,

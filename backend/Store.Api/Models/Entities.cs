@@ -625,6 +625,12 @@ public class StockChangeHistory
     [Column("changed_by_user_id")]
     public string ChangedByUserId { get; set; } = string.Empty;
 
+    [Column("reason")]
+    public string Reason { get; set; } = "admin_manual";
+
+    [Column("order_id")]
+    public string? OrderId { get; set; }
+
     [Column("old_value")]
     public int OldValue { get; set; }
 

@@ -508,8 +508,8 @@ public class AdminController : ControllerBase
         var history = await _db.StockChangeHistories.OrderByDescending(x => x.ChangedAt).Take(500).ToListAsync();
         return Results.Ok(history.Select(x =>
         {
-            var isPurchase = x.ChangedByUserId.StartsWith("purchase:", StringComparison.OrdinalIgnoreCase);
-            var changedById = isPurchase ? x.ChangedByUserId["purchase:".Length..] : x.ChangedByUserId;
+            var reason = string.IsNullOrWhiteSpace(x.Reason) ? "admin_manual" : x.Reason;
+            var changedById = x.ChangedByUserId;
             return new
             {
                 x.Id,
@@ -522,7 +522,8 @@ public class AdminController : ControllerBase
                 x.ChangedAt,
                 changedByUserId = changedById,
                 changedBy = users.GetValueOrDefault(changedById),
-                reason = isPurchase ? "purchase" : "admin_manual"
+                reason,
+                x.OrderId
             };
         }));
     }

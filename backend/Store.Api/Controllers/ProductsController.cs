@@ -414,6 +414,7 @@ public class ProductsController : ControllerBase
                         ProductId = productId,
                         SizeId = dictionary.Id,
                         ChangedByUserId = changedByUserId,
+                        Reason = "admin_manual",
                         OldValue = 0,
                         NewValue = stock,
                         ChangedAt = now
@@ -434,6 +435,7 @@ public class ProductsController : ControllerBase
                     ProductId = productId,
                     SizeId = dictionary.Id,
                     ChangedByUserId = changedByUserId,
+                    Reason = "admin_manual",
                     OldValue = old,
                     NewValue = stock,
                     ChangedAt = now
