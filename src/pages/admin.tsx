@@ -263,6 +263,42 @@ interface GalleryImage {
   createdAt?: number;
 }
 
+const ORDER_STATUS_OPTIONS = [
+  { value: "created", label: "Оформлен" },
+  { value: "paid", label: "Оплачен" },
+  { value: "in_transit", label: "В пути" },
+  { value: "delivered", label: "Доставлен" },
+  { value: "canceled", label: "Отменен" },
+  { value: "returned", label: "Возврат" },
+] as const;
+
+const ORDER_STATUS_LABELS = Object.fromEntries(ORDER_STATUS_OPTIONS.map((item) => [item.value, item.label])) as Record<string, string>;
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cod: "Оплата при получении",
+  card: "Банковская карта",
+  sbp: "СБП",
+  cash: "Наличные",
+};
+
+const parseOrderItems = (raw: any) => {
+  try {
+    const source = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(source) ? source : [];
+  } catch {
+    return [];
+  }
+};
+
+const parseOrderStatusHistory = (raw: any) => {
+  try {
+    const source = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(source) ? source : [];
+  } catch {
+    return [];
+  }
+};
+
 
 type DictionaryKind = "sizes" | "materials" | "colors" | "categories";
 
@@ -346,6 +382,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<any | null>(null);
+  const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    status: "created",
+    shippingAddress: "",
+    paymentMethod: "cod",
+    customerName: "",
+    customerEmail: "",
+    customerPhone: "",
+    managerComment: "",
+  });
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
@@ -459,6 +507,64 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [] });
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
+    }
+  };
+
+  const formatOrderStatus = (value: string) => ORDER_STATUS_LABELS[value] || value || "—";
+
+  const getOrderItemsSummary = (order: any) => {
+    const items = parseOrderItems(order?.itemsJson || order?.items);
+    if (!items.length) return "—";
+
+    return items.map((item: any) => {
+      const qty = Number(item?.quantity || 1);
+      const product = products.find((entry) => entry._id === item?.productId);
+      const title = item?.productName || product?.name || item?.productId || "Товар";
+      const size = item?.size ? ` (${item.size})` : "";
+      return `${title}${size} × ${qty}`;
+    }).join(", ");
+  };
+
+  const openOrderEditor = (order: any) => {
+    setEditingOrder(order);
+    setOrderForm({
+      status: order?.status || "created",
+      shippingAddress: order?.shippingAddress || "",
+      paymentMethod: order?.paymentMethod || "cod",
+      customerName: order?.customerName || "",
+      customerEmail: order?.customerEmail || "",
+      customerPhone: order?.customerPhone || "",
+      managerComment: "",
+    });
+    setIsOrderDialogOpen(true);
+  };
+
+  const saveOrder = async () => {
+    if (!editingOrder?.id) return;
+
+    setOrderSaving(true);
+    try {
+      await FLOW.adminUpdateOrder({
+        input: {
+          orderId: editingOrder.id,
+          payload: {
+            status: orderForm.status,
+            shippingAddress: orderForm.shippingAddress,
+            paymentMethod: orderForm.paymentMethod,
+            customerName: orderForm.customerName,
+            customerEmail: orderForm.customerEmail,
+            customerPhone: orderForm.customerPhone,
+            managerComment: orderForm.managerComment,
+          },
+        },
+      });
+      toast.success("Заказ обновлен");
+      setIsOrderDialogOpen(false);
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось сохранить заказ");
+    } finally {
+      setOrderSaving(false);
     }
   };
 
@@ -1711,8 +1817,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <TableRow>
                     <TableHead>ID</TableHead>
                     <TableHead>Пользователь</TableHead>
+                    <TableHead>Товары</TableHead>
+                    <TableHead>Как купил</TableHead>
+                    <TableHead>Куда отправили</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead>Сумма</TableHead>
+                    <TableHead className="text-right">Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1720,12 +1830,80 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <TableRow key={order.id}>
                       <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
                       <TableCell>{order.userEmail || order.userId}</TableCell>
-                      <TableCell>{order.status}</TableCell>
-                      <TableCell>{order.totalAmount}</TableCell>
+                      <TableCell className="max-w-[280px] text-xs">{getOrderItemsSummary(order)}</TableCell>
+                      <TableCell>{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</TableCell>
+                      <TableCell className="max-w-[220px] text-xs">{order.shippingAddress || "—"}</TableCell>
+                      <TableCell>{formatOrderStatus(order.status)}</TableCell>
+                      <TableCell>{Number(order.totalAmount || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button type="button" variant="outline" size="sm" onClick={() => openOrderEditor(order)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+
+              <Dialog open={isOrderDialogOpen} onOpenChange={setIsOrderDialogOpen}>
+                <DialogContent className="max-w-3xl rounded-none">
+                  <DialogHeader>
+                    <DialogTitle className="uppercase">Редактирование заказа</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Статус заказа</Label>
+                      <select className="w-full h-10 border border-black px-3 bg-white" value={orderForm.status} onChange={(e) => setOrderForm((prev) => ({ ...prev, status: e.target.value }))}>
+                        {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Способ оплаты</Label>
+                      <Input value={orderForm.paymentMethod} onChange={(e) => setOrderForm((prev) => ({ ...prev, paymentMethod: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Получатель</Label>
+                      <Input value={orderForm.customerName} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerName: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input value={orderForm.customerEmail} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerEmail: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Телефон</Label>
+                      <Input value={orderForm.customerPhone} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerPhone: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Адрес доставки</Label>
+                      <Textarea value={orderForm.shippingAddress} onChange={(e) => setOrderForm((prev) => ({ ...prev, shippingAddress: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Комментарий к смене статуса</Label>
+                      <Textarea value={orderForm.managerComment} onChange={(e) => setOrderForm((prev) => ({ ...prev, managerComment: e.target.value }))} placeholder="Например: Передан в службу доставки" className="rounded-none border-black" />
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 p-3 max-h-48 overflow-auto">
+                    <p className="font-bold uppercase text-sm mb-2">Хроника статусов</p>
+                    <div className="space-y-2 text-sm">
+                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).length === 0 && <p className="text-muted-foreground">История пока пуста</p>}
+                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).slice().reverse().map((entry: any, index: number) => (
+                        <div key={`${entry?.changedAt || "row"}-${index}`} className="border-b border-gray-100 pb-2">
+                          <div className="font-semibold">{formatOrderStatus(String(entry?.status || ""))}</div>
+                          <div className="text-xs text-gray-500">{entry?.changedAt ? new Date(Number(entry.changedAt)).toLocaleString() : ""} · {entry?.changedBy || "system"}</div>
+                          {entry?.comment && <div className="text-xs">{String(entry.comment)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => setIsOrderDialogOpen(false)}>Отмена</Button>
+                    <Button type="button" className="rounded-none bg-black text-white" onClick={saveOrder} disabled={orderSaving}>{orderSaving ? "Сохранение..." : "Сохранить"}</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </TabsContent>
 

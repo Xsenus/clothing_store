@@ -41,6 +41,13 @@ public class OrdersController : ControllerBase
             items = x.ItemsJson,
             x.TotalAmount,
             x.Status,
+            x.PaymentMethod,
+            x.PurchaseChannel,
+            x.ShippingAddress,
+            x.CustomerName,
+            x.CustomerEmail,
+            x.CustomerPhone,
+            x.StatusHistoryJson,
             x.CreatedAt
         }).ToListAsync());
     }
@@ -53,14 +60,36 @@ public class OrdersController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var normalizedStatus = string.IsNullOrWhiteSpace(payload.Status) ? "created" : payload.Status.Trim().ToLowerInvariant();
+
+        var statusHistory = new[]
+        {
+            new
+            {
+                status = normalizedStatus,
+                changedAt = now,
+                changedBy = "system",
+                comment = "Заказ создан"
+            }
+        };
+
         var order = new Order
         {
             Id = Guid.NewGuid().ToString("N"),
             UserId = user.Id,
             ItemsJson = JsonSerializer.Serialize(payload.Items),
             TotalAmount = payload.TotalAmount,
-            Status = payload.Status ?? "processing",
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            Status = normalizedStatus,
+            PaymentMethod = string.IsNullOrWhiteSpace(payload.PaymentMethod) ? "cod" : payload.PaymentMethod.Trim(),
+            PurchaseChannel = string.IsNullOrWhiteSpace(payload.PurchaseChannel) ? "web" : payload.PurchaseChannel.Trim(),
+            ShippingAddress = payload.ShippingAddress?.Trim() ?? string.Empty,
+            CustomerName = payload.CustomerName?.Trim() ?? string.Empty,
+            CustomerEmail = payload.CustomerEmail?.Trim() ?? string.Empty,
+            CustomerPhone = payload.CustomerPhone?.Trim() ?? string.Empty,
+            StatusHistoryJson = JsonSerializer.Serialize(statusHistory),
+            CreatedAt = now,
+            UpdatedAt = now
         };
         _db.Orders.Add(order);
         await _db.SaveChangesAsync();
