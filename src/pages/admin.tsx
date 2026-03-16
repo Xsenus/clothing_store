@@ -24,11 +24,11 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle, Search, ShieldAlert, ShieldX, UserCog } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -253,6 +253,52 @@ interface Product {
   sizeStock?: Record<string, number>;
 }
 
+interface AdminUser {
+  id: string;
+  email: string;
+  verified: boolean;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  isSystem: boolean;
+  createdAt?: string;
+  profile?: {
+    name?: string | null;
+    phone?: string | null;
+    nickname?: string | null;
+    shippingAddress?: string | null;
+    phoneVerified?: boolean;
+  } | null;
+}
+
+interface AdminOrder {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  totalAmount: number;
+  status: string;
+  createdAt?: string | number;
+  itemsJson?: string;
+  items?: unknown;
+  paymentMethod?: string;
+  purchaseChannel?: string;
+  shippingAddress?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  statusHistoryJson?: string;
+  updatedAt?: string | number;
+}
+
+interface AdminUserEditForm {
+  email: string;
+  name: string;
+  phone: string;
+  nickname: string;
+  shippingAddress: string;
+  password: string;
+}
+
+type SensitiveField = "email" | "phone" | "password";
 interface GalleryImage {
   id: string;
   name: string;
@@ -262,6 +308,42 @@ interface GalleryImage {
   existsOnDisk: boolean;
   createdAt?: number;
 }
+
+const ORDER_STATUS_OPTIONS = [
+  { value: "created", label: "Оформлен" },
+  { value: "paid", label: "Оплачен" },
+  { value: "in_transit", label: "В пути" },
+  { value: "delivered", label: "Доставлен" },
+  { value: "canceled", label: "Отменен" },
+  { value: "returned", label: "Возврат" },
+] as const;
+
+const ORDER_STATUS_LABELS = Object.fromEntries(ORDER_STATUS_OPTIONS.map((item) => [item.value, item.label])) as Record<string, string>;
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cod: "Оплата при получении",
+  card: "Банковская карта",
+  sbp: "СБП",
+  cash: "Наличные",
+};
+
+const parseOrderItems = (raw: any) => {
+  try {
+    const source = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(source) ? source : [];
+  } catch {
+    return [];
+  }
+};
+
+const parseOrderStatusHistory = (raw: any) => {
+  try {
+    const source = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(source) ? source : [];
+  } catch {
+    return [];
+  }
+};
 
 
 type DictionaryKind = "sizes" | "materials" | "colors" | "categories";
@@ -327,8 +409,18 @@ const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = 
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [usersRoleFilter, setUsersRoleFilter] = useState<"all" | "admin" | "user">("all");
+  const [usersStatusFilter, setUsersStatusFilter] = useState<"all" | "active" | "blocked">("all");
+  const [usersPage, setUsersPage] = useState(1);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [isUserEditModalOpen, setIsUserEditModalOpen] = useState(false);
+  const [userEditForm, setUserEditForm] = useState<AdminUserEditForm>({ email: "", name: "", phone: "", nickname: "", shippingAddress: "", password: "" });
+  const [userEditSaving, setUserEditSaving] = useState(false);
+  const [pendingSensitiveFields, setPendingSensitiveFields] = useState<SensitiveField[]>([]);
+  const [isSensitiveConfirmOpen, setIsSensitiveConfirmOpen] = useState(false);
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -346,6 +438,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
+  const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    status: "created",
+    shippingAddress: "",
+    paymentMethod: "cod",
+    customerName: "",
+    customerEmail: "",
+    customerPhone: "",
+    managerComment: "",
+  });
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
@@ -462,7 +566,64 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const toggleUserBlock = async (user: any) => {
+  const formatOrderStatus = (value: string) => ORDER_STATUS_LABELS[value] || value || "—";
+
+  const getOrderItemsSummary = (order: AdminOrder) => {
+    const items = parseOrderItems(order?.itemsJson || order?.items);
+    if (!items.length) return "—";
+
+    return items.map((item: any) => {
+      const qty = Number(item?.quantity || 1);
+      const product = products.find((entry) => entry._id === item?.productId);
+      const title = item?.productName || product?.name || item?.productId || "Товар";
+      const size = item?.size ? ` (${item.size})` : "";
+      return `${title}${size} × ${qty}`;
+    }).join(", ");
+  };
+
+  const openOrderEditor = (order: AdminOrder) => {
+    setEditingOrder(order);
+    setOrderForm({
+      status: order?.status || "created",
+      shippingAddress: order?.shippingAddress || "",
+      paymentMethod: order?.paymentMethod || "cod",
+      customerName: order?.customerName || "",
+      customerEmail: order?.customerEmail || "",
+      customerPhone: order?.customerPhone || "",
+      managerComment: "",
+    });
+    setIsOrderDialogOpen(true);
+  };
+
+  const saveOrder = async () => {
+    if (!editingOrder?.id) return;
+
+    setOrderSaving(true);
+    try {
+      await FLOW.adminUpdateOrder({
+        input: {
+          orderId: editingOrder.id,
+          payload: {
+            status: orderForm.status,
+            shippingAddress: orderForm.shippingAddress,
+            paymentMethod: orderForm.paymentMethod,
+            customerName: orderForm.customerName,
+            customerEmail: orderForm.customerEmail,
+            customerPhone: orderForm.customerPhone,
+            managerComment: orderForm.managerComment,
+          },
+        },
+      });
+      toast.success("Заказ обновлен");
+      setIsOrderDialogOpen(false);
+      await fetchAdminData();
+    } catch (error) {
+      toast.error("Не удалось сохранить заказ");
+    } finally {
+      setOrderSaving(false);
+    }
+  };
+  const toggleUserBlock = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
       await fetchAdminData();
@@ -471,7 +632,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const toggleUserAdmin = async (user: any) => {
+  const toggleUserAdmin = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isAdmin: !user.isAdmin } });
       await fetchAdminData();
@@ -480,7 +641,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const deleteUser = async (user: any) => {
+  const deleteUser = async (user: AdminUser) => {
     if (!confirm(`Удалить пользователя ${user.email}?`)) return;
     try {
       await FLOW.adminDeleteUser({ input: { userId: user.id } });
@@ -761,6 +922,159 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!q) return true;
     return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
   });
+
+  const USERS_PER_PAGE = 10;
+
+  const filteredUsers = useMemo(() => {
+    const query = usersSearch.trim().toLowerCase();
+    return users.filter((user) => {
+      const roleMatch = usersRoleFilter === "all"
+        ? true
+        : usersRoleFilter === "admin"
+          ? user.isAdmin
+          : !user.isAdmin;
+      const statusMatch = usersStatusFilter === "all"
+        ? true
+        : usersStatusFilter === "active"
+          ? !user.isBlocked
+          : user.isBlocked;
+      if (!roleMatch || !statusMatch) return false;
+      if (!query) return true;
+
+      const haystack = [
+        user.email,
+        user.profile?.name,
+        user.profile?.nickname,
+        user.profile?.phone,
+        user.id
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [users, usersRoleFilter, usersSearch, usersStatusFilter]);
+
+  const totalUserPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
+  const paginatedUsers = useMemo(() => {
+    const safePage = Math.min(usersPage, totalUserPages);
+    const start = (safePage - 1) * USERS_PER_PAGE;
+    return filteredUsers.slice(start, start + USERS_PER_PAGE);
+  }, [filteredUsers, usersPage, totalUserPages]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [usersSearch, usersRoleFilter, usersStatusFilter]);
+
+  useEffect(() => {
+    if (usersPage > totalUserPages) {
+      setUsersPage(totalUserPages);
+    }
+  }, [usersPage, totalUserPages]);
+
+  const openUserEditModal = (user: AdminUser) => {
+    setSelectedUser(user);
+    setUserEditForm({
+      email: user.email || "",
+      name: user.profile?.name || "",
+      phone: user.profile?.phone || "",
+      nickname: user.profile?.nickname || "",
+      shippingAddress: user.profile?.shippingAddress || "",
+      password: ""
+    });
+    setPendingSensitiveFields([]);
+    setIsSensitiveConfirmOpen(false);
+    setIsUserEditModalOpen(true);
+  };
+
+  const closeUserEditModal = () => {
+    setIsUserEditModalOpen(false);
+    setPendingSensitiveFields([]);
+    setIsSensitiveConfirmOpen(false);
+  };
+
+  const getSensitiveFieldLabel = (field: SensitiveField) => {
+    if (field === "email") return "Email";
+    if (field === "phone") return "Телефон";
+    return "Пароль";
+  };
+
+  const submitUserEdit = async () => {
+    if (!selectedUser) return;
+
+    setUserEditSaving(true);
+    try {
+      await FLOW.adminUpdateUser({
+        input: {
+          userId: selectedUser.id,
+          email: userEditForm.email.trim(),
+          name: userEditForm.name,
+          phone: userEditForm.phone,
+          nickname: userEditForm.nickname,
+          shippingAddress: userEditForm.shippingAddress,
+          password: userEditForm.password.trim() || undefined
+        }
+      });
+      await fetchAdminData();
+      toast.success("Пользователь обновлен");
+      closeUserEditModal();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось обновить пользователя"));
+    } finally {
+      setUserEditSaving(false);
+      setPendingSensitiveFields([]);
+      setIsSensitiveConfirmOpen(false);
+    }
+  };
+
+  const requestUserEditSave = () => {
+    if (!selectedUser) return;
+
+    const changedSensitive: SensitiveField[] = [];
+    if (userEditForm.email.trim().toLowerCase() !== (selectedUser.email || "").trim().toLowerCase()) {
+      changedSensitive.push("email");
+    }
+    if (userEditForm.phone.trim() !== (selectedUser.profile?.phone || "").trim()) {
+      changedSensitive.push("phone");
+    }
+    if (userEditForm.password.trim()) {
+      changedSensitive.push("password");
+    }
+
+    if (changedSensitive.length === 0) {
+      submitUserEdit();
+      return;
+    }
+
+    setPendingSensitiveFields(changedSensitive);
+    setIsSensitiveConfirmOpen(true);
+  };
+
+  const confirmNextSensitiveField = () => {
+    if (pendingSensitiveFields.length <= 1) {
+      setIsSensitiveConfirmOpen(false);
+      setPendingSensitiveFields([]);
+      submitUserEdit();
+      return;
+    }
+
+    setPendingSensitiveFields((prev) => prev.slice(1));
+    setIsSensitiveConfirmOpen(false);
+    setTimeout(() => setIsSensitiveConfirmOpen(true), 0);
+  };
+
+  const selectedUserOrders = useMemo(() => {
+    if (!selectedUser) return [];
+    return orders
+      .filter((order) => order.userId === selectedUser.id)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [orders, selectedUser]);
+
+  const userOrdersCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    orders.forEach((order) => {
+      map.set(order.userId, (map.get(order.userId) || 0) + 1);
+    });
+    return map;
+  }, [orders]);
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message.trim()) {
@@ -1681,36 +1995,302 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           <TabsContent value="users" className="mt-0">
             <div className="border border-gray-200 p-4">
               <h2 className="text-2xl font-black uppercase mb-4">Пользователи и права</h2>
+
+              <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    placeholder="Поиск: email, имя, ник, телефон, ID"
+                    className="rounded-none pl-9"
+                  />
+                </div>
+
+                <select
+                  value={usersRoleFilter}
+                  onChange={(e) => setUsersRoleFilter(e.target.value as typeof usersRoleFilter)}
+                  className="h-10 border border-input bg-background px-3 text-sm rounded-none"
+                >
+                  <option value="all">Все роли</option>
+                  <option value="admin">Только админы</option>
+                  <option value="user">Только пользователи</option>
+                </select>
+
+                <select
+                  value={usersStatusFilter}
+                  onChange={(e) => setUsersStatusFilter(e.target.value as typeof usersStatusFilter)}
+                  className="h-10 border border-input bg-background px-3 text-sm rounded-none"
+                >
+                  <option value="all">Все статусы</option>
+                  <option value="active">Активные</option>
+                  <option value="blocked">Заблокированные</option>
+                </select>
+
+                <div className="flex items-center justify-end text-sm text-muted-foreground">
+                  Найдено: {filteredUsers.length}
+                </div>
+              </div>
+
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Email</TableHead>
+                    <TableHead>Email / профиль</TableHead>
                     <TableHead>Роль</TableHead>
                     <TableHead>Статус</TableHead>
+                    <TableHead>Заказов</TableHead>
                     <TableHead className="text-right">Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.isAdmin ? "Админ" : "Пользователь"}{user.isSystem ? " (system)" : ""}</TableCell>
-                      <TableCell>{user.isBlocked ? "Заблокирован" : "Активен"}</TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => toggleUserBlock(user)}>
-                          {user.isBlocked ? "Разблокировать" : "Блокировать"}
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => toggleUserAdmin(user)} disabled={user.isSystem}>
-                          {user.isAdmin ? "Снять админа" : "Сделать админом"}
-                        </Button>
-                        <Button variant="destructive" size="sm" onClick={() => deleteUser(user)} disabled={user.isSystem}>
-                          Удалить
-                        </Button>
+                  {paginatedUsers.map((user) => {
+                    const userOrdersCount = userOrdersCountMap.get(user.id) || 0;
+                    return (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div className="font-semibold">{user.email}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {user.profile?.name || "Без имени"}
+                            {user.profile?.nickname ? ` · @${user.profile.nickname}` : ""}
+                            {user.profile?.phone ? ` · ${user.profile.phone}` : ""}
+                          </div>
+                        </TableCell>
+                        <TableCell>{user.isAdmin ? "Админ" : "Пользователь"}{user.isSystem ? " (system)" : ""}</TableCell>
+                        <TableCell>{user.isBlocked ? "Заблокирован" : "Активен"}</TableCell>
+                        <TableCell>{userOrdersCount}</TableCell>
+                        <TableCell className="text-right">
+                          <TooltipProvider>
+                            <div className="inline-flex items-center gap-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="outline" size="icon" className="rounded-none" onClick={() => openUserEditModal(user)} aria-label="Редактировать пользователя">
+                                    <UserCog className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Редактировать / просмотреть</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="outline" size="icon" className="rounded-none" onClick={() => toggleUserBlock(user)} aria-label={user.isBlocked ? "Разблокировать" : "Заблокировать"}>
+                                    {user.isBlocked ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{user.isBlocked ? "Снять блокировку" : "Заблокировать"}</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="outline" size="icon" className="rounded-none" onClick={() => toggleUserAdmin(user)} disabled={user.isSystem} aria-label={user.isAdmin ? "Снять админа" : "Сделать админом"}>
+                                    {user.isAdmin ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{user.isAdmin ? "Снять права администратора" : "Выдать права администратора"}</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="destructive" size="icon" className="rounded-none" onClick={() => deleteUser(user)} disabled={user.isSystem} aria-label="Удалить пользователя">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Удалить</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TooltipProvider>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {paginatedUsers.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-10">
+                        Пользователи не найдены
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )}
                 </TableBody>
               </Table>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                  Страница {usersPage} из {totalUserPages}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-none"
+                    onClick={() => setUsersPage((prev) => Math.max(1, prev - 1))}
+                    disabled={usersPage <= 1}
+                  >
+                    Назад
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-none"
+                    onClick={() => setUsersPage((prev) => Math.min(totalUserPages, prev + 1))}
+                    disabled={usersPage >= totalUserPages}
+                  >
+                    Вперёд
+                  </Button>
+                </div>
+              </div>
+
+              <Dialog open={isUserEditModalOpen} onOpenChange={(open) => (open ? setIsUserEditModalOpen(true) : closeUserEditModal())}>
+                <DialogContent className="max-w-3xl rounded-none">
+                  <DialogHeader>
+                    <DialogTitle className="uppercase">Редактор пользователя</DialogTitle>
+                  </DialogHeader>
+
+                  {selectedUser ? (
+                    <div className="space-y-6">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label>Email</Label>
+                          <Input
+                            value={userEditForm.email}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                            className="rounded-none"
+                            type="email"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>ID</Label>
+                          <Input value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Имя</Label>
+                          <Input
+                            value={userEditForm.name}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                            className="rounded-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Telegram / Ник</Label>
+                          <Input
+                            value={userEditForm.nickname}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, nickname: e.target.value }))}
+                            className="rounded-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Телефон</Label>
+                          <Input
+                            value={userEditForm.phone}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, phone: e.target.value }))}
+                            className="rounded-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Новый пароль</Label>
+                          <Input
+                            value={userEditForm.password}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, password: e.target.value }))}
+                            className="rounded-none"
+                            type="password"
+                            placeholder="Оставьте пустым, если менять не нужно"
+                          />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <Label>Адрес доставки</Label>
+                          <Textarea
+                            value={userEditForm.shippingAddress}
+                            onChange={(e) => setUserEditForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
+                            className="rounded-none min-h-20"
+                          />
+                        </div>
+                        <div className="border p-3 md:col-span-2">
+                          <div className="text-xs uppercase text-muted-foreground">Текущий статус</div>
+                          <div>{selectedUser.isBlocked ? "Заблокирован" : "Активен"}</div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-lg font-bold uppercase mb-2">Заказы пользователя ({selectedUserOrders.length})</h3>
+                        <div className="max-h-64 overflow-auto border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>ID</TableHead>
+                                <TableHead>Сумма</TableHead>
+                                <TableHead>Статус</TableHead>
+                                <TableHead>Дата</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {selectedUserOrders.map((order) => (
+                                <TableRow key={order.id}>
+                                  <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
+                                  <TableCell>{order.totalAmount}</TableCell>
+                                  <TableCell>{order.status}</TableCell>
+                                  <TableCell>{order.createdAt ? new Date(order.createdAt).toLocaleString() : "—"}</TableCell>
+                                </TableRow>
+                              ))}
+                              {selectedUserOrders.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-center text-muted-foreground py-6">У пользователя пока нет заказов</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+
+                      <DialogFooter>
+                        <Button variant="outline" className="rounded-none" onClick={closeUserEditModal}>
+                          Закрыть
+                        </Button>
+                        <Button variant="outline" className="rounded-none" onClick={() => selectedUser && toggleUserBlock(selectedUser)}>
+                          {selectedUser.isBlocked ? "Разблокировать" : "Блокировать"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="rounded-none"
+                          onClick={() => selectedUser && toggleUserAdmin(selectedUser)}
+                          disabled={selectedUser.isSystem}
+                        >
+                          {selectedUser.isAdmin ? "Снять админа" : "Сделать админом"}
+                        </Button>
+                        <Button className="rounded-none" onClick={requestUserEditSave} disabled={userEditSaving}>
+                          {userEditSaving ? "Сохранение..." : "Сохранить изменения"}
+                        </Button>
+                      </DialogFooter>
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center text-muted-foreground">Пользователь не выбран</div>
+                  )}
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isSensitiveConfirmOpen} onOpenChange={setIsSensitiveConfirmOpen}>
+                <DialogContent className="max-w-md rounded-none border-black">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-black uppercase">Подтвердите изменение поля «{getSensitiveFieldLabel(pendingSensitiveFields[0] || "password")}»</DialogTitle>
+                  </DialogHeader>
+                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    Это обязательное подтверждение для критичных данных пользователя.
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-none"
+                      onClick={() => {
+                        setIsSensitiveConfirmOpen(false);
+                        setPendingSensitiveFields([]);
+                      }}
+                    >
+                      Отмена
+                    </Button>
+                    <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-800" onClick={confirmNextSensitiveField}>
+                      Подтвердить
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </TabsContent>
 
@@ -1722,8 +2302,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <TableRow>
                     <TableHead>ID</TableHead>
                     <TableHead>Пользователь</TableHead>
+                    <TableHead>Товары</TableHead>
+                    <TableHead>Как купил</TableHead>
+                    <TableHead>Куда отправили</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead>Сумма</TableHead>
+                    <TableHead className="text-right">Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1731,12 +2315,80 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <TableRow key={order.id}>
                       <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
                       <TableCell>{order.userEmail || order.userId}</TableCell>
-                      <TableCell>{order.status}</TableCell>
-                      <TableCell>{order.totalAmount}</TableCell>
+                      <TableCell className="max-w-[280px] text-xs">{getOrderItemsSummary(order)}</TableCell>
+                      <TableCell>{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</TableCell>
+                      <TableCell className="max-w-[220px] text-xs">{order.shippingAddress || "—"}</TableCell>
+                      <TableCell>{formatOrderStatus(order.status)}</TableCell>
+                      <TableCell>{Number(order.totalAmount || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button type="button" variant="outline" size="sm" onClick={() => openOrderEditor(order)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+
+              <Dialog open={isOrderDialogOpen} onOpenChange={setIsOrderDialogOpen}>
+                <DialogContent className="max-w-3xl rounded-none">
+                  <DialogHeader>
+                    <DialogTitle className="uppercase">Редактирование заказа</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Статус заказа</Label>
+                      <select className="w-full h-10 border border-black px-3 bg-white" value={orderForm.status} onChange={(e) => setOrderForm((prev) => ({ ...prev, status: e.target.value }))}>
+                        {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Способ оплаты</Label>
+                      <Input value={orderForm.paymentMethod} onChange={(e) => setOrderForm((prev) => ({ ...prev, paymentMethod: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Получатель</Label>
+                      <Input value={orderForm.customerName} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerName: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input value={orderForm.customerEmail} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerEmail: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Телефон</Label>
+                      <Input value={orderForm.customerPhone} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerPhone: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Адрес доставки</Label>
+                      <Textarea value={orderForm.shippingAddress} onChange={(e) => setOrderForm((prev) => ({ ...prev, shippingAddress: e.target.value }))} className="rounded-none border-black" />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Комментарий к смене статуса</Label>
+                      <Textarea value={orderForm.managerComment} onChange={(e) => setOrderForm((prev) => ({ ...prev, managerComment: e.target.value }))} placeholder="Например: Передан в службу доставки" className="rounded-none border-black" />
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 p-3 max-h-48 overflow-auto">
+                    <p className="font-bold uppercase text-sm mb-2">Хроника статусов</p>
+                    <div className="space-y-2 text-sm">
+                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).length === 0 && <p className="text-muted-foreground">История пока пуста</p>}
+                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).slice().reverse().map((entry: any, index: number) => (
+                        <div key={`${entry?.changedAt || "row"}-${index}`} className="border-b border-gray-100 pb-2">
+                          <div className="font-semibold">{formatOrderStatus(String(entry?.status || ""))}</div>
+                          <div className="text-xs text-gray-500">{entry?.changedAt ? new Date(Number(entry.changedAt)).toLocaleString() : ""} · {entry?.changedBy || "system"}</div>
+                          {entry?.comment && <div className="text-xs">{String(entry.comment)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => setIsOrderDialogOpen(false)}>Отмена</Button>
+                    <Button type="button" className="rounded-none bg-black text-white" onClick={saveOrder} disabled={orderSaving}>{orderSaving ? "Сохранение..." : "Сохранить"}</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </TabsContent>
 

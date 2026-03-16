@@ -23,6 +23,38 @@ const normalizePhone = (value) => {
   return normalized;
 };
 
+const ORDER_STATUS_LABELS = {
+  created: "Оформлен",
+  paid: "Оплачен",
+  in_transit: "В пути",
+  delivered: "Доставлен",
+  canceled: "Отменен",
+  returned: "Возврат",
+};
+
+const PAYMENT_METHOD_LABELS = {
+  cod: "Оплата при получении",
+  card: "Банковская карта",
+  sbp: "СБП",
+  cash: "Наличные",
+};
+
+const parseJsonArray = (raw) => {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const formatOrderDate = (raw) => {
+  const value = Number(raw || 0);
+  if (!value) return "—";
+  const normalized = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(normalized).toLocaleDateString();
+};
+
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState("orders");
   const [loading, setLoading] = useState(true);
@@ -281,11 +313,25 @@ export default function ProfilePage() {
                     <div key={order.id} className="border border-gray-200 p-6 bg-white hover:shadow-lg transition-shadow">
                       <div className="flex justify-between items-start mb-4">
                         <div><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">НОМЕР ЗАКАЗА</p><p className="font-mono font-bold text-sm">{order.id}</p></div>
-                        <div className="text-right"><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">ДАТА</p><p className="font-bold text-sm">{new Date(order.createdAt * 1000).toLocaleDateString()}</p></div>
+                        <div className="text-right"><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">ДАТА</p><p className="font-bold text-sm">{formatOrderDate(order.createdAt)}</p></div>
                       </div>
                       <div className="flex justify-between items-end border-t border-gray-100 pt-4">
-                        <div><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">СТАТУС</p><span className="inline-block px-3 py-1 bg-black text-white text-xs font-bold uppercase tracking-widest rounded-full">{order.status || "В обработке"}</span></div>
+                        <div><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">СТАТУС</p><span className="inline-block px-3 py-1 bg-black text-white text-xs font-bold uppercase tracking-widest rounded-full">{ORDER_STATUS_LABELS[order.status] || order.status || "В обработке"}</span></div>
                         <div className="text-right"><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">ИТОГО</p><p className="text-2xl font-black">${Number(order.totalAmount).toFixed(2)}</p></div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm border-t border-gray-100 pt-4">
+                        <p><span className="font-semibold">Способ оплаты:</span> {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</p>
+                        <p><span className="font-semibold">Адрес доставки:</span> {order.shippingAddress || "—"}</p>
+                      </div>
+                      <div className="mt-3 text-sm">
+                        <p className="font-semibold mb-1">Товары:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                          {parseJsonArray(order.items).map((item, idx) => (
+                            <li key={`${order.id}-${idx}`}>
+                              {item.productName || item.productId || "Товар"} {item.size ? `(размер ${item.size})` : ""} × {Number(item.quantity || 1)}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
                   ))}

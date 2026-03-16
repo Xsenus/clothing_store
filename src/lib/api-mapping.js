@@ -230,6 +230,12 @@ export const FLOW = {
 
   getUserOrders: async () => request("/orders"),
 
+  createOrder: async ({ input }) => request("/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   getUserLikes: async () => request("/likes"),
 
   checkLike: async ({ input }) => {
@@ -496,12 +502,27 @@ export const FLOW = {
 
   adminGetOrders: async () => request("/admin/orders"),
 
+  adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input.payload),
+  }),
+
   adminGetUsers: async () => request("/admin/users"),
 
   adminUpdateUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isAdmin: input.isAdmin, isBlocked: input.isBlocked }),
+    body: JSON.stringify({
+      isAdmin: input.isAdmin,
+      isBlocked: input.isBlocked,
+      email: input.email,
+      name: input.name,
+      phone: input.phone,
+      nickname: input.nickname,
+      shippingAddress: input.shippingAddress,
+      password: input.password,
+    }),
   }),
 
   adminDeleteUser: async ({ input }) => request(`/admin/users/${input.userId}`, {

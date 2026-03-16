@@ -53,7 +53,25 @@ public record ReviewPayload(string Text, List<string>? Media);
 /// <summary>
 /// Данные для создания заказа.
 /// </summary>
-public record OrderPayload(List<Dictionary<string, object>> Items, double TotalAmount, string? Status);
+public record OrderPayload(
+    List<Dictionary<string, object>> Items,
+    double TotalAmount,
+    string? Status,
+    string? CustomerName,
+    string? CustomerEmail,
+    string? CustomerPhone,
+    string? ShippingAddress,
+    string? PaymentMethod,
+    string? PurchaseChannel);
+
+public record AdminOrderPatchPayload(
+    string? Status,
+    string? ShippingAddress,
+    string? PaymentMethod,
+    string? CustomerName,
+    string? CustomerEmail,
+    string? CustomerPhone,
+    string? ManagerComment);
 
 /// <summary>
 /// Данные авторизации Telegram Login Widget.
