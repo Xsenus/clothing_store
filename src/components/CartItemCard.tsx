@@ -22,9 +22,11 @@ interface CartItem {
 interface CartItemCardProps {
   item: CartItem;
   product?: Product;
+  isOutOfStock?: boolean;
+  availableStock?: number | null;
 }
 
-export default function CartItemCard({ item, product }: CartItemCardProps) {
+export default function CartItemCard({ item, product, isOutOfStock = false, availableStock = null }: CartItemCardProps) {
   const { updateQuantity, removeFromCart } = useCart();
   const [updating, setUpdating] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -76,6 +78,11 @@ export default function CartItemCard({ item, product }: CartItemCardProps) {
           </div>
           <p className="text-sm text-gray-500 uppercase tracking-wider mt-1">Размер: {item.size}</p>
           <p className="text-xs text-gray-400 mt-1">${product.price.toFixed(2)} / шт</p>
+          {isOutOfStock && (
+            <p className="text-xs text-red-600 mt-1 font-semibold">
+              {availableStock === 0 ? "Товар закончился" : `Доступно: ${availableStock ?? 0} шт.`}
+            </p>
+          )}
         </div>
 
         <div className="flex justify-between items-center mt-4">
@@ -83,7 +90,7 @@ export default function CartItemCard({ item, product }: CartItemCardProps) {
             quantity={item.quantity} 
             onChange={handleQuantityChange}
             min={1}
-            max={10}
+            max={isOutOfStock ? item.quantity : Math.max(1, availableStock ?? 10)}
           />
           <Button 
             variant="ghost" 

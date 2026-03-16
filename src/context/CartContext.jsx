@@ -51,7 +51,7 @@ export function CartProvider({ children }) {
       return true;
     } catch (error) {
       console.error("Failed to add to cart:", error);
-      toast.error("Не удалось добавить товар");
+      toast.error(error?.message || "Не удалось добавить товар");
       return false;
     } finally {
       setIsLoading(false);
@@ -73,7 +73,7 @@ export function CartProvider({ children }) {
       );
     } catch (error) {
       console.error("Failed to update quantity:", error);
-      toast.error("Не удалось обновить количество");
+      toast.error(error?.message || "Не удалось обновить количество");
       await refreshCart();
     }
   };

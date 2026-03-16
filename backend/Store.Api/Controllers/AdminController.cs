@@ -506,18 +506,24 @@ public class AdminController : ControllerBase
         var products = await _db.Products.ToDictionaryAsync(x => x.Id, x => x.Slug);
         var sizes = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
         var history = await _db.StockChangeHistories.OrderByDescending(x => x.ChangedAt).Take(500).ToListAsync();
-        return Results.Ok(history.Select(x => new
+        return Results.Ok(history.Select(x =>
         {
-            x.Id,
-            x.ProductId,
-            product = products.GetValueOrDefault(x.ProductId),
-            x.SizeId,
-            size = sizes.GetValueOrDefault(x.SizeId),
-            x.OldValue,
-            x.NewValue,
-            x.ChangedAt,
-            x.ChangedByUserId,
-            changedBy = users.GetValueOrDefault(x.ChangedByUserId)
+            var isPurchase = x.ChangedByUserId.StartsWith("purchase:", StringComparison.OrdinalIgnoreCase);
+            var changedById = isPurchase ? x.ChangedByUserId["purchase:".Length..] : x.ChangedByUserId;
+            return new
+            {
+                x.Id,
+                x.ProductId,
+                product = products.GetValueOrDefault(x.ProductId),
+                x.SizeId,
+                size = sizes.GetValueOrDefault(x.SizeId),
+                x.OldValue,
+                x.NewValue,
+                x.ChangedAt,
+                changedByUserId = changedById,
+                changedBy = users.GetValueOrDefault(changedById),
+                reason = isPurchase ? "purchase" : "admin_manual"
+            };
         }));
     }
 

@@ -281,6 +281,11 @@ interface ActionNoticeState {
   isError?: boolean;
 }
 
+interface ProductDictionarySelectorState {
+  open: boolean;
+  kind: DictionaryKind;
+}
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
@@ -344,6 +349,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     error: ""
   });
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
+  const [productDictionarySelector, setProductDictionarySelector] = useState<ProductDictionarySelectorState>({ open: false, kind: "sizes" });
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
@@ -1268,6 +1274,71 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       ...prev,
       sizeStock: { ...prev.sizeStock, [size]: numeric }
     }));
+  };
+
+  const openProductDictionarySelector = (kind: DictionaryKind) => {
+    setProductDictionarySelector({ open: true, kind });
+  };
+
+  const closeProductDictionarySelector = () => {
+    setProductDictionarySelector((prev) => ({ ...prev, open: false }));
+  };
+
+  const addDictionaryValueToProduct = (kind: DictionaryKind, name: string) => {
+    const normalizedName = name.trim();
+    if (!normalizedName) return;
+
+    setFormData((prev) => {
+      if (kind === "sizes") {
+        if (prev.sizes.includes(normalizedName)) return prev;
+        return {
+          ...prev,
+          sizes: [...prev.sizes, normalizedName],
+          sizeStock: { ...prev.sizeStock, [normalizedName]: prev.sizeStock[normalizedName] ?? 0 }
+        };
+      }
+
+      if (kind === "categories") {
+        return { ...prev, category: normalizedName };
+      }
+
+      if (kind === "materials") {
+        return { ...prev, material: normalizedName };
+      }
+
+      if (kind === "colors") {
+        return { ...prev, color: normalizedName };
+      }
+
+      return prev;
+    });
+  };
+
+  const removeDictionaryValueFromProduct = (kind: DictionaryKind, name?: string) => {
+    setFormData((prev) => {
+      if (kind === "sizes" && name) {
+        const nextStock = { ...prev.sizeStock };
+        delete nextStock[name];
+        return {
+          ...prev,
+          sizes: prev.sizes.filter((item) => item !== name),
+          sizeStock: nextStock
+        };
+      }
+
+      if (kind === "categories") return { ...prev, category: "" };
+      if (kind === "materials") return { ...prev, material: "" };
+      if (kind === "colors") return { ...prev, color: "" };
+      return prev;
+    });
+  };
+
+  const getProductDictionarySelected = (kind: DictionaryKind, name: string) => {
+    if (kind === "sizes") return formData.sizes.includes(name);
+    if (kind === "categories") return formData.category === name;
+    if (kind === "materials") return formData.material === name;
+    if (kind === "colors") return formData.color === name;
+    return false;
   };
 
   const setMediaSlot = (index: number, type: "image" | "video", url: string) => {
@@ -2710,12 +2781,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-cat">Категория</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-cat" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите категорию</option>
-                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("categories")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                      </div>
+                      {formData.category ? (
+                        <div className="flex items-center justify-between border border-black px-3 py-2">
+                          <span>{formData.category}</span>
+                          <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("categories")}>Удалить</Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Категория не выбрана</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2784,25 +2862,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-2">
                   <Label>Размеры</Label>
-                  <div className="flex flex-wrap gap-4">
-                    {(dictionaries.sizes || []).map((sizeItem: any) => (
-                      <div key={sizeItem.name} className="flex items-center space-x-2">
-                        <Checkbox 
-                          id={`size-${sizeItem.name}`} 
-                          checked={formData.sizes.includes(sizeItem.name)}
-                          onCheckedChange={() => toggleSize(sizeItem.name)}
-                        />
-                        <Label htmlFor={`size-${sizeItem.name}`} className="cursor-pointer">{sizeItem.name}</Label>
+                  <div className="space-y-2">
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("sizes")}>Словарь</Button>
+                    {formData.sizes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Размеры не выбраны</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {formData.sizes.map((size) => (
+                          <div key={size} className="flex items-center justify-between border border-black px-3 py-2">
+                            <span>{size}</span>
+                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("sizes", size)}>Удалить</Button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label>Остатки по размерам</Label>
                   <div className="grid grid-cols-3 gap-3">
-                    {(dictionaries.sizes || []).map((sizeItem: any) => {
-                      const size = sizeItem.name;
+                    {(formData.sizes || []).map((size) => {
                       return (
                       <div key={`stock-${size}`} className="space-y-1">
                         <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
@@ -2851,12 +2931,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-material">Материал</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-material" value={formData.material} onChange={(e) => setFormData({...formData, material: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите материал</option>
-                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("materials")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
+                      </div>
+                      {formData.material ? (
+                        <div className="flex items-center justify-between border border-black px-3 py-2">
+                          <span>{formData.material}</span>
+                          <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("materials")}>Удалить</Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Материал не выбран</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2894,12 +2981,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-color">Цвет</Label>
-                    <div className="flex gap-2">
-                      <select id="prod-color" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="h-10 flex-1 border border-black px-3">
-                        <option value="">Выберите цвет</option>
-                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
-                      </select>
-                      <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("colors")}>Словарь</Button>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
+                      </div>
+                      {formData.color ? (
+                        <div className="flex items-center justify-between border border-black px-3 py-2">
+                          <span>{formData.color}</span>
+                          <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("colors")}>Удалить</Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Цвет не выбран</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2927,6 +3021,46 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           )}
 
 
+
+          <Dialog open={productDictionarySelector.open} onOpenChange={(open) => setProductDictionarySelector((prev) => ({ ...prev, open }))}>
+            <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">
+                  Справочник: {dictionaryGroups.find((group) => group.key === productDictionarySelector.kind)?.label}
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                {(dictionaries[productDictionarySelector.kind] || []).map((item: any) => {
+                  const selected = getProductDictionarySelected(productDictionarySelector.kind, item.name);
+                  return (
+                    <div key={`${productDictionarySelector.kind}-${item.id}`} className="flex items-center justify-between border border-gray-200 px-4 py-3">
+                      <div>
+                        <div className="flex items-center gap-2 font-semibold">
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
+                          <span>{item.name}</span>
+                        </div>
+                        {item.description && <p className="text-xs text-muted-foreground mt-1">{item.description}</p>}
+                      </div>
+                      <Button
+                        type="button"
+                        variant={selected ? "secondary" : "outline"}
+                        className="rounded-none"
+                        onClick={() => addDictionaryValueToProduct(productDictionarySelector.kind, item.name)}
+                        disabled={selected}
+                      >
+                        {selected ? "Выбрано" : "Выбрать"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={closeProductDictionarySelector}>Закрыть</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={dictionaryDeleteDialog.open} onOpenChange={(open) => { if (!dictionaryDeleteDialog.submitting) setDictionaryDeleteDialog((prev) => ({ ...prev, open, error: open ? prev.error : "" })); }}>
             <DialogContent className="max-w-md rounded-none border-black">

@@ -230,6 +230,12 @@ export const FLOW = {
 
   getUserOrders: async () => request("/orders"),
 
+  createOrder: async ({ input }) => request("/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items: input.items, totalAmount: input.totalAmount, status: "processing" }),
+  }),
+
   getUserLikes: async () => request("/likes"),
 
   checkLike: async ({ input }) => {
