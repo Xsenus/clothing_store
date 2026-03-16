@@ -30,7 +30,8 @@ interface Product {
   price: number;
   images: string[];
   sizes: string[];
-  category: string;
+  category?: string;
+  categories?: string[];
   isNew?: boolean;
   isPopular?: boolean;
   likesCount?: number;
@@ -325,7 +326,12 @@ export default function CatalogPage() {
     result = result.filter(p => p.price >= priceRange.min && p.price <= priceRange.max);
 
     if (selectedCategories.length > 0) {
-      result = result.filter(p => selectedCategories.includes(p.category));
+      result = result.filter((p) => {
+        const productCategories = (Array.isArray(p.categories) && p.categories.length > 0)
+          ? p.categories
+          : (p.category ? [p.category] : []);
+        return productCategories.some((category) => selectedCategories.includes(category));
+      });
     }
 
     if (selectedSizes.length > 0) {

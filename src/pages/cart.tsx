@@ -51,6 +51,7 @@ export default function CartPage() {
 
   const hasUnavailableItems = cartItems.some((item) => {
     const product = products[item.productId];
+    if (!product) return true;
     if (!product?.sizeStock) return false;
     return (product.sizeStock[item.size] ?? 0) < item.quantity;
   });
@@ -112,8 +113,8 @@ export default function CartPage() {
                 <div className="space-y-0">
                   {cartItems.map((item) => {
                     const product = products[item.productId];
-                    const available = product?.sizeStock?.[item.size] ?? null;
-                    const isOutOfStock = available !== null && available < item.quantity;
+                    const available = product?.sizeStock ? (product.sizeStock[item.size] ?? 0) : (product ? null : 0);
+                    const isOutOfStock = !product || (available !== null && available < item.quantity);
                     return (
                       <CartItemCard
                         key={item.cartId}

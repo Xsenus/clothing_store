@@ -217,9 +217,12 @@ export const FLOW = {
 
   getSimilarProducts: async ({ input }) => {
     const products = normalizeProducts(await request("/products"));
-    return products.filter(
-      (p) => p.category === input.category && p._id !== input.productId
-    ).slice(0, 4);
+    return products.filter((p) => {
+      const categories = Array.isArray(p.categories) && p.categories.length > 0
+        ? p.categories
+        : (p.category ? [p.category] : []);
+      return categories.includes(input.category) && p._id !== input.productId;
+    }).slice(0, 4);
   },
 
   toggleLike: async ({ input }) => request("/likes/toggle", {
