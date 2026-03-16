@@ -1,7 +1,9 @@
+using System.Data;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -10,7 +12,7 @@ using Store.Api.Services;
 namespace Store.Api.Controllers;
 
 /// <summary>
-/// Контроллер операций с заказами.
+/// РљРѕРЅС‚СЂРѕР»Р»РµСЂ РѕРїРµСЂР°С†РёР№ СЃ Р·Р°РєР°Р·Р°РјРё.
 /// </summary>
 [ApiController]
 [Route("orders")]
@@ -19,8 +21,10 @@ public class OrdersController : ControllerBase
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
 
+    private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
+
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="OrdersController"/>.
+    /// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµС‚ РЅРѕРІС‹Р№ СЌРєР·РµРјРїР»СЏСЂ РєР»Р°СЃСЃР° <see cref="OrdersController"/>.
     /// </summary>
     public OrdersController(StoreDbContext db, AuthService auth)
     {
@@ -29,7 +33,7 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
-    /// Возвращает заказы текущего пользователя.
+    /// Р’РѕР·РІСЂР°С‰Р°РµС‚ Р·Р°РєР°Р·С‹ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.
     /// </summary>
     [HttpGet]
     public async Task<IResult> List()
@@ -47,7 +51,7 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
-    /// Создаёт заказ.
+    /// РЎРѕР·РґР°С‘С‚ Р·Р°РєР°Р·.
     /// </summary>
     [HttpPost]
     public async Task<IResult> Create([FromBody] OrderPayload payload)
@@ -59,68 +63,101 @@ public class OrdersController : ControllerBase
         if (normalizedItems.Count == 0)
             return Results.BadRequest(new { detail = "Корзина пуста" });
 
-        await using var tx = await _db.Database.BeginTransactionAsync();
-        foreach (var item in normalizedItems)
+        try
         {
-            var availableStock = await GetAvailableStockAsync(item.ProductId, item.Size);
-            if (!availableStock.HasValue)
-                continue;
+            await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
 
-            if (availableStock.Value < item.Quantity)
-                return Results.BadRequest(new { detail = $"Недостаточно остатка для товара {item.ProductId}, размер {item.Size}. Доступно: {availableStock.Value}" });
-        }
+            var sizeLookups = normalizedItems.Select(x => x.LookupSize).Distinct().ToList();
+            var sizeDictionaries = await _db.SizeDictionaries
+                .Where(x => sizeLookups.Contains(x.Name.ToLower()))
+                .ToListAsync();
+            var sizeMap = sizeDictionaries.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x, StringComparer.OrdinalIgnoreCase);
 
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var orderId = Guid.NewGuid().ToString("N");
-        foreach (var item in normalizedItems)
-        {
-            var sizeDictionary = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Name.ToLower() == item.Size.Trim().ToLowerInvariant());
-            if (sizeDictionary is null)
-                continue;
-
-            var row = await _db.ProductSizeStocks.FirstOrDefaultAsync(x => x.ProductId == item.ProductId && x.SizeId == sizeDictionary.Id);
-            if (row is null)
-                continue;
-
-            var oldValue = row.Stock;
-            row.Stock = Math.Max(0, row.Stock - item.Quantity);
-
-            _db.StockChangeHistories.Add(new StockChangeHistory
+            foreach (var item in normalizedItems)
             {
-                ProductId = item.ProductId,
-                SizeId = sizeDictionary.Id,
-                ChangedByUserId = user.Id,
-                Reason = "purchase",
-                OrderId = orderId,
-                OldValue = oldValue,
-                NewValue = row.Stock,
-                ChangedAt = now
+                if (!sizeMap.ContainsKey(item.LookupSize))
+                    return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара {item.ProductId}" });
+            }
+
+            var requestedSizeIds = sizeMap.Values.Select(x => x.Id).Distinct().ToList();
+            var requestedProductIds = normalizedItems.Select(x => x.ProductId).Distinct().ToList();
+            var stockRows = await _db.ProductSizeStocks
+                .Where(x => requestedProductIds.Contains(x.ProductId) && requestedSizeIds.Contains(x.SizeId))
+                .ToListAsync();
+            var stockMap = stockRows.ToDictionary(x => $"{x.ProductId}:{x.SizeId}", x => x, StringComparer.Ordinal);
+
+            foreach (var item in normalizedItems)
+            {
+                var sizeDictionary = sizeMap[item.LookupSize];
+                var stockKey = $"{item.ProductId}:{sizeDictionary.Id}";
+                if (!stockMap.TryGetValue(stockKey, out var row))
+                    return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара {item.ProductId}" });
+
+                if (row.Stock < item.Quantity)
+                    return Results.BadRequest(new { detail = $"Недостаточно остатка для товара {item.ProductId}, размер {item.Size}. Доступно: {row.Stock}" });
+            }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var orderId = Guid.NewGuid().ToString("N");
+            foreach (var item in normalizedItems)
+            {
+                var sizeDictionary = sizeMap[item.LookupSize];
+                var row = stockMap[$"{item.ProductId}:{sizeDictionary.Id}"];
+                var oldValue = row.Stock;
+                row.Stock -= item.Quantity;
+
+                _db.StockChangeHistories.Add(new StockChangeHistory
+                {
+                    ProductId = item.ProductId,
+                    SizeId = sizeDictionary.Id,
+                    ChangedByUserId = user.Id,
+                    Reason = "purchase",
+                    OrderId = orderId,
+                    OldValue = oldValue,
+                    NewValue = row.Stock,
+                    ChangedAt = now
+                });
+            }
+
+            var serializedItems = normalizedItems.Select(item => new
+            {
+                productId = item.ProductId,
+                size = item.Size,
+                quantity = item.Quantity
             });
+
+            var order = new Order
+            {
+                Id = orderId,
+                UserId = user.Id,
+                ItemsJson = JsonSerializer.Serialize(serializedItems),
+                TotalAmount = payload.TotalAmount,
+                Status = payload.Status ?? "processing",
+                CreatedAt = now
+            };
+            _db.Orders.Add(order);
+
+            var cartItems = await _db.CartItems.Where(x => x.UserId == user.Id).ToListAsync();
+            if (cartItems.Count > 0)
+                _db.CartItems.RemoveRange(cartItems);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Results.Ok(new { id = order.Id });
         }
-
-        var order = new Order
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
         {
-            Id = orderId,
-            UserId = user.Id,
-            ItemsJson = JsonSerializer.Serialize(payload.Items),
-            TotalAmount = payload.TotalAmount,
-            Status = payload.Status ?? "processing",
-            CreatedAt = now
-        };
-        _db.Orders.Add(order);
-
-        var cartItems = await _db.CartItems.Where(x => x.UserId == user.Id).ToListAsync();
-        if (cartItems.Count > 0)
-            _db.CartItems.RemoveRange(cartItems);
-
-        await _db.SaveChangesAsync();
-        await tx.CommitAsync();
-        return Results.Ok(new { id = order.Id });
+            return Results.Conflict(new { detail = "Остатки изменились во время оформления заказа. Обновите корзину и попробуйте снова." });
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+        {
+            return Results.Conflict(new { detail = "Остатки изменились во время оформления заказа. Обновите корзину и попробуйте снова." });
+        }
     }
 
-    private static List<(string ProductId, string Size, int Quantity)> NormalizeOrderItems(List<Dictionary<string, object>> items)
+    private static List<NormalizedOrderItem> NormalizeOrderItems(List<Dictionary<string, object>> items)
     {
-        var result = new List<(string ProductId, string Size, int Quantity)>();
+        var parsedItems = new List<NormalizedOrderItem>();
         foreach (var item in items)
         {
             if (!item.TryGetValue("productId", out var productValue)
@@ -130,16 +167,23 @@ public class OrdersController : ControllerBase
                 continue;
             }
 
-            var productId = AsString(productValue);
-            var size = AsString(sizeValue);
+            var productId = AsString(productValue).Trim();
+            var size = AsString(sizeValue).Trim();
             var quantity = AsInt(quantityValue);
             if (string.IsNullOrWhiteSpace(productId) || string.IsNullOrWhiteSpace(size) || quantity <= 0)
                 continue;
 
-            result.Add((productId, size, quantity));
+            parsedItems.Add(new NormalizedOrderItem(productId, size, size.ToLowerInvariant(), quantity));
         }
 
-        return result;
+        return parsedItems
+            .GroupBy(x => $"{x.ProductId}\u001f{x.LookupSize}", StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new NormalizedOrderItem(first.ProductId, first.Size, first.LookupSize, group.Sum(x => x.Quantity));
+            })
+            .ToList();
     }
 
     private static string AsString(object value)
@@ -167,17 +211,5 @@ public class OrdersController : ControllerBase
             _ when int.TryParse(value?.ToString(), out var parsed) => parsed,
             _ => 0
         };
-    }
-
-    private async Task<int?> GetAvailableStockAsync(string productId, string sizeName)
-    {
-        var normalizedSize = sizeName.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(normalizedSize)) return null;
-
-        var sizeDictionary = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Name.ToLower() == normalizedSize);
-        if (sizeDictionary is null) return null;
-
-        var stock = await _db.ProductSizeStocks.FirstOrDefaultAsync(x => x.ProductId == productId && x.SizeId == sizeDictionary.Id);
-        return stock?.Stock;
     }
 }

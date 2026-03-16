@@ -50,6 +50,8 @@ public class CartController : ControllerBase
         var existing = await _db.CartItems.FirstOrDefaultAsync(x => x.UserId == user.Id && x.ProductId == payload.ProductId && x.Size == payload.Size);
         var requestedQuantity = payload.Quantity + (existing?.Quantity ?? 0);
         var availableStock = await GetAvailableStockAsync(payload.ProductId, payload.Size);
+        if (!availableStock.HasValue)
+            return Results.BadRequest(new { detail = $"Размер {payload.Size} недоступен для товара" });
         if (availableStock.HasValue && requestedQuantity > availableStock.Value)
             return Results.BadRequest(new { detail = $"Недостаточно остатка для размера {payload.Size}. Доступно: {availableStock.Value}" });
 
@@ -80,6 +82,8 @@ public class CartController : ControllerBase
         if (item is null) return Results.NotFound(new { detail = "Item not found" });
 
         var availableStock = await GetAvailableStockAsync(item.ProductId, item.Size);
+        if (!availableStock.HasValue)
+            return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара" });
         if (availableStock.HasValue && payload.Quantity > availableStock.Value)
             return Results.BadRequest(new { detail = $"Недостаточно остатка для размера {item.Size}. Доступно: {availableStock.Value}" });
 

@@ -187,7 +187,11 @@ public class DatabaseInitializer
         await SeedDictionaryAsync(db.MaterialDictionaries, defaultMaterials, now);
         await SeedDictionaryAsync(db.ColorDictionaries, defaultColors, now);
         await SeedDictionaryAsync(db.CategoryDictionaries, defaultCategories, now);
+        await db.SaveChangesAsync();
+
         await EnsureCategoryRussianDescriptionsAsync(db);
+        await db.SaveChangesAsync();
+
         await SeedCategoriesFromProductsAsync(db, now);
         await SeedSizesFromProductsAsync(db, now);
 
@@ -201,24 +205,25 @@ public class DatabaseInitializer
             .ToListAsync();
         var normalizedExisting = existingCategories
             .Select(x => x.Trim().ToLowerInvariant())
-            .ToHashSet();
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(db.CategoryDictionaries);
 
-        var categoriesFromProducts = await db.Products
-            .Select(x => x.Category)
-            .Where(x => x != null && x != string.Empty)
-            .Distinct()
+        var products = await db.Products
+            .Select(x => new { x.Category, x.Data })
             .ToListAsync();
 
-        foreach (var category in categoriesFromProducts)
+        foreach (var category in EnumerateCategoriesFromProducts(products))
         {
-            var normalized = category!.Trim().ToLowerInvariant();
+            var normalized = category.Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(normalized) || normalizedExisting.Contains(normalized))
                 continue;
 
             db.CategoryDictionaries.Add(new CategoryDictionary
             {
                 Name = category.Trim(),
+                Slug = DictionarySlugService.EnsureUnique(category, occupiedSlugs),
                 IsActive = true,
+                ShowInCatalogFilter = true,
                 CreatedAt = createdAt
             });
             normalizedExisting.Add(normalized);
@@ -232,7 +237,8 @@ public class DatabaseInitializer
             .ToListAsync();
         var normalizedExisting = existingSizes
             .Select(x => x.Trim().ToLowerInvariant())
-            .ToHashSet();
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(db.SizeDictionaries);
 
         var products = await db.Products
             .Select(x => x.Data)
@@ -266,7 +272,9 @@ public class DatabaseInitializer
                 db.SizeDictionaries.Add(new SizeDictionary
                 {
                     Name = sizeName,
+                    Slug = DictionarySlugService.EnsureUnique(sizeName, occupiedSlugs),
                     IsActive = true,
+                    ShowInCatalogFilter = true,
                     CreatedAt = createdAt
                 });
                 normalizedExisting.Add(normalized);
@@ -311,7 +319,8 @@ public class DatabaseInitializer
     private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
     {
         var existing = await set.AsQueryable().Select(x => EF.Property<string>(x, "Name")).ToListAsync();
-        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(set);
         foreach (var value in values)
         {
             var name = value.Trim();
@@ -325,8 +334,58 @@ public class DatabaseInitializer
                 continue;
 
             typeof(T).GetProperty("Name")?.SetValue(item, name);
+            typeof(T).GetProperty("Slug")?.SetValue(item, DictionarySlugService.EnsureUnique(name, occupiedSlugs));
+            typeof(T).GetProperty("ShowInCatalogFilter")?.SetValue(item, true);
             typeof(T).GetProperty("CreatedAt")?.SetValue(item, createdAt);
             set.Add(item);
+            normalized.Add(name.ToLowerInvariant());
+        }
+    }
+
+    private static async Task<HashSet<string>> LoadOccupiedDictionarySlugsAsync<T>(DbSet<T> set) where T : class
+    {
+        var slugs = await set.AsQueryable()
+            .Select(x => EF.Property<string?>(x, "Slug"))
+            .Where(x => x != null && x != string.Empty)
+            .ToListAsync();
+
+        return slugs
+            .Select(x => x!.Trim().ToLowerInvariant())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateCategoriesFromProducts(IEnumerable<dynamic> products)
+    {
+        foreach (var product in products)
+        {
+            var category = (string?)product.Category;
+            if (!string.IsNullOrWhiteSpace(category))
+                yield return category;
+
+            var data = (string?)product.Data;
+            if (string.IsNullOrWhiteSpace(data))
+                continue;
+
+            JsonArray? categories;
+            try
+            {
+                categories = JsonNode.Parse(data)?["categories"] as JsonArray;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (categories is null)
+                continue;
+
+            foreach (var categoryNode in categories)
+            {
+                var value = categoryNode?.ToString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(value))
+                    yield return value;
+            }
         }
     }
     private async Task EnsureAdminUserAsync(StoreDbContext db)

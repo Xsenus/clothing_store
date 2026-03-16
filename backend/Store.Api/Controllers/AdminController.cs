@@ -347,30 +347,31 @@ public class AdminController : ControllerBase
         var description = NormalizeOptionalText(payload.Description);
         var color = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
+        var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
 
         switch (kind.ToLowerInvariant())
         {
             case "sizes":
                 if (await _db.SizeDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Размер уже существует" });
-                var size = new SizeDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                var size = new SizeDictionary { Name = name, Slug = await ResolveDictionarySlugAsync(_db.SizeDictionaries, payload.Slug, name), Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.SizeDictionaries.Add(size);
                 await _db.SaveChangesAsync();
                 return Results.Ok(size);
             case "materials":
                 if (await _db.MaterialDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Материал уже существует" });
-                var material = new MaterialDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                var material = new MaterialDictionary { Name = name, Slug = await ResolveDictionarySlugAsync(_db.MaterialDictionaries, payload.Slug, name), Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.MaterialDictionaries.Add(material);
                 await _db.SaveChangesAsync();
                 return Results.Ok(material);
             case "colors":
                 if (await _db.ColorDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Цвет уже существует" });
-                var colorDictionary = new ColorDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                var colorDictionary = new ColorDictionary { Name = name, Slug = await ResolveDictionarySlugAsync(_db.ColorDictionaries, payload.Slug, name), Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.ColorDictionaries.Add(colorDictionary);
                 await _db.SaveChangesAsync();
                 return Results.Ok(colorDictionary);
             case "categories":
                 if (await _db.CategoryDictionaries.AnyAsync(x => x.Name.ToLower() == name.ToLower())) return Results.BadRequest(new { detail = "Категория уже существует" });
-                var category = new CategoryDictionary { Name = name, Description = description, Color = color, IsActive = isActive, CreatedAt = now };
+                var category = new CategoryDictionary { Name = name, Slug = await ResolveDictionarySlugAsync(_db.CategoryDictionaries, payload.Slug, name), Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
                 _db.CategoryDictionaries.Add(category);
                 await _db.SaveChangesAsync();
                 return Results.Ok(category);
@@ -392,6 +393,7 @@ public class AdminController : ControllerBase
         var description = NormalizeOptionalText(payload.Description);
         var colorValue = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
+        var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
 
         switch (kind.ToLowerInvariant())
         {
@@ -403,9 +405,11 @@ public class AdminController : ControllerBase
                 if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
                     return Results.BadRequest(new { detail = "Размер используется в товарах, редактирование запрещено" });
                 size.Name = name;
+                size.Slug = await ResolveDictionarySlugAsync(_db.SizeDictionaries, payload.Slug ?? size.Slug, name, id);
                 size.Description = description;
                 size.Color = colorValue;
                 size.IsActive = isActive;
+                size.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "materials":
                 var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
@@ -415,9 +419,11 @@ public class AdminController : ControllerBase
                 if (await IsProductDataValueInUseAsync("material", material.Name))
                     return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
                 material.Name = name;
+                material.Slug = await ResolveDictionarySlugAsync(_db.MaterialDictionaries, payload.Slug ?? material.Slug, name, id);
                 material.Description = description;
                 material.Color = colorValue;
                 material.IsActive = isActive;
+                material.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "colors":
                 var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
@@ -427,21 +433,25 @@ public class AdminController : ControllerBase
                 if (await IsProductDataValueInUseAsync("color", color.Name))
                     return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
                 color.Name = name;
+                color.Slug = await ResolveDictionarySlugAsync(_db.ColorDictionaries, payload.Slug ?? color.Slug, name, id);
                 color.Description = description;
                 color.Color = colorValue;
                 color.IsActive = isActive;
+                color.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             case "categories":
                 var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (category is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
                 if (await _db.CategoryDictionaries.AnyAsync(x => x.Id != id && x.Name.ToLower() == name.ToLower()))
                     return Results.BadRequest(new { detail = "Категория уже существует" });
-                if (await _db.Products.AnyAsync(x => x.Category == category.Name))
+                if (await _db.Products.AnyAsync(x => x.Category == category.Name) || await IsProductDataValueInUseAsync("category", category.Name))
                     return Results.BadRequest(new { detail = "Категория используется в товарах, редактирование запрещено" });
                 category.Name = name;
+                category.Slug = await ResolveDictionarySlugAsync(_db.CategoryDictionaries, payload.Slug ?? category.Slug, name, id);
                 category.Description = description;
                 category.Color = colorValue;
                 category.IsActive = isActive;
+                category.ShowInCatalogFilter = showInCatalogFilter;
                 break;
             default:
                 return Results.BadRequest(new { detail = "Неизвестный словарь" });
@@ -485,7 +495,7 @@ public class AdminController : ControllerBase
                 var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (category is not null)
                 {
-                    var used = await _db.Products.AnyAsync(x => x.Category == category.Name);
+                    var used = await _db.Products.AnyAsync(x => x.Category == category.Name) || await IsProductDataValueInUseAsync("category", category.Name);
                     if (used) return Results.BadRequest(new { detail = "Категория используется в товарах, удаление запрещено" });
                     _db.CategoryDictionaries.Remove(category);
                 }
@@ -560,8 +570,7 @@ public class AdminController : ControllerBase
         var productsData = await _db.Products.AsNoTracking().Select(x => x.Data).ToListAsync();
         foreach (var data in productsData)
         {
-            if (TryGetStringFromProductData(data, field, out var current)
-                && string.Equals(current, value, StringComparison.OrdinalIgnoreCase))
+            if (ProductDataContainsValue(data, GetProductDataAliases(field), value))
             {
                 return true;
             }
@@ -570,9 +579,40 @@ public class AdminController : ControllerBase
         return false;
     }
 
-    private static bool TryGetStringFromProductData(string data, string field, out string? value)
+    private async Task<string> ResolveDictionarySlugAsync<T>(DbSet<T> set, string? slugSource, string name, string? excludeId = null) where T : class
     {
-        value = null;
+        var baseSlug = DictionarySlugService.Normalize(string.IsNullOrWhiteSpace(slugSource) ? name : slugSource);
+        var slug = baseSlug;
+        var suffix = 2;
+        while (await DictionarySlugExistsAsync(set, slug, excludeId))
+        {
+            slug = $"{baseSlug}-{suffix}";
+            suffix++;
+        }
+
+        return slug;
+    }
+
+    private async Task<bool> DictionarySlugExistsAsync<T>(DbSet<T> set, string slug, string? excludeId = null) where T : class
+    {
+        IQueryable<T> query = set.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(excludeId))
+            query = query.Where(x => EF.Property<string>(x, "Id") != excludeId);
+
+        var normalizedSlug = slug.Trim().ToLowerInvariant();
+        return await query.AnyAsync(x => (EF.Property<string?>(x, "Slug") ?? string.Empty).Trim().ToLower() == normalizedSlug);
+    }
+
+    private static IReadOnlyList<string> GetProductDataAliases(string field) => field.ToLowerInvariant() switch
+    {
+        "category" => ["category", "categories"],
+        "material" => ["material", "materials"],
+        "color" => ["color", "colors"],
+        _ => [field]
+    };
+
+    private static bool ProductDataContainsValue(string data, IReadOnlyList<string> fields, string targetValue)
+    {
         if (string.IsNullOrWhiteSpace(data))
             return false;
 
@@ -582,14 +622,39 @@ public class AdminController : ControllerBase
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 return false;
 
-            if (!document.RootElement.TryGetProperty(field, out var property))
-                return false;
+            foreach (var field in fields)
+            {
+                if (!document.RootElement.TryGetProperty(field, out var property))
+                    continue;
 
-            if (property.ValueKind != JsonValueKind.String)
-                return false;
+                if (property.ValueKind == JsonValueKind.String)
+                {
+                    var value = property.GetString();
+                    if (!string.IsNullOrWhiteSpace(value)
+                        && string.Equals(value, targetValue, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
 
-            value = property.GetString();
-            return !string.IsNullOrWhiteSpace(value);
+                if (property.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in property.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.String)
+                            continue;
+
+                        var value = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(value)
+                            && string.Equals(value, targetValue, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
         }
         catch (JsonException)
         {

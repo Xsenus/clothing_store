@@ -76,6 +76,21 @@ public class ProductsController : ControllerBase
             try
             {
                 var json = JsonNode.Parse(data)?.AsObject();
+                var category = json?["category"]?.ToString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(category))
+                    usedCategories.Add(category);
+
+                var categoryValues = json?["categories"] as JsonArray;
+                if (categoryValues is not null)
+                {
+                    foreach (var item in categoryValues)
+                    {
+                        var name = item?.ToString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(name))
+                            usedCategories.Add(name);
+                    }
+                }
+
                 var sizes = json?["sizes"] as JsonArray;
                 if (sizes is null) continue;
                 foreach (var size in sizes)
@@ -218,7 +233,8 @@ public class ProductsController : ControllerBase
     [HttpPost]
     public async Task<IResult> Create([FromBody] JsonObject payload)
     {
-        if (!await _auth.RequireAdminAsync(Request)) return Results.Unauthorized();
+        var admin = await _auth.RequireAdminUserAsync(Request);
+        if (admin is null) return Results.Unauthorized();
         var id = payload["id"]?.ToString() ?? Guid.NewGuid().ToString("N");
         payload["id"] = id;
         NormalizePriceFields(payload);
@@ -227,7 +243,7 @@ public class ProductsController : ControllerBase
         {
             Id = id,
             Slug = payload["slug"]?.ToString() ?? id,
-            Category = payload["category"]?.ToString(),
+            Category = payload["category"]?.ToString() ?? (payload["categories"] as JsonArray)?[0]?.ToString(),
             IsNew = payload["isNew"]?.GetValue<bool>() ?? false,
             IsPopular = payload["isPopular"]?.GetValue<bool>() ?? false,
             LikesCount = payload["likesCount"]?.GetValue<int>() ?? 0,
@@ -236,7 +252,7 @@ public class ProductsController : ControllerBase
         };
         _db.Products.Add(product);
         await _db.SaveChangesAsync();
-        await SyncSizeStockAsync(id, payload["sizeStock"] as JsonObject, payload["sizes"] as JsonArray, null);
+        await SyncSizeStockAsync(id, payload["sizeStock"] as JsonObject, payload["sizes"] as JsonArray, admin.Id);
         return Results.Json(payload);
     }
 
@@ -253,7 +269,7 @@ public class ProductsController : ControllerBase
         NormalizePriceFields(json);
 
         product.Slug = json["slug"]?.ToString() ?? product.Slug;
-        product.Category = json["category"]?.ToString();
+        product.Category = json["category"]?.ToString() ?? (json["categories"] as JsonArray)?[0]?.ToString();
         product.IsNew = json["isNew"]?.GetValue<bool>() ?? false;
         product.IsPopular = json["isPopular"]?.GetValue<bool>() ?? false;
         product.LikesCount = json["likesCount"]?.GetValue<int>() ?? product.LikesCount;
@@ -355,6 +371,13 @@ public class ProductsController : ControllerBase
     {
         var existing = await _db.ProductSizeStocks.Where(x => x.ProductId == productId).ToListAsync();
         var dictionaries = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Name.ToLowerInvariant(), x => x);
+        var occupiedSlugs = (await _db.SizeDictionaries
+                .Select(x => x.Slug)
+                .Where(x => x != null && x != string.Empty)
+                .ToListAsync())
+            .Select(x => x.Trim().ToLowerInvariant())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         var requested = new Dictionary<string, int>();
@@ -390,6 +413,8 @@ public class ProductsController : ControllerBase
                 dictionary = new SizeDictionary
                 {
                     Name = sizeName,
+                    Slug = DictionarySlugService.EnsureUnique(sizeName, occupiedSlugs),
+                    ShowInCatalogFilter = true,
                     CreatedAt = now
                 };
                 _db.SizeDictionaries.Add(dictionary);
@@ -448,7 +473,26 @@ public class ProductsController : ControllerBase
             .ToHashSet();
         var toDelete = existing.Where(x => !requiredSizeIds.Contains(x.SizeId)).ToList();
         if (toDelete.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(changedByUserId))
+            {
+                foreach (var row in toDelete)
+                {
+                    _db.StockChangeHistories.Add(new StockChangeHistory
+                    {
+                        ProductId = productId,
+                        SizeId = row.SizeId,
+                        ChangedByUserId = changedByUserId,
+                        Reason = "admin_manual",
+                        OldValue = row.Stock,
+                        NewValue = 0,
+                        ChangedAt = now
+                    });
+                }
+            }
+
             _db.ProductSizeStocks.RemoveRange(toDelete);
+        }
 
         await _db.SaveChangesAsync();
     }
