@@ -177,14 +177,135 @@ public class DatabaseInitializer
         var defaultSizes = new[] { "XS", "S", "M", "L", "XL", "XXL" };
         var defaultMaterials = new[] { "Хлопок", "Полиэстер", "Футер", "Деним" };
         var defaultColors = new[] { "Черный", "Белый", "Серый", "Бежевый" };
-        var defaultCategories = new[] { "hoodie", "t-shirt", "pants", "jacket" };
+        var defaultCategories = new[]
+        {
+            "outerwear", "hoodie", "sweatshirt", "shirt", "t-shirt", "top",
+            "suit", "pants", "shorts", "skirt", "underwear", "shoes", "bags", "accessories", "mystery-box"
+        };
 
         await SeedDictionaryAsync(db.SizeDictionaries, defaultSizes, now);
         await SeedDictionaryAsync(db.MaterialDictionaries, defaultMaterials, now);
         await SeedDictionaryAsync(db.ColorDictionaries, defaultColors, now);
         await SeedDictionaryAsync(db.CategoryDictionaries, defaultCategories, now);
+        await EnsureCategoryRussianDescriptionsAsync(db);
+        await SeedCategoriesFromProductsAsync(db, now);
+        await SeedSizesFromProductsAsync(db, now);
 
         await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedCategoriesFromProductsAsync(StoreDbContext db, long createdAt)
+    {
+        var existingCategories = await db.CategoryDictionaries
+            .Select(x => x.Name)
+            .ToListAsync();
+        var normalizedExisting = existingCategories
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet();
+
+        var categoriesFromProducts = await db.Products
+            .Select(x => x.Category)
+            .Where(x => x != null && x != string.Empty)
+            .Distinct()
+            .ToListAsync();
+
+        foreach (var category in categoriesFromProducts)
+        {
+            var normalized = category!.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(normalized) || normalizedExisting.Contains(normalized))
+                continue;
+
+            db.CategoryDictionaries.Add(new CategoryDictionary
+            {
+                Name = category.Trim(),
+                IsActive = true,
+                CreatedAt = createdAt
+            });
+            normalizedExisting.Add(normalized);
+        }
+    }
+
+    private static async Task SeedSizesFromProductsAsync(StoreDbContext db, long createdAt)
+    {
+        var existingSizes = await db.SizeDictionaries
+            .Select(x => x.Name)
+            .ToListAsync();
+        var normalizedExisting = existingSizes
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet();
+
+        var products = await db.Products
+            .Select(x => x.Data)
+            .ToListAsync();
+
+        foreach (var data in products)
+        {
+            JsonArray? sizes;
+            try
+            {
+                sizes = JsonNode.Parse(data)?["sizes"] as JsonArray;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (sizes is null)
+                continue;
+
+            foreach (var sizeNode in sizes)
+            {
+                var sizeName = sizeNode?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(sizeName))
+                    continue;
+
+                var normalized = sizeName.ToLowerInvariant();
+                if (normalizedExisting.Contains(normalized))
+                    continue;
+
+                db.SizeDictionaries.Add(new SizeDictionary
+                {
+                    Name = sizeName,
+                    IsActive = true,
+                    CreatedAt = createdAt
+                });
+                normalizedExisting.Add(normalized);
+            }
+        }
+    }
+
+    private static async Task EnsureCategoryRussianDescriptionsAsync(StoreDbContext db)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["outerwear"] = "Верхняя одежда",
+            ["hoodie"] = "Толстовки (худи)",
+            ["sweatshirt"] = "Кофты",
+            ["shirt"] = "Рубашки",
+            ["t-shirt"] = "Футболки",
+            ["top"] = "Топы",
+            ["suit"] = "Костюмы",
+            ["pants"] = "Штаны",
+            ["shorts"] = "Шорты",
+            ["skirt"] = "Юбки",
+            ["underwear"] = "Нижнее бельё",
+            ["shoes"] = "Обувь",
+            ["bags"] = "Сумки",
+            ["accessories"] = "Аксессуары",
+            ["mystery-box"] = "Мистери боксы"
+        };
+
+        var categories = await db.CategoryDictionaries.ToListAsync();
+        foreach (var category in categories)
+        {
+            if (!labels.TryGetValue(category.Name, out var label))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(category.Description))
+                continue;
+
+            category.Description = label;
+        }
     }
 
     private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
@@ -404,15 +525,26 @@ public class DatabaseInitializer
         if (title is null)
         {
             db.AppSettings.Add(new AppSetting { Key = "site_title", Value = "fashiondemon" });
-            await db.SaveChangesAsync();
-            return;
         }
 
-        if (string.IsNullOrWhiteSpace(title.Value) || string.Equals(title.Value, "Fashiondemon", StringComparison.Ordinal))
+        if (title is not null && (string.IsNullOrWhiteSpace(title.Value) || string.Equals(title.Value, "Fashiondemon", StringComparison.Ordinal)))
         {
             title.Value = "fashiondemon";
-            await db.SaveChangesAsync();
         }
+
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_categories_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_sizes_enabled", "true");
+
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task EnsureAppSettingExistsAsync(StoreDbContext db, string key, string value)
+    {
+        var row = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+        if (row is not null)
+            return;
+
+        db.AppSettings.Add(new AppSetting { Key = key, Value = value });
     }
 
     private async Task EnsureLegacyTelegramBotMigratedAsync(StoreDbContext db)

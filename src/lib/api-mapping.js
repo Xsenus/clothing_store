@@ -168,6 +168,14 @@ const sortProducts = (products, sortBy) => {
     sorted.sort((a, b) => (b.likesCount || 0) - (a.likesCount || 0));
   } else if (sortBy === "new") {
     sorted.sort((a, b) => (b._creationTime || 0) - (a._creationTime || 0));
+  } else if (sortBy === "sale") {
+    const getDiscount = (item) => {
+      const basePrice = Number(item.basePrice ?? item.oldPrice ?? item.price ?? 0);
+      const currentPrice = Number(item.discountedPrice ?? item.price ?? 0);
+      if (!Number.isFinite(basePrice) || basePrice <= 0 || !Number.isFinite(currentPrice)) return 0;
+      return Math.max(basePrice - currentPrice, 0);
+    };
+    sorted.sort((a, b) => getDiscount(b) - getDiscount(a));
   }
   return sorted;
 };
@@ -197,6 +205,8 @@ export const FLOW = {
   getPopularProducts: async () => normalizeProducts(await request("/products/popular")),
 
   getAllProducts: async () => normalizeProducts(await request("/products")),
+
+  getCatalogFilters: async () => request("/products/filters"),
 
   catalogFilter: async ({ input } = {}) => {
     const products = normalizeProducts(await request("/products"));

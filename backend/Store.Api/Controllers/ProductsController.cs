@@ -54,6 +54,87 @@ public class ProductsController : ControllerBase
     [HttpGet("popular")]
     public async Task<IResult> ListPopular() => Results.Json((await _db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
+    [HttpGet("filters")]
+    public async Task<IResult> GetCatalogFilters()
+    {
+        var usedCategoryNames = await _db.Products
+            .Where(p => p.Category != null && p.Category != string.Empty)
+            .Select(p => p.Category!)
+            .Distinct()
+            .ToListAsync();
+        var usedCategories = usedCategoryNames
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var usedSizes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var productDataList = await _db.Products
+            .Select(p => p.Data)
+            .ToListAsync();
+        foreach (var data in productDataList)
+        {
+            try
+            {
+                var json = JsonNode.Parse(data)?.AsObject();
+                var sizes = json?["sizes"] as JsonArray;
+                if (sizes is null) continue;
+                foreach (var size in sizes)
+                {
+                    var name = size?.ToString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        usedSizes.Add(name);
+                }
+            }
+            catch
+            {
+                // ignore invalid legacy payload and continue
+            }
+        }
+
+        var sizeMap = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
+        var stockSizes = await _db.ProductSizeStocks
+            .Select(x => x.SizeId)
+            .Distinct()
+            .ToListAsync();
+        foreach (var sizeId in stockSizes)
+        {
+            var sizeName = sizeMap.GetValueOrDefault(sizeId)?.Trim();
+            if (!string.IsNullOrWhiteSpace(sizeName))
+                usedSizes.Add(sizeName!);
+        }
+
+        var categoryDictionaryItems = await _db.CategoryDictionaries
+            .Where(x => x.IsActive)
+            .ToListAsync();
+        var categories = categoryDictionaryItems
+            .Where(x => usedCategories.Contains(x.Name))
+            .OrderBy(x => ResolveCategoryLabel(x.Name, x.Description))
+            .Select(x => new { value = x.Name, label = ResolveCategoryLabel(x.Name, x.Description) })
+            .ToList();
+
+        var sizesList = await _db.SizeDictionaries
+            .Where(x => x.IsActive && usedSizes.Contains(x.Name))
+            .OrderBy(x => x.Name)
+            .Select(x => x.Name)
+            .ToListAsync();
+
+        var settingsRows = await _db.AppSettings
+            .Where(x => x.Key == "catalog_filter_categories_enabled" || x.Key == "catalog_filter_sizes_enabled")
+            .ToListAsync();
+        var settings = settingsRows.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+
+        return Results.Ok(new
+        {
+            categories,
+            sizes = sizesList,
+            visibility = new
+            {
+                categories = ParseBooleanSetting(settings, "catalog_filter_categories_enabled", true),
+                sizes = ParseBooleanSetting(settings, "catalog_filter_sizes_enabled", true)
+            }
+        });
+    }
+
     [HttpGet("category/{category}/new")]
     public async Task<IResult> CategoryNew(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsNew).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
 
@@ -86,6 +167,52 @@ public class ProductsController : ControllerBase
         }
 
         return Results.Json(json);
+    }
+
+    private static bool ParseBooleanSetting(IDictionary<string, string> settings, string key, bool fallback)
+    {
+        if (!settings.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "1" => true,
+            "true" => true,
+            "on" => true,
+            "yes" => true,
+            "0" => false,
+            "false" => false,
+            "off" => false,
+            "no" => false,
+            _ => fallback
+        };
+    }
+
+    private static string ResolveCategoryLabel(string value, string? description)
+    {
+        var customLabel = description?.Trim();
+        if (!string.IsNullOrWhiteSpace(customLabel))
+            return customLabel;
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "outerwear" => "Верхняя одежда",
+            "hoodie" => "Толстовки (худи)",
+            "sweatshirt" => "Кофты",
+            "shirt" => "Рубашки",
+            "t-shirt" => "Футболки",
+            "top" => "Топы",
+            "suit" => "Костюмы",
+            "pants" => "Штаны",
+            "shorts" => "Шорты",
+            "skirt" => "Юбки",
+            "underwear" => "Нижнее бельё",
+            "shoes" => "Обувь",
+            "bags" => "Сумки",
+            "accessories" => "Аксессуары",
+            "mystery-box" => "Мистери боксы",
+            _ => value
+        };
     }
 
     [HttpPost]
