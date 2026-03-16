@@ -650,18 +650,9 @@ namespace Store.Api.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("new_value");
 
-                    b.Property<string>("OrderId")
-                        .HasColumnType("text")
-                        .HasColumnName("order_id");
-
                     b.Property<int>("OldValue")
                         .HasColumnType("integer")
                         .HasColumnName("old_value");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("reason");
 
                     b.Property<string>("ProductId")
                         .IsRequired()
