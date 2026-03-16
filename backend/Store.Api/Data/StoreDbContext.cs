@@ -82,9 +82,13 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
         modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<MaterialDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<MaterialDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<ColorDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<ColorDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CategoryDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<CategoryDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<ProductSizeStock>().HasIndex(x => new { x.ProductId, x.SizeId }).IsUnique();
         modelBuilder.Entity<StockChangeHistory>().HasIndex(x => x.ChangedAt);
         modelBuilder.Entity<PriceChangeHistory>().HasIndex(x => x.ChangedAt);

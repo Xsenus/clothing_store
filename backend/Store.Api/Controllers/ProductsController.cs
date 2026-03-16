@@ -58,69 +58,37 @@ public class ProductsController : ControllerBase
     [HttpGet("filters")]
     public async Task<IResult> GetCatalogFilters()
     {
-        var usedCategoryNames = await _db.Products
-            .Where(p => p.Category != null && p.Category != string.Empty)
-            .Select(p => p.Category!)
-            .Distinct()
-            .ToListAsync();
-        var usedCategories = usedCategoryNames
-            .Select(x => x.Trim())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var usedSizes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var productDataList = await _db.Products
-            .Select(p => p.Data)
-            .ToListAsync();
-        foreach (var data in productDataList)
-        {
-            try
-            {
-                var json = JsonNode.Parse(data)?.AsObject();
-                var sizes = json?["sizes"] as JsonArray;
-                if (sizes is null) continue;
-                foreach (var size in sizes)
-                {
-                    var name = size?.ToString()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(name))
-                        usedSizes.Add(name);
-                }
-            }
-            catch
-            {
-                // ignore invalid legacy payload and continue
-            }
-        }
-
-        var sizeMap = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
-        var stockSizes = await _db.ProductSizeStocks
-            .Select(x => x.SizeId)
-            .Distinct()
-            .ToListAsync();
-        foreach (var sizeId in stockSizes)
-        {
-            var sizeName = sizeMap.GetValueOrDefault(sizeId)?.Trim();
-            if (!string.IsNullOrWhiteSpace(sizeName))
-                usedSizes.Add(sizeName!);
-        }
-
         var categoryDictionaryItems = await _db.CategoryDictionaries
             .Where(x => x.IsActive)
             .ToListAsync();
         var categories = categoryDictionaryItems
-            .Where(x => usedCategories.Contains(x.Name))
-            .OrderBy(x => ResolveCategoryLabel(x.Name, x.Description))
-            .Select(x => new { value = x.Name, label = ResolveCategoryLabel(x.Name, x.Description) })
+            .OrderBy(x => x.Name)
+            .Select(x => new { value = x.Slug, label = x.Name })
             .ToList();
 
         var sizesList = await _db.SizeDictionaries
-            .Where(x => x.IsActive && usedSizes.Contains(x.Name))
+            .Where(x => x.IsActive)
             .OrderBy(x => x.Name)
             .Select(x => x.Name)
             .ToListAsync();
 
+        var materials = await _db.MaterialDictionaries
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new { value = x.Slug, label = x.Name })
+            .ToListAsync();
+
+        var colors = await _db.ColorDictionaries
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new { value = x.Slug, label = x.Name, color = x.Color })
+            .ToListAsync();
+
         var settingsRows = await _db.AppSettings
-            .Where(x => x.Key == "catalog_filter_categories_enabled" || x.Key == "catalog_filter_sizes_enabled")
+            .Where(x => x.Key == "catalog_filter_categories_enabled"
+                     || x.Key == "catalog_filter_sizes_enabled"
+                     || x.Key == "catalog_filter_materials_enabled"
+                     || x.Key == "catalog_filter_colors_enabled")
             .ToListAsync();
         var settings = settingsRows.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
 
@@ -128,10 +96,14 @@ public class ProductsController : ControllerBase
         {
             categories,
             sizes = sizesList,
+            materials,
+            colors,
             visibility = new
             {
                 categories = ParseBooleanSetting(settings, "catalog_filter_categories_enabled", true),
-                sizes = ParseBooleanSetting(settings, "catalog_filter_sizes_enabled", true)
+                sizes = ParseBooleanSetting(settings, "catalog_filter_sizes_enabled", true),
+                materials = ParseBooleanSetting(settings, "catalog_filter_materials_enabled", true),
+                colors = ParseBooleanSetting(settings, "catalog_filter_colors_enabled", true)
             }
         });
     }
@@ -186,33 +158,6 @@ public class ProductsController : ControllerBase
             "off" => false,
             "no" => false,
             _ => fallback
-        };
-    }
-
-    private static string ResolveCategoryLabel(string value, string? description)
-    {
-        var customLabel = description?.Trim();
-        if (!string.IsNullOrWhiteSpace(customLabel))
-            return customLabel;
-
-        return value.Trim().ToLowerInvariant() switch
-        {
-            "outerwear" => "Верхняя одежда",
-            "hoodie" => "Толстовки (худи)",
-            "sweatshirt" => "Кофты",
-            "shirt" => "Рубашки",
-            "t-shirt" => "Футболки",
-            "top" => "Топы",
-            "suit" => "Костюмы",
-            "pants" => "Штаны",
-            "shorts" => "Шорты",
-            "skirt" => "Юбки",
-            "underwear" => "Нижнее бельё",
-            "shoes" => "Обувь",
-            "bags" => "Сумки",
-            "accessories" => "Аксессуары",
-            "mystery-box" => "Мистери боксы",
-            _ => value
         };
     }
 
@@ -432,7 +377,7 @@ public class ProductsController : ControllerBase
         }
 
         var requiredSizeIds = requested.Keys
-            .Select(name => dictionaries[name.ToLowerInvariant()].Id)
+            .Select(name => dictionaries[NormalizeLookupValue(name)].Id)
             .ToHashSet();
         var toDelete = existing.Where(x => !requiredSizeIds.Contains(x.SizeId)).ToList();
         if (toDelete.Count > 0)
@@ -450,26 +395,47 @@ public class ProductsController : ControllerBase
         if (dictionaries.TryGetValue(normalized, out var existingDictionary))
             return existingDictionary;
 
+        var baseSlug = BuildSizeSlug(sizeName);
+        var slug = baseSlug;
+        var suffix = 2;
         var dictionary = new SizeDictionary
         {
             Name = sizeName,
+            Slug = slug,
+            ShowInCatalogFilter = true,
             CreatedAt = createdAt
         };
 
-        _db.SizeDictionaries.Add(dictionary);
-
-        try
+        while (true)
         {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex) when (IsUniqueSizeNameViolation(ex))
-        {
-            _db.Entry(dictionary).State = EntityState.Detached;
-            dictionary = await _db.SizeDictionaries.FirstAsync(x => x.Name.Trim().ToLower() == normalized);
-        }
+            _db.SizeDictionaries.Add(dictionary);
 
-        dictionaries[normalized] = dictionary;
-        return dictionary;
+            try
+            {
+                await _db.SaveChangesAsync();
+                dictionaries[normalized] = dictionary;
+                return dictionary;
+            }
+            catch (DbUpdateException ex) when (IsUniqueSizeNameViolation(ex))
+            {
+                _db.Entry(dictionary).State = EntityState.Detached;
+                dictionary = await _db.SizeDictionaries.FirstAsync(x => x.Name.Trim().ToLower() == normalized);
+                dictionaries[normalized] = dictionary;
+                return dictionary;
+            }
+            catch (DbUpdateException ex) when (IsUniqueSizeSlugViolation(ex))
+            {
+                _db.Entry(dictionary).State = EntityState.Detached;
+                slug = $"{baseSlug}-{suffix++}";
+                dictionary = new SizeDictionary
+                {
+                    Name = sizeName,
+                    Slug = slug,
+                    ShowInCatalogFilter = true,
+                    CreatedAt = createdAt
+                };
+            }
+        }
     }
 
     private static bool IsUniqueSizeNameViolation(DbUpdateException ex)
@@ -479,8 +445,28 @@ public class ProductsController : ControllerBase
             ConstraintName: "IX_size_dictionaries_name"
         };
 
+    private static bool IsUniqueSizeSlugViolation(DbUpdateException ex)
+        => ex.InnerException is PostgresException
+        {
+            SqlState: "23505",
+            ConstraintName: "IX_size_dictionaries_slug"
+        };
+
     private static string NormalizeLookupValue(string value)
         => value.Trim().ToLowerInvariant();
+
+    private static string BuildSizeSlug(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "size";
+
+        var chars = value.Trim().ToLowerInvariant().Select(ch =>
+            (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ? ch : '-').ToArray();
+        var slug = string.Join(string.Empty, chars).Trim('-');
+        while (slug.Contains("--"))
+            slug = slug.Replace("--", "-");
+        return string.IsNullOrWhiteSpace(slug) ? "size" : slug;
+    }
 
     private async Task SavePriceHistoryAsync(string productId, JsonObject before, JsonObject after, string changedByUserId)
     {

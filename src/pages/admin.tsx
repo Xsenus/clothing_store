@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { setCachedPublicSettings } from '@/lib/site-settings';
+import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle, Search, ShieldAlert, ShieldX, UserCog } from 'lucide-react';
@@ -396,15 +396,19 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_bot_token: "",
   catalog_filter_categories_enabled: "true",
   catalog_filter_sizes_enabled: "true",
+  catalog_filter_materials_enabled: "true",
+  catalog_filter_colors_enabled: "true",
   dadata_api_key: "",
   yandex_delivery_base_cost: "350",
   yandex_delivery_cost_per_kg: "40",
   yandex_delivery_markup_percent: "0"
 };
 
-const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = {
+const DICTIONARY_FILTER_SETTING_KEYS: Record<DictionaryKind, string> = {
   categories: "catalog_filter_categories_enabled",
-  sizes: "catalog_filter_sizes_enabled"
+  sizes: "catalog_filter_sizes_enabled",
+  materials: "catalog_filter_materials_enabled",
+  colors: "catalog_filter_colors_enabled"
 };
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
@@ -425,7 +429,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
-  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; color: string; description: string; isActive: boolean }>>({});
+  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; slug: string; color: string; description: string; isActive: boolean; showInCatalogFilter: boolean }>>({});
   const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>("sizes");
   const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
   const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
@@ -673,23 +677,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const updateDictionaryFilterVisibility = (kind: DictionaryKind, enabled: boolean) => {
+  const updateDictionaryFilterVisibility = async (kind: DictionaryKind, enabled: boolean) => {
     const key = DICTIONARY_FILTER_SETTING_KEYS[kind];
     if (!key) return;
-    updateSetting(key, enabled ? "true" : "false");
+    const nextValue = enabled ? "true" : "false";
+    const previousValue = settings[key] ?? DEFAULT_APP_SETTINGS[key];
+
+    updateSetting(key, nextValue);
+
+    try {
+      await FLOW.adminSaveSettings({ input: { [key]: nextValue } });
+      setCachedPublicSettings({ ...getCachedPublicSettings(), [key]: nextValue });
+    } catch (error) {
+      updateSetting(key, previousValue);
+      toast.error("Не удалось сохранить настройку фильтра каталога");
+    }
   };
 
   const createDictionaryItem = async (kind: DictionaryKind) => {
-    const name = window.prompt("Введите значение словаря");
+    const name = window.prompt("Введите отображаемое название (например, Хлопок)");
     if (!name) return;
+    const slug = window.prompt("Введите slug на английском (например, cotton)");
+    if (!slug) return;
     try {
-      await FLOW.adminCreateDictionaryItem({ input: { kind, name, isActive: true } });
+      await FLOW.adminCreateDictionaryItem({ input: { kind, name, slug, isActive: true, showInCatalogFilter: true } });
       await fetchAdminData();
       toast.success("Элемент словаря добавлен");
       if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
-      if (kind === "materials") setFormData((prev) => ({ ...prev, material: name }));
-      if (kind === "colors") setFormData((prev) => ({ ...prev, color: name }));
-      if (kind === "categories") setFormData((prev) => ({ ...prev, category: name }));
+      if (kind === "materials") setFormData((prev) => ({ ...prev, material: slug }));
+      if (kind === "colors") setFormData((prev) => ({ ...prev, color: slug }));
+      if (kind === "categories") setFormData((prev) => ({ ...prev, category: slug }));
     } catch (error) {
       toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
     }
@@ -697,9 +714,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const getDictionaryDraftDefaults = (item: any) => ({
     name: item.name || "",
+    slug: item.slug || "",
     color: item.color || getDictionaryDotColor(item.name || ""),
     description: item.description || "",
-    isActive: item.isActive ?? true
+    isActive: item.isActive ?? true,
+    showInCatalogFilter: item.showInCatalogFilter ?? true
   });
 
   const startEditDictionaryItem = (item: any) => {
@@ -753,8 +772,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const updateDictionaryItem = async (kind: DictionaryKind, item: any) => {
     const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
     const nextName = (draft.name ?? item.name ?? "").trim();
+    const nextSlug = (draft.slug ?? item.slug ?? "").trim().toLowerCase();
     if (!nextName) {
       toast.error("Название обязательно");
+      return;
+    }
+    if (!nextSlug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(nextSlug)) {
+      toast.error("Slug обязателен и должен быть на латинице");
       return;
     }
     try {
@@ -763,9 +787,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           kind,
           id: item.id,
           name: nextName,
+          slug: nextSlug,
           color: draft.color,
           description: draft.description,
-          isActive: draft.isActive
+          isActive: draft.isActive,
+          showInCatalogFilter: draft.showInCatalogFilter
         }
       });
       await fetchAdminData();
@@ -2445,13 +2471,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
                             <div className="space-y-3">
-                              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.85fr)_auto] xl:items-end">
+                              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.85fr)_auto] xl:items-end">
                                 <div className="space-y-1">
                                   <Label className="mb-1 block text-xs">Название *</Label>
                                   <Input
                                     value={draft.name}
                                     onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, name: e.target.value } }))}
                                     className="rounded-md border-slate-300"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="mb-1 block text-xs">Slug *</Label>
+                                  <Input
+                                    value={draft.slug}
+                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, slug: e.target.value.toLowerCase() } }))}
+                                    className="rounded-md border-slate-300"
+                                    placeholder="latin-slug"
                                   />
                                 </div>
                                 <div className="space-y-1">
@@ -2472,13 +2507,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
-                                  <div className="mr-2 flex items-center gap-2">
-                                    <Checkbox
-                                      id={`dict-active-${item.id}`}
-                                      checked={draft.isActive}
-                                      onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
-                                    />
-                                    <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
+                                  <div className="mr-2 flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                      <Checkbox
+                                        id={`dict-active-${item.id}`}
+                                        checked={draft.isActive}
+                                        onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
+                                      />
+                                      <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
+                                    </div>
                                   </div>
                                   <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
                                     <X className="mr-2 h-4 w-4" /> Сброс
@@ -2505,6 +2542,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="flex items-center gap-2 font-semibold">
                                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                                   {item.name}
+                                  <span className="text-xs text-slate-500">({item.slug})</span>
                                   <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${item.isActive === false ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
                                     {item.isActive === false ? "неактивно" : "активно"}
                                   </span>
@@ -3365,7 +3403,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="flex gap-2">
                       <select id="prod-cat" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="h-10 flex-1 border border-black px-3">
                         <option value="">Выберите категорию</option>
-                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                        {(dictionaries.categories || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
                       </select>
                       <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
                     </div>
@@ -3506,7 +3544,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="flex gap-2">
                       <select id="prod-material" value={formData.material} onChange={(e) => setFormData({...formData, material: e.target.value})} className="h-10 flex-1 border border-black px-3">
                         <option value="">Выберите материал</option>
-                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                        {(dictionaries.materials || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
                       </select>
                       <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
                     </div>
@@ -3549,7 +3587,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="flex gap-2">
                       <select id="prod-color" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="h-10 flex-1 border border-black px-3">
                         <option value="">Выберите цвет</option>
-                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                        {(dictionaries.colors || []).map((item: any) => <option key={item.id} value={item.slug}>{item.name}</option>)}
                       </select>
                       <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
                     </div>
