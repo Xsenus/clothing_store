@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Store.Api.Migrations
 {
     /// <inheritdoc />
-    [Migration("20260316092143_AddDictionarySlugsAndCatalogFilter")]
     public partial class AddDictionarySlugsAndCatalogFilter : Migration
     {
         /// <inheritdoc />

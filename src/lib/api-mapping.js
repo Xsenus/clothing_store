@@ -217,11 +217,19 @@ export const FLOW = {
 
   getSimilarProducts: async ({ input }) => {
     const products = normalizeProducts(await request("/products"));
-    return products.filter((p) => {
-      const categories = Array.isArray(p.categories) && p.categories.length > 0
-        ? p.categories
-        : (p.category ? [p.category] : []);
-      return categories.includes(input.category) && p._id !== input.productId;
+    const targetCategory = String(input.category || "").trim().toLowerCase();
+    if (!targetCategory) {
+      return [];
+    }
+
+    return products.filter((product) => {
+      if (product._id === input.productId) return false;
+
+      const categories = Array.isArray(product.categories) && product.categories.length > 0
+        ? product.categories
+        : (product.category ? [product.category] : []);
+
+      return categories.some((category) => String(category || "").trim().toLowerCase() === targetCategory);
     }).slice(0, 4);
   },
 
@@ -236,7 +244,7 @@ export const FLOW = {
   createOrder: async ({ input }) => request("/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items: input.items, totalAmount: input.totalAmount, status: "processing" }),
+    body: JSON.stringify(input),
   }),
 
   getUserLikes: async () => request("/likes"),
@@ -505,12 +513,27 @@ export const FLOW = {
 
   adminGetOrders: async () => request("/admin/orders"),
 
+  adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input.payload),
+  }),
+
   adminGetUsers: async () => request("/admin/users"),
 
   adminUpdateUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isAdmin: input.isAdmin, isBlocked: input.isBlocked }),
+    body: JSON.stringify({
+      isAdmin: input.isAdmin,
+      isBlocked: input.isBlocked,
+      email: input.email,
+      name: input.name,
+      phone: input.phone,
+      nickname: input.nickname,
+      shippingAddress: input.shippingAddress,
+      password: input.password,
+    }),
   }),
 
   adminDeleteUser: async ({ input }) => request(`/admin/users/${input.userId}`, {
@@ -564,7 +587,14 @@ export const FLOW = {
   adminCreateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name }),
+    body: JSON.stringify({
+      name: input.name,
+      slug: input.slug,
+      color: input.color,
+      description: input.description,
+      isActive: input.isActive,
+      showInCatalogFilter: input.showInCatalogFilter,
+    }),
   }),
 
   adminDeleteDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
@@ -574,7 +604,14 @@ export const FLOW = {
   adminUpdateDictionaryItem: async ({ input }) => request(`/admin/dictionaries/${input.kind}/${input.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name, color: input.color, description: input.description, isActive: input.isActive }),
+    body: JSON.stringify({
+      name: input.name,
+      slug: input.slug,
+      color: input.color,
+      description: input.description,
+      isActive: input.isActive,
+      showInCatalogFilter: input.showInCatalogFilter,
+    }),
   }),
 
   adminGetStockHistory: async () => request("/admin/history/stocks"),

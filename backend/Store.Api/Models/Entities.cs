@@ -792,9 +792,33 @@ public class Order
     [Column("status")]
     public string Status { get; set; } = "processing";
 
+    [Column("payment_method")]
+    public string PaymentMethod { get; set; } = "cod";
+
+    [Column("purchase_channel")]
+    public string PurchaseChannel { get; set; } = "web";
+
+    [Column("shipping_address")]
+    public string ShippingAddress { get; set; } = string.Empty;
+
+    [Column("customer_name")]
+    public string CustomerName { get; set; } = string.Empty;
+
+    [Column("customer_email")]
+    public string CustomerEmail { get; set; } = string.Empty;
+
+    [Column("customer_phone")]
+    public string CustomerPhone { get; set; } = string.Empty;
+
+    [Column("status_history_json", TypeName = "jsonb")]
+    public string StatusHistoryJson { get; set; } = "[]";
+
     /// <summary>
     /// Получает или задаёт время создания в миллисекундах Unix.
     /// </summary>
     [Column("created_at")]
     public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
 }
