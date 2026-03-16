@@ -510,6 +510,9 @@ public class SizeDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("slug")]
+    public string Slug { get; set; } = string.Empty;
+
     [Column("description")]
     public string? Description { get; set; }
 
@@ -518,6 +521,9 @@ public class SizeDictionary
 
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
+
+    [Column("show_in_catalog_filter")]
+    public bool ShowInCatalogFilter { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }
@@ -533,6 +539,9 @@ public class MaterialDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("slug")]
+    public string Slug { get; set; } = string.Empty;
+
     [Column("description")]
     public string? Description { get; set; }
 
@@ -541,6 +550,9 @@ public class MaterialDictionary
 
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
+
+    [Column("show_in_catalog_filter")]
+    public bool ShowInCatalogFilter { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }
@@ -556,6 +568,9 @@ public class ColorDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("slug")]
+    public string Slug { get; set; } = string.Empty;
+
     [Column("description")]
     public string? Description { get; set; }
 
@@ -564,6 +579,9 @@ public class ColorDictionary
 
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
+
+    [Column("show_in_catalog_filter")]
+    public bool ShowInCatalogFilter { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }
@@ -579,6 +597,9 @@ public class CategoryDictionary
     [Column("name")]
     public string Name { get; set; } = string.Empty;
 
+    [Column("slug")]
+    public string Slug { get; set; } = string.Empty;
+
     [Column("description")]
     public string? Description { get; set; }
 
@@ -587,6 +608,9 @@ public class CategoryDictionary
 
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
+
+    [Column("show_in_catalog_filter")]
+    public bool ShowInCatalogFilter { get; set; } = true;
 
     [Column("created_at")]
     public long CreatedAt { get; set; }

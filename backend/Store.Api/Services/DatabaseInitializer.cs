@@ -174,20 +174,53 @@ public class DatabaseInitializer
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        var defaultSizes = new[] { "XS", "S", "M", "L", "XL", "XXL" };
-        var defaultMaterials = new[] { "Хлопок", "Полиэстер", "Футер", "Деним" };
-        var defaultColors = new[] { "Черный", "Белый", "Серый", "Бежевый" };
+        var defaultSizes = new[]
+        {
+            (Name: "XS", Slug: "xs"),
+            (Name: "S", Slug: "s"),
+            (Name: "M", Slug: "m"),
+            (Name: "L", Slug: "l"),
+            (Name: "XL", Slug: "xl"),
+            (Name: "XXL", Slug: "xxl")
+        };
+        var defaultMaterials = new[]
+        {
+            (Name: "Хлопок", Slug: "cotton"),
+            (Name: "Полиэстер", Slug: "polyester"),
+            (Name: "Футер", Slug: "french-terry"),
+            (Name: "Деним", Slug: "denim")
+        };
+        var defaultColors = new[]
+        {
+            (Name: "Черный", Slug: "black"),
+            (Name: "Белый", Slug: "white"),
+            (Name: "Серый", Slug: "gray"),
+            (Name: "Бежевый", Slug: "beige")
+        };
         var defaultCategories = new[]
         {
-            "outerwear", "hoodie", "sweatshirt", "shirt", "t-shirt", "top",
-            "suit", "pants", "shorts", "skirt", "underwear", "shoes", "bags", "accessories", "mystery-box"
+            (Name: "Верхняя одежда", Slug: "outerwear"),
+            (Name: "Толстовки (худи)", Slug: "hoodie"),
+            (Name: "Кофты", Slug: "sweatshirt"),
+            (Name: "Рубашки", Slug: "shirt"),
+            (Name: "Футболки", Slug: "t-shirt"),
+            (Name: "Топы", Slug: "top"),
+            (Name: "Костюмы", Slug: "suit"),
+            (Name: "Штаны", Slug: "pants"),
+            (Name: "Шорты", Slug: "shorts"),
+            (Name: "Юбки", Slug: "skirt"),
+            (Name: "Нижнее бельё", Slug: "underwear"),
+            (Name: "Обувь", Slug: "shoes"),
+            (Name: "Сумки", Slug: "bags"),
+            (Name: "Аксессуары", Slug: "accessories"),
+            (Name: "Мистери боксы", Slug: "mystery-box")
         };
 
         await SeedDictionaryAsync(db.SizeDictionaries, defaultSizes, now);
         await SeedDictionaryAsync(db.MaterialDictionaries, defaultMaterials, now);
         await SeedDictionaryAsync(db.ColorDictionaries, defaultColors, now);
         await SeedDictionaryAsync(db.CategoryDictionaries, defaultCategories, now);
-        await EnsureCategoryRussianDescriptionsAsync(db);
+        await BackfillDictionarySlugsAsync(db);
         await SeedCategoriesFromProductsAsync(db, now);
         await SeedSizesFromProductsAsync(db, now);
 
@@ -218,7 +251,9 @@ public class DatabaseInitializer
             db.CategoryDictionaries.Add(new CategoryDictionary
             {
                 Name = category.Trim(),
+                Slug = Slugify(category.Trim()),
                 IsActive = true,
+                ShowInCatalogFilter = true,
                 CreatedAt = createdAt
             });
             normalizedExisting.Add(normalized);
@@ -266,7 +301,9 @@ public class DatabaseInitializer
                 db.SizeDictionaries.Add(new SizeDictionary
                 {
                     Name = sizeName,
+                    Slug = Slugify(sizeName),
                     IsActive = true,
+                    ShowInCatalogFilter = true,
                     CreatedAt = createdAt
                 });
                 normalizedExisting.Add(normalized);
@@ -274,7 +311,69 @@ public class DatabaseInitializer
         }
     }
 
-    private static async Task EnsureCategoryRussianDescriptionsAsync(StoreDbContext db)
+    private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<(string Name, string Slug)> values, long createdAt) where T : class
+    {
+        var existing = await set.AsQueryable().ToListAsync();
+        var normalizedNames = existing.Select(x => (EF.Property<string>(x, "Name") ?? string.Empty).Trim().ToLowerInvariant()).ToHashSet();
+        var normalizedSlugs = existing.Select(x => (EF.Property<string>(x, "Slug") ?? string.Empty).Trim().ToLowerInvariant()).ToHashSet();
+        foreach (var (dictionaryName, dictionarySlug) in values)
+        {
+            var name = dictionaryName.Trim();
+            var slug = dictionarySlug.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(slug))
+                continue;
+            if (normalizedNames.Contains(name.ToLowerInvariant()) || normalizedSlugs.Contains(slug))
+                continue;
+
+            var item = Activator.CreateInstance<T>();
+            if (item is null)
+                continue;
+
+            typeof(T).GetProperty("Name")?.SetValue(item, name);
+            typeof(T).GetProperty("Slug")?.SetValue(item, slug);
+            typeof(T).GetProperty("ShowInCatalogFilter")?.SetValue(item, true);
+            typeof(T).GetProperty("CreatedAt")?.SetValue(item, createdAt);
+            set.Add(item);
+            normalizedNames.Add(name.ToLowerInvariant());
+            normalizedSlugs.Add(slug);
+        }
+    }
+
+    private static async Task BackfillDictionarySlugsAsync(StoreDbContext db)
+    {
+        await BackfillDictionarySlugsAsync(db.SizeDictionaries);
+        await BackfillDictionarySlugsAsync(db.MaterialDictionaries);
+        await BackfillDictionarySlugsAsync(db.ColorDictionaries);
+        await BackfillCategorySlugsAsync(db.CategoryDictionaries);
+    }
+
+    private static async Task BackfillDictionarySlugsAsync<T>(DbSet<T> set) where T : class
+    {
+        var rows = await set.ToListAsync();
+        var used = rows.Select(x => (EF.Property<string>(x, "Slug") ?? string.Empty).Trim().ToLowerInvariant()).Where(x => !string.IsNullOrWhiteSpace(x)).ToHashSet();
+        foreach (var row in rows)
+        {
+            var name = (EF.Property<string>(row, "Name") ?? string.Empty).Trim();
+            var slug = (EF.Property<string>(row, "Slug") ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(slug))
+            {
+                var candidate = Slugify(name);
+                var idx = 2;
+                var unique = candidate;
+                while (used.Contains(unique))
+                {
+                    unique = $"{candidate}-{idx++}";
+                }
+
+                slug = unique;
+                typeof(T).GetProperty("Slug")?.SetValue(row, slug);
+                used.Add(slug);
+            }
+
+        }
+    }
+
+    private static async Task BackfillCategorySlugsAsync(DbSet<CategoryDictionary> set)
     {
         var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -295,39 +394,46 @@ public class DatabaseInitializer
             ["mystery-box"] = "Мистери боксы"
         };
 
-        var categories = await db.CategoryDictionaries.ToListAsync();
-        foreach (var category in categories)
+        var rows = await set.ToListAsync();
+        var used = rows.Select(x => (x.Slug ?? string.Empty).Trim().ToLowerInvariant()).Where(x => !string.IsNullOrWhiteSpace(x)).ToHashSet();
+        foreach (var row in rows)
         {
-            if (!labels.TryGetValue(category.Name, out var label))
-                continue;
+            var currentName = row.Name?.Trim() ?? string.Empty;
+            var currentSlug = row.Slug?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(currentSlug))
+            {
+                var fromName = currentName.ToLowerInvariant();
+                if (labels.ContainsKey(fromName))
+                    currentSlug = fromName;
+                else
+                    currentSlug = Slugify(currentName);
 
-            if (!string.IsNullOrWhiteSpace(category.Description))
-                continue;
+                var unique = currentSlug;
+                var idx = 2;
+                while (used.Contains(unique))
+                    unique = $"{currentSlug}-{idx++}";
+                currentSlug = unique;
+                row.Slug = currentSlug;
+                used.Add(currentSlug);
+            }
 
-            category.Description = label;
+            if (labels.TryGetValue(currentSlug, out var display))
+                row.Name = display;
+
         }
     }
 
-    private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
+    private static string Slugify(string value)
     {
-        var existing = await set.AsQueryable().Select(x => EF.Property<string>(x, "Name")).ToListAsync();
-        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
-        foreach (var value in values)
-        {
-            var name = value.Trim();
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-            if (normalized.Contains(name.ToLowerInvariant()))
-                continue;
+        if (string.IsNullOrWhiteSpace(value))
+            return "item";
 
-            var item = Activator.CreateInstance<T>();
-            if (item is null)
-                continue;
-
-            typeof(T).GetProperty("Name")?.SetValue(item, name);
-            typeof(T).GetProperty("CreatedAt")?.SetValue(item, createdAt);
-            set.Add(item);
-        }
+        var chars = value.Trim().ToLowerInvariant().Select(ch =>
+            (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ? ch : '-').ToArray();
+        var slug = string.Join(string.Empty, chars).Trim('-');
+        while (slug.Contains("--"))
+            slug = slug.Replace("--", "-");
+        return string.IsNullOrWhiteSpace(slug) ? "item" : slug;
     }
     private async Task EnsureAdminUserAsync(StoreDbContext db)
     {
