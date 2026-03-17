@@ -386,6 +386,30 @@ interface StockHistoryEntry {
   orderId?: string | null;
 }
 
+const createEmptyProductForm = () => ({
+  name: "",
+  slug: "",
+  description: "",
+  basePrice: "",
+  discountPercent: "0",
+  discountedPrice: "",
+  categories: [] as string[],
+  images: "",
+  videos: "",
+  media: [{ type: "image" as const, url: "" }],
+  sizes: [] as string[],
+  isNew: false,
+  isPopular: false,
+  sku: "",
+  materials: [] as string[],
+  printType: "",
+  fit: "",
+  gender: "",
+  colors: [] as string[],
+  shipping: "",
+  sizeStock: {} as Record<string, number>
+});
+
 const normalizeDictionaryValues = (values?: string[] | null, fallback?: string | null) => {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -524,33 +548,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     ? location.pathname.match(/^\/admin\/products\/([^/]+)\/edit$/)
     : null;
   const routeEditingProductId = editProductRouteMatch?.[1] || null;
+  const [selectedAdminTab, setSelectedAdminTab] = useState("products");
 
   // Form State
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    slug: "",
-    description: "",
-    basePrice: "",
-    discountPercent: "0",
-    discountedPrice: "",
-    categories: [] as string[],
-    images: "",
-    videos: "",
-    media: [] as { type: "image" | "video"; url: string }[],
-    sizes: [] as string[],
-    isNew: false,
-    isPopular: false,
-    sku: "",
-    materials: [] as string[],
-    printType: "",
-    fit: "",
-    gender: "",
-    colors: [] as string[],
-    shipping: "",
-    sizeStock: {} as Record<string, number>
-  });
+  const [formData, setFormData] = useState(createEmptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
@@ -1464,6 +1467,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return [...images, ...videos];
   };
 
+  const resetProductEditor = () => {
+    setEditingId(null);
+    setEditingProduct(null);
+    setFormData(createEmptyProductForm());
+    setIsOpen(false);
+  };
+
   const openProductForm = (product?: Product) => {
     if (product) {
       setEditingId(product._id);
@@ -1495,35 +1505,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     } else {
       setEditingId(null);
       setEditingProduct(null);
-      setFormData({
-        name: "",
-        slug: "",
-        description: "",
-        basePrice: "",
-        discountPercent: "0",
-        discountedPrice: "",
-        categories: [],
-        images: "",
-        videos: "",
-        media: [{ type: "image", url: "" }],
-        sizes: [],
-        isNew: false,
-        isPopular: false,
-        sku: "",
-        materials: [],
-        printType: "",
-        fit: "",
-        gender: "",
-        colors: [],
-        shipping: "",
-        sizeStock: {}
-      });
+      setFormData(createEmptyProductForm());
     }
     setIsOpen(true);
   };
 
   const closeProductForm = () => {
-    setIsOpen(false);
+    resetProductEditor();
+    if (isStandaloneAdmin && location.pathname !== "/admin") {
+      navigate("/admin");
+    }
+  };
+
+  const handleAdminTabChange = (value: string) => {
+    setSelectedAdminTab(value);
+    if (value === "products") return;
+
+    resetProductEditor();
     if (isStandaloneAdmin && location.pathname !== "/admin") {
       navigate("/admin");
     }
@@ -1545,11 +1543,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!isStandaloneAdmin) return;
 
     if (isCreateProductRoute) {
+      setSelectedAdminTab("products");
       openProductForm();
       return;
     }
 
     if (routeEditingProductId) {
+      setSelectedAdminTab("products");
       const targetProduct = products.find((p) => p._id === routeEditingProductId || (p as any).id === routeEditingProductId);
       if (targetProduct) {
         openProductForm(targetProduct);
@@ -1918,7 +1918,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </div>
           </div>
 
-          <Tabs defaultValue="products" className="w-full">
+          <Tabs value={selectedAdminTab} onValueChange={handleAdminTabChange} className="w-full">
             <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
               <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
@@ -3522,7 +3522,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             </DialogContent>
           </Dialog>
 
-          {isOpen && (
+          {isOpen && selectedAdminTab === "products" && (
           <section className="mt-8 border border-black p-6">
             <div className="mb-6 flex items-center justify-between gap-3">
               <h2 className="text-2xl font-black uppercase tracking-tighter">
