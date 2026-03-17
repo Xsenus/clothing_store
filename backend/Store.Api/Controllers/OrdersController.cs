@@ -126,14 +126,57 @@ public class OrdersController : ControllerBase
                 quantity = item.Quantity
             });
 
+            var resolvedStatus = string.IsNullOrWhiteSpace(payload.Status)
+                ? "processing"
+                : payload.Status.Trim().ToLowerInvariant();
+            var resolvedPaymentMethod = string.IsNullOrWhiteSpace(payload.PaymentMethod)
+                ? "cod"
+                : payload.PaymentMethod.Trim().ToLowerInvariant();
+            var resolvedPurchaseChannel = string.IsNullOrWhiteSpace(payload.PurchaseChannel)
+                ? "web"
+                : payload.PurchaseChannel.Trim().ToLowerInvariant();
+            var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
+            var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
+                ? user.Email
+                : payload.CustomerEmail.Trim();
+            var resolvedCustomerPhone = payload.CustomerPhone?.Trim() ?? string.Empty;
+            var resolvedShippingAddress = payload.ShippingAddress?.Trim() ?? string.Empty;
+            var initialHistory = new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = "created",
+                    ["changedAt"] = now,
+                    ["changedBy"] = user.Email,
+                    ["comment"] = "Заказ создан",
+                    ["fieldChanges"] = BuildInitialOrderFieldChanges(
+                        resolvedStatus,
+                        resolvedPaymentMethod,
+                        resolvedPurchaseChannel,
+                        resolvedCustomerName,
+                        resolvedCustomerEmail,
+                        resolvedCustomerPhone,
+                        resolvedShippingAddress,
+                        payload.TotalAmount)
+                }
+            };
+
             var order = new Order
             {
                 Id = orderId,
                 UserId = user.Id,
                 ItemsJson = JsonSerializer.Serialize(serializedItems),
                 TotalAmount = payload.TotalAmount,
-                Status = payload.Status ?? "processing",
-                CreatedAt = now
+                Status = resolvedStatus,
+                PaymentMethod = resolvedPaymentMethod,
+                PurchaseChannel = resolvedPurchaseChannel,
+                ShippingAddress = resolvedShippingAddress,
+                CustomerName = resolvedCustomerName,
+                CustomerEmail = resolvedCustomerEmail,
+                CustomerPhone = resolvedCustomerPhone,
+                StatusHistoryJson = JsonSerializer.Serialize(initialHistory),
+                CreatedAt = now,
+                UpdatedAt = now
             };
             _db.Orders.Add(order);
 
@@ -153,6 +196,52 @@ public class OrdersController : ControllerBase
         {
             return Results.Conflict(new { detail = "Остатки изменились во время оформления заказа. Обновите корзину и попробуйте снова." });
         }
+    }
+
+    private static List<Dictionary<string, object?>> BuildInitialOrderFieldChanges(
+        string status,
+        string paymentMethod,
+        string purchaseChannel,
+        string customerName,
+        string customerEmail,
+        string customerPhone,
+        string shippingAddress,
+        double totalAmount)
+    {
+        var changes = new List<Dictionary<string, object?>>();
+
+        AddInitialOrderFieldChange(changes, "status", status);
+        AddInitialOrderFieldChange(changes, "paymentMethod", paymentMethod);
+        AddInitialOrderFieldChange(changes, "purchaseChannel", purchaseChannel);
+        AddInitialOrderFieldChange(changes, "customerName", customerName);
+        AddInitialOrderFieldChange(changes, "customerEmail", customerEmail);
+        AddInitialOrderFieldChange(changes, "customerPhone", customerPhone);
+        AddInitialOrderFieldChange(changes, "shippingAddress", shippingAddress);
+        if (totalAmount > 0)
+        {
+            changes.Add(new Dictionary<string, object?>
+            {
+                ["field"] = "totalAmount",
+                ["oldValue"] = null,
+                ["newValue"] = totalAmount
+            });
+        }
+
+        return changes;
+    }
+
+    private static void AddInitialOrderFieldChange(List<Dictionary<string, object?>> changes, string field, string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        changes.Add(new Dictionary<string, object?>
+        {
+            ["field"] = field,
+            ["oldValue"] = null,
+            ["newValue"] = normalized
+        });
     }
 
     private static List<NormalizedOrderItem> NormalizeOrderItems(List<Dictionary<string, object>> items)

@@ -511,12 +511,27 @@ export const FLOW = {
 
   adminMe: async () => request("/admin/me"),
 
-  adminGetOrders: async () => request("/admin/orders"),
+  adminGetOrders: async ({ input } = {}) => {
+    const params = new URLSearchParams();
+    if (input?.page) params.set("page", String(input.page));
+    if (input?.pageSize) params.set("pageSize", String(input.pageSize));
+    if (input?.search) params.set("search", input.search);
+    if (input?.status && input.status !== "all") params.set("status", input.status);
+    if (input?.dateFrom) params.set("dateFrom", input.dateFrom);
+    if (input?.dateTo) params.set("dateTo", input.dateTo);
+    if (input?.userId) params.set("userId", input.userId);
+    const query = params.toString();
+    return request(query ? `/admin/orders?${query}` : "/admin/orders");
+  },
 
   adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input.payload),
+  }),
+
+  adminDeleteOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
+    method: "DELETE",
   }),
 
   adminGetUsers: async () => request("/admin/users"),

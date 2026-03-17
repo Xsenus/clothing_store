@@ -24,10 +24,12 @@ const normalizePhone = (value) => {
 };
 
 const ORDER_STATUS_LABELS = {
+  processing: "В обработке",
   created: "Оформлен",
   paid: "Оплачен",
   in_transit: "В пути",
   delivered: "Доставлен",
+  completed: "Завершен",
   canceled: "Отменен",
   returned: "Возврат",
 };

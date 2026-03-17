@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Net.Mail;
 using System.Text.RegularExpressions;
@@ -23,6 +24,8 @@ public class AdminController : ControllerBase
     private readonly AuthService _auth;
     private readonly AdminDataSeeder _adminDataSeeder;
     private readonly ITelegramBotManager _telegramBotManager;
+
+    private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
@@ -88,29 +91,182 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("orders")]
-    public async Task<IResult> Orders()
+    public async Task<IResult> Orders(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? dateFrom = null,
+        [FromQuery] string? dateTo = null,
+        [FromQuery] string? userId = null)
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-        var users = await _db.Users.ToDictionaryAsync(x => x.Id, x => x.Email);
-        var orders = await _db.Orders.OrderByDescending(x => x.CreatedAt).ToListAsync();
-        return Results.Ok(orders.Select(o => new
+
+        var resolvedPageSize = Math.Clamp(pageSize, 5, 100);
+        IQueryable<Order> query = _db.Orders.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(userId))
         {
-            o.Id,
-            o.UserId,
-            userEmail = users.GetValueOrDefault(o.UserId),
-            o.TotalAmount,
-            o.Status,
-            o.PaymentMethod,
-            o.PurchaseChannel,
-            o.ShippingAddress,
-            o.CustomerName,
-            o.CustomerEmail,
-            o.CustomerPhone,
-            o.StatusHistoryJson,
-            o.CreatedAt,
-            o.UpdatedAt,
-            o.ItemsJson
-        }));
+            var normalizedUserId = userId.Trim();
+            query = query.Where(x => x.UserId == normalizedUserId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status.Trim(), "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedStatus = NormalizeOrderStatus(status);
+            if (normalizedStatus == "canceled")
+            {
+                query = query.Where(x => x.Status.ToLower() == "canceled" || x.Status.ToLower() == "cancelled");
+            }
+            else
+            {
+                query = query.Where(x => x.Status.ToLower() == normalizedStatus);
+            }
+        }
+
+        if (TryParseOrderFilterDate(dateFrom, isEndOfDay: false, out var fromTimestamp))
+        {
+            query = query.Where(x => x.CreatedAt >= fromTimestamp);
+        }
+
+        if (TryParseOrderFilterDate(dateTo, isEndOfDay: true, out var toTimestamp))
+        {
+            query = query.Where(x => x.CreatedAt <= toTimestamp);
+        }
+
+        var trimmedSearch = search?.Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedSearch))
+        {
+            var pattern = $"%{trimmedSearch}%";
+            var matchingUserIds = _db.Users
+                .AsNoTracking()
+                .Where(x => EF.Functions.ILike(x.Email, pattern))
+                .Select(x => x.Id);
+            var matchingProfileUserIds = _db.Profiles
+                .AsNoTracking()
+                .Where(x =>
+                    EF.Functions.ILike(x.Email, pattern) ||
+                    EF.Functions.ILike(x.Name ?? string.Empty, pattern) ||
+                    EF.Functions.ILike(x.Phone ?? string.Empty, pattern) ||
+                    EF.Functions.ILike(x.Nickname ?? string.Empty, pattern) ||
+                    EF.Functions.ILike(x.ShippingAddress ?? string.Empty, pattern))
+                .Select(x => x.UserId);
+
+            query = query.Where(x =>
+                EF.Functions.ILike(x.Id, pattern) ||
+                EF.Functions.ILike(x.UserId, pattern) ||
+                EF.Functions.ILike(x.CustomerName, pattern) ||
+                EF.Functions.ILike(x.CustomerEmail, pattern) ||
+                EF.Functions.ILike(x.CustomerPhone, pattern) ||
+                EF.Functions.ILike(x.ShippingAddress, pattern) ||
+                EF.Functions.ILike(x.Status, pattern) ||
+                EF.Functions.ILike(x.PaymentMethod, pattern) ||
+                EF.Functions.ILike(x.PurchaseChannel, pattern) ||
+                EF.Functions.ILike(x.ItemsJson, pattern) ||
+                matchingUserIds.Contains(x.UserId) ||
+                matchingProfileUserIds.Contains(x.UserId));
+        }
+
+        var totalItems = await query.CountAsync();
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)resolvedPageSize));
+        var resolvedPage = Math.Clamp(page, 1, totalPages);
+
+        var orders = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .Skip((resolvedPage - 1) * resolvedPageSize)
+            .Take(resolvedPageSize)
+            .ToListAsync();
+
+        var userIds = orders.Select(x => x.UserId).Distinct().ToList();
+        var users = userIds.Count == 0
+            ? new Dictionary<string, User>()
+            : await _db.Users.AsNoTracking().Where(x => userIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        var profiles = userIds.Count == 0
+            ? new Dictionary<string, Profile>()
+            : await _db.Profiles.AsNoTracking().Where(x => userIds.Contains(x.UserId)).ToDictionaryAsync(x => x.UserId);
+
+        var normalizedItemsByOrderId = orders.ToDictionary(x => x.Id, x => ParseOrderItems(x.ItemsJson));
+        var productIds = normalizedItemsByOrderId.Values
+            .SelectMany(x => x)
+            .Select(x => x.ProductId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+        var productNames = productIds.Count == 0
+            ? new Dictionary<string, string>()
+            : (await _db.Products
+                .AsNoTracking()
+                .Where(x => productIds.Contains(x.Id))
+                .ToListAsync())
+                .ToDictionary(
+                    x => x.Id,
+                    x =>
+                    {
+                        try
+                        {
+                            using var json = JsonDocument.Parse(x.Data);
+                            if (json.RootElement.TryGetProperty("name", out var nameElement))
+                            {
+                                var name = nameElement.GetString()?.Trim();
+                                if (!string.IsNullOrWhiteSpace(name))
+                                    return name;
+                            }
+                        }
+                        catch (JsonException)
+                        {
+                        }
+
+                        return x.Slug;
+                    });
+
+        return Results.Ok(new
+        {
+            items = orders.Select(o =>
+            {
+                var user = users.GetValueOrDefault(o.UserId);
+                var profile = profiles.GetValueOrDefault(o.UserId);
+                var normalizedItems = normalizedItemsByOrderId.GetValueOrDefault(o.Id) ?? [];
+                return new
+                {
+                    o.Id,
+                    o.UserId,
+                    userEmail = user?.Email,
+                    userProfile = profile is null
+                        ? null
+                        : new
+                        {
+                            profile.Name,
+                            profile.Phone,
+                            profile.Nickname,
+                            profile.ShippingAddress,
+                            profile.PhoneVerified
+                        },
+                    o.TotalAmount,
+                    o.Status,
+                    o.PaymentMethod,
+                    o.PurchaseChannel,
+                    o.ShippingAddress,
+                    o.CustomerName,
+                    o.CustomerEmail,
+                    o.CustomerPhone,
+                    o.StatusHistoryJson,
+                    o.CreatedAt,
+                    o.UpdatedAt,
+                    o.ItemsJson,
+                    items = normalizedItems.Select(item => new
+                    {
+                        item.ProductId,
+                        productName = productNames.GetValueOrDefault(item.ProductId),
+                        item.Size,
+                        item.Quantity
+                    })
+                };
+            }),
+            page = resolvedPage,
+            pageSize = resolvedPageSize,
+            totalItems,
+            totalPages
+        });
     }
 
     [HttpPatch("orders/{orderId}")]
@@ -122,46 +278,78 @@ public class AdminController : ControllerBase
         var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId);
         if (order is null) return Results.NotFound(new { detail = "Order not found" });
 
+        var currentStatus = NormalizeOrderStatus(order.Status);
         var nextStatus = string.IsNullOrWhiteSpace(payload.Status)
-            ? order.Status
-            : payload.Status.Trim().ToLowerInvariant();
+            ? currentStatus
+            : NormalizeOrderStatus(payload.Status);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var hasStatusChange = !string.Equals(order.Status, nextStatus, StringComparison.OrdinalIgnoreCase);
+        if (IsInventoryReleasedStatus(currentStatus) && !IsInventoryReleasedStatus(nextStatus))
+            return Results.BadRequest(new { detail = "Нельзя вернуть отмененный или возвращенный заказ в активный статус из этого интерфейса" });
 
-        order.Status = nextStatus;
-        if (payload.ShippingAddress is not null) order.ShippingAddress = payload.ShippingAddress.Trim();
-        if (payload.PaymentMethod is not null) order.PaymentMethod = payload.PaymentMethod.Trim();
-        if (payload.CustomerName is not null) order.CustomerName = payload.CustomerName.Trim();
-        if (payload.CustomerEmail is not null) order.CustomerEmail = payload.CustomerEmail.Trim();
-        if (payload.CustomerPhone is not null) order.CustomerPhone = payload.CustomerPhone.Trim();
+        var nextShippingAddress = payload.ShippingAddress is null ? order.ShippingAddress : payload.ShippingAddress.Trim();
+        var nextPaymentMethod = payload.PaymentMethod is null ? NormalizePaymentMethod(order.PaymentMethod) : NormalizePaymentMethod(payload.PaymentMethod);
+        var nextCustomerName = payload.CustomerName is null ? order.CustomerName : payload.CustomerName.Trim();
+        var nextCustomerEmail = payload.CustomerEmail is null ? order.CustomerEmail : payload.CustomerEmail.Trim();
+        var nextCustomerPhone = payload.CustomerPhone is null ? order.CustomerPhone : payload.CustomerPhone.Trim();
+        var fieldChanges = BuildOrderFieldChanges(order, nextStatus, nextShippingAddress, nextPaymentMethod, nextCustomerName, nextCustomerEmail, nextCustomerPhone);
 
-        if (hasStatusChange)
+        if (fieldChanges.Count == 0)
+            return Results.Ok(new { ok = true, noChanges = true });
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+
+        if (!IsInventoryReleasedStatus(currentStatus) && IsInventoryReleasedStatus(nextStatus))
         {
-            List<Dictionary<string, object?>> history;
-            try
-            {
-                history = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(order.StatusHistoryJson) ?? [];
-            }
-            catch
-            {
-                history = [];
-            }
-
-            history.Add(new Dictionary<string, object?>
-            {
-                ["status"] = nextStatus,
-                ["changedAt"] = now,
-                ["changedBy"] = admin.Email,
-                ["comment"] = string.IsNullOrWhiteSpace(payload.ManagerComment)
-                    ? "Статус изменен администратором"
-                    : payload.ManagerComment.Trim()
-            });
-
-            order.StatusHistoryJson = JsonSerializer.Serialize(history);
+            await ReleaseOrderStockAsync(order, admin.Id, now, nextStatus == "returned" ? "order_return" : "order_cancel");
         }
 
+        order.Status = nextStatus;
+        order.ShippingAddress = nextShippingAddress;
+        order.PaymentMethod = nextPaymentMethod;
+        order.CustomerName = nextCustomerName;
+        order.CustomerEmail = nextCustomerEmail;
+        order.CustomerPhone = nextCustomerPhone;
         order.UpdatedAt = now;
+
+        var history = ParseOrderHistory(order.StatusHistoryJson);
+        history.Add(new Dictionary<string, object?>
+        {
+            ["kind"] = IsInventoryReleasedStatus(nextStatus) && !IsInventoryReleasedStatus(currentStatus) ? "canceled" : "updated",
+            ["status"] = nextStatus,
+            ["changedAt"] = now,
+            ["changedBy"] = admin.Email,
+            ["comment"] = string.IsNullOrWhiteSpace(payload.ManagerComment)
+                ? "Заказ обновлен администратором"
+                : payload.ManagerComment.Trim(),
+            ["fieldChanges"] = fieldChanges
+        });
+        order.StatusHistoryJson = JsonSerializer.Serialize(history);
+
         await _db.SaveChangesAsync();
+        await tx.CommitAsync();
+
+        return Results.Ok(new { ok = true });
+    }
+
+    [HttpDelete("orders/{orderId}")]
+    public async Task<IResult> DeleteOrder(string orderId)
+    {
+        var admin = await RequireAdminUserAsync();
+        if (admin is null) return Results.Unauthorized();
+
+        var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId);
+        if (order is null) return Results.NotFound(new { detail = "Order not found" });
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (!IsInventoryReleasedStatus(order.Status))
+        {
+            await ReleaseOrderStockAsync(order, admin.Id, now, "order_delete");
+        }
+
+        _db.Orders.Remove(order);
+        await _db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         return Results.Ok(new { ok = true });
     }
@@ -171,6 +359,11 @@ public class AdminController : ControllerBase
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
         var profiles = await _db.Profiles.ToDictionaryAsync(x => x.UserId, x => x);
+        var orderCounts = await _db.Orders
+            .AsNoTracking()
+            .GroupBy(x => x.UserId)
+            .Select(x => new { UserId = x.Key, Count = x.Count() })
+            .ToDictionaryAsync(x => x.UserId, x => x.Count);
         var users = await _db.Users.OrderBy(x => x.CreatedAt).ToListAsync();
 
         return Results.Ok(users.Select(u => new
@@ -182,6 +375,7 @@ public class AdminController : ControllerBase
             u.IsBlocked,
             u.IsSystem,
             u.CreatedAt,
+            ordersCount = orderCounts.GetValueOrDefault(u.Id),
             profile = profiles.TryGetValue(u.Id, out var p)
                 ? new { p.Name, p.Phone, p.Nickname, p.ShippingAddress, p.PhoneVerified }
                 : null
@@ -860,6 +1054,203 @@ public class AdminController : ControllerBase
         {
             return Results.BadRequest(new { detail = duplicateSlugMessage });
         }
+    }
+
+    private static List<Dictionary<string, object?>> ParseOrderHistory(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(raw) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<Dictionary<string, object?>> BuildOrderFieldChanges(
+        Order order,
+        string nextStatus,
+        string nextShippingAddress,
+        string nextPaymentMethod,
+        string nextCustomerName,
+        string nextCustomerEmail,
+        string nextCustomerPhone)
+    {
+        var changes = new List<Dictionary<string, object?>>();
+
+        AddOrderFieldChange(changes, "status", NormalizeOrderStatus(order.Status), nextStatus);
+        AddOrderFieldChange(changes, "shippingAddress", order.ShippingAddress, nextShippingAddress);
+        AddOrderFieldChange(changes, "paymentMethod", NormalizePaymentMethod(order.PaymentMethod), nextPaymentMethod);
+        AddOrderFieldChange(changes, "customerName", order.CustomerName, nextCustomerName);
+        AddOrderFieldChange(changes, "customerEmail", order.CustomerEmail, nextCustomerEmail);
+        AddOrderFieldChange(changes, "customerPhone", order.CustomerPhone, nextCustomerPhone);
+
+        return changes;
+    }
+
+    private static void AddOrderFieldChange(List<Dictionary<string, object?>> changes, string field, object? oldValue, object? newValue)
+    {
+        var oldText = oldValue?.ToString()?.Trim() ?? string.Empty;
+        var newText = newValue?.ToString()?.Trim() ?? string.Empty;
+        if (string.Equals(oldText, newText, StringComparison.Ordinal))
+            return;
+
+        changes.Add(new Dictionary<string, object?>
+        {
+            ["field"] = field,
+            ["oldValue"] = string.IsNullOrWhiteSpace(oldText) ? null : oldText,
+            ["newValue"] = string.IsNullOrWhiteSpace(newText) ? null : newText
+        });
+    }
+
+    private async Task ReleaseOrderStockAsync(Order order, string changedByUserId, long changedAt, string reason)
+    {
+        var normalizedItems = ParseOrderItems(order.ItemsJson);
+        if (normalizedItems.Count == 0)
+            return;
+
+        var sizeLookups = normalizedItems.Select(x => x.LookupSize).Distinct().ToList();
+        var sizeDictionaries = await _db.SizeDictionaries
+            .Where(x => sizeLookups.Contains(x.Name.ToLower()))
+            .ToListAsync();
+        var sizeMap = sizeDictionaries.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x, StringComparer.OrdinalIgnoreCase);
+        if (sizeMap.Count == 0)
+            return;
+
+        var requestedSizeIds = sizeMap.Values.Select(x => x.Id).Distinct().ToList();
+        var requestedProductIds = normalizedItems.Select(x => x.ProductId).Distinct().ToList();
+        var stockRows = await _db.ProductSizeStocks
+            .Where(x => requestedProductIds.Contains(x.ProductId) && requestedSizeIds.Contains(x.SizeId))
+            .ToListAsync();
+        var stockMap = stockRows.ToDictionary(x => $"{x.ProductId}:{x.SizeId}", x => x, StringComparer.Ordinal);
+
+        foreach (var item in normalizedItems)
+        {
+            if (!sizeMap.TryGetValue(item.LookupSize, out var sizeDictionary))
+                continue;
+
+            var stockKey = $"{item.ProductId}:{sizeDictionary.Id}";
+            if (!stockMap.TryGetValue(stockKey, out var row))
+            {
+                row = new ProductSizeStock
+                {
+                    ProductId = item.ProductId,
+                    SizeId = sizeDictionary.Id,
+                    Stock = 0
+                };
+                _db.ProductSizeStocks.Add(row);
+                stockMap[stockKey] = row;
+            }
+
+            var oldValue = row.Stock;
+            row.Stock += item.Quantity;
+
+            _db.StockChangeHistories.Add(new StockChangeHistory
+            {
+                ProductId = item.ProductId,
+                SizeId = sizeDictionary.Id,
+                ChangedByUserId = changedByUserId,
+                Reason = reason,
+                OrderId = order.Id,
+                OldValue = oldValue,
+                NewValue = row.Stock,
+                ChangedAt = changedAt
+            });
+        }
+    }
+
+    private static List<NormalizedOrderItem> ParseOrderItems(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(raw) ?? [];
+            return items
+                .Select(item =>
+                {
+                    var productId = AsString(item.TryGetValue("productId", out var productValue) ? productValue : null).Trim();
+                    var size = AsString(item.TryGetValue("size", out var sizeValue) ? sizeValue : null).Trim();
+                    var quantity = AsInt(item.TryGetValue("quantity", out var quantityValue) ? quantityValue : null);
+                    return new NormalizedOrderItem(productId, size, size.ToLowerInvariant(), quantity);
+                })
+                .Where(item => !string.IsNullOrWhiteSpace(item.ProductId) && !string.IsNullOrWhiteSpace(item.Size) && item.Quantity > 0)
+                .GroupBy(x => $"{x.ProductId}\u001f{x.LookupSize}", StringComparer.Ordinal)
+                .Select(group =>
+                {
+                    var first = group.First();
+                    return new NormalizedOrderItem(first.ProductId, first.Size, first.LookupSize, group.Sum(x => x.Quantity));
+                })
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string AsString(object? value)
+    {
+        return value switch
+        {
+            null => string.Empty,
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonElement element => element.ToString(),
+            _ => value.ToString() ?? string.Empty
+        };
+    }
+
+    private static int AsInt(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            JsonElement element when element.ValueKind == JsonValueKind.Number => element.GetInt32(),
+            JsonElement element when element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsed) => parsed,
+            int intValue => intValue,
+            long longValue => (int)longValue,
+            double doubleValue => (int)doubleValue,
+            decimal decimalValue => (int)decimalValue,
+            _ when int.TryParse(value.ToString(), out var parsed) => parsed,
+            _ => 0
+        };
+    }
+
+    private static bool TryParseOrderFilterDate(string? value, bool isEndOfDay, out long timestamp)
+    {
+        timestamp = 0;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        if (!DateOnly.TryParseExact(value.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+            return false;
+
+        var parsedDateTime = parsedDate.ToDateTime(isEndOfDay ? TimeOnly.MaxValue : TimeOnly.MinValue, DateTimeKind.Utc);
+        timestamp = new DateTimeOffset(parsedDateTime).ToUnixTimeMilliseconds();
+        return true;
+    }
+
+    private static bool IsInventoryReleasedStatus(string? status)
+    {
+        var normalized = NormalizeOrderStatus(status);
+        return normalized is "canceled" or "returned";
+    }
+
+    private static string NormalizeOrderStatus(string? status)
+    {
+        var normalized = status?.Trim().ToLowerInvariant() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(normalized) ? "processing" : normalized;
+    }
+
+    private static string NormalizePaymentMethod(string? paymentMethod)
+    {
+        var normalized = paymentMethod?.Trim().ToLowerInvariant() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(normalized) ? "cod" : normalized;
     }
 
     private static bool IsUniqueDictionaryNameViolation(DbUpdateException ex)

@@ -24,7 +24,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
   buildProductCardBackgroundStyleFromColor,
@@ -43,7 +43,7 @@ import {
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -279,6 +279,7 @@ interface AdminUser {
   isAdmin: boolean;
   isBlocked: boolean;
   isSystem: boolean;
+  ordersCount?: number;
   createdAt?: string;
   profile?: {
     name?: string | null;
@@ -293,11 +294,23 @@ interface AdminOrder {
   id: string;
   userId: string;
   userEmail?: string;
+  userProfile?: {
+    name?: string | null;
+    phone?: string | null;
+    nickname?: string | null;
+    shippingAddress?: string | null;
+    phoneVerified?: boolean;
+  } | null;
   totalAmount: number;
   status: string;
   createdAt?: string | number;
   itemsJson?: string;
-  items?: unknown;
+  items?: Array<{
+    productId?: string;
+    productName?: string | null;
+    size?: string | null;
+    quantity?: number;
+  }> | unknown;
   paymentMethod?: string;
   purchaseChannel?: string;
   shippingAddress?: string;
@@ -306,6 +319,56 @@ interface AdminOrder {
   customerPhone?: string;
   statusHistoryJson?: string;
   updatedAt?: string | number;
+}
+
+interface OrderHistoryFieldChange {
+  field?: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+}
+
+interface OrderHistoryEntry {
+  kind?: string;
+  status?: string;
+  changedAt?: string | number;
+  changedBy?: string;
+  comment?: string;
+  fieldChanges?: OrderHistoryFieldChange[];
+}
+
+interface AdminSessionUser {
+  id: string;
+  email: string;
+}
+
+type OrderTableColumnId = "id" | "client" | "items" | "payment" | "delivery" | "status" | "amount" | "date" | "actions";
+
+interface OrderTablePreferences {
+  columnOrder: OrderTableColumnId[];
+  hiddenColumns: OrderTableColumnId[];
+  pageSize: number;
+}
+
+interface OrderTableColumnDefinition {
+  id: OrderTableColumnId;
+  label: string;
+  required?: boolean;
+}
+
+interface OrderFormChange {
+  field: string;
+  label: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+type OrderActionType = "cancel" | "delete";
+
+interface OrderActionDialogState {
+  open: boolean;
+  action: OrderActionType;
+  order: AdminOrder | null;
+  submitting: boolean;
 }
 
 interface AdminUserEditForm {
@@ -329,21 +392,135 @@ interface GalleryImage {
 }
 
 const ORDER_STATUS_OPTIONS = [
+  { value: "processing", label: "В обработке" },
   { value: "created", label: "Оформлен" },
   { value: "paid", label: "Оплачен" },
   { value: "in_transit", label: "В пути" },
   { value: "delivered", label: "Доставлен" },
+  { value: "completed", label: "Завершен" },
   { value: "canceled", label: "Отменен" },
   { value: "returned", label: "Возврат" },
 ] as const;
 
-const ORDER_STATUS_LABELS = Object.fromEntries(ORDER_STATUS_OPTIONS.map((item) => [item.value, item.label])) as Record<string, string>;
+const ORDER_STATUS_LABELS = Object.fromEntries(
+  [...ORDER_STATUS_OPTIONS, { value: "cancelled", label: "Отменен" }].map((item) => [item.value, item.label])
+) as Record<string, string>;
+
+const TERMINAL_ORDER_STATUSES = new Set(["canceled", "returned"]);
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cod: "Оплата при получении",
   card: "Банковская карта",
   sbp: "СБП",
   cash: "Наличные",
+};
+
+const PURCHASE_CHANNEL_LABELS: Record<string, string> = {
+  web: "Сайт",
+  mobile: "Мобильное приложение",
+  admin: "Администратор",
+};
+
+const ORDER_HISTORY_FIELD_LABELS: Record<string, string> = {
+  status: "Статус",
+  paymentMethod: "Способ оплаты",
+  purchaseChannel: "Канал заказа",
+  customerName: "Получатель",
+  customerEmail: "Email",
+  customerPhone: "Телефон",
+  shippingAddress: "Адрес доставки",
+  totalAmount: "Сумма",
+};
+
+const ORDER_TABLE_COLUMNS: OrderTableColumnDefinition[] = [
+  { id: "id", label: "ID" },
+  { id: "client", label: "Клиент" },
+  { id: "items", label: "Товары" },
+  { id: "payment", label: "Оплата" },
+  { id: "delivery", label: "Доставка" },
+  { id: "status", label: "Статус" },
+  { id: "amount", label: "Сумма" },
+  { id: "date", label: "Дата" },
+  { id: "actions", label: "Действия", required: true },
+];
+
+const ORDER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const ORDER_TABLE_PREFERENCE_KEY_PREFIX = "admin_orders_table_preferences__";
+const ORDER_STATUS_ROW_COLOR_SETTING_KEYS: Record<string, string> = {
+  processing: "admin_orders_row_color_processing",
+  created: "admin_orders_row_color_created",
+  paid: "admin_orders_row_color_paid",
+  in_transit: "admin_orders_row_color_in_transit",
+  delivered: "admin_orders_row_color_delivered",
+  completed: "admin_orders_row_color_completed",
+  canceled: "admin_orders_row_color_canceled",
+  returned: "admin_orders_row_color_returned",
+};
+
+const createDefaultOrderTablePreferences = (): OrderTablePreferences => ({
+  columnOrder: ORDER_TABLE_COLUMNS.map((column) => column.id),
+  hiddenColumns: [],
+  pageSize: ORDER_PAGE_SIZE_OPTIONS[0],
+});
+
+const sanitizeOrderTablePreferences = (raw: unknown): OrderTablePreferences => {
+  const defaults = createDefaultOrderTablePreferences();
+  const knownIds = new Set<OrderTableColumnId>(defaults.columnOrder);
+  const requiredIds = new Set<OrderTableColumnId>(ORDER_TABLE_COLUMNS.filter((column) => column.required).map((column) => column.id));
+  const parsed = (() => {
+    if (typeof raw === "string") {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    return raw;
+  })() as Partial<OrderTablePreferences> | null;
+
+  const preferredOrder = Array.isArray(parsed?.columnOrder)
+    ? parsed.columnOrder.filter((columnId): columnId is OrderTableColumnId => knownIds.has(columnId as OrderTableColumnId))
+    : [];
+  const columnOrder = [...preferredOrder, ...defaults.columnOrder.filter((columnId) => !preferredOrder.includes(columnId))];
+  const hiddenColumns = Array.isArray(parsed?.hiddenColumns)
+    ? parsed.hiddenColumns.filter((columnId): columnId is OrderTableColumnId => knownIds.has(columnId as OrderTableColumnId) && !requiredIds.has(columnId as OrderTableColumnId))
+    : [];
+  const pageSize = ORDER_PAGE_SIZE_OPTIONS.includes(parsed?.pageSize as (typeof ORDER_PAGE_SIZE_OPTIONS)[number])
+    ? Number(parsed?.pageSize)
+    : defaults.pageSize;
+
+  return {
+    columnOrder,
+    hiddenColumns,
+    pageSize,
+  };
+};
+
+const getOrderTablePreferenceKey = (adminId?: string | null) =>
+  adminId ? `${ORDER_TABLE_PREFERENCE_KEY_PREFIX}${adminId}` : "";
+
+const normalizeHexColorSetting = (value?: string | null) => {
+  const normalized = (value || "").trim();
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(normalized)) {
+    return "";
+  }
+
+  if (normalized.length === 4) {
+    return `#${normalized[1]}${normalized[1]}${normalized[2]}${normalized[2]}${normalized[3]}${normalized[3]}`.toLowerCase();
+  }
+
+  return normalized.toLowerCase();
+};
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = normalizeHexColorSetting(hex);
+  if (!normalized) return "";
+
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 };
 
 const parseOrderItems = (raw: any) => {
@@ -355,7 +532,7 @@ const parseOrderItems = (raw: any) => {
   }
 };
 
-const parseOrderStatusHistory = (raw: any) => {
+const parseOrderHistory = (raw: any): OrderHistoryEntry[] => {
   try {
     const source = typeof raw === "string" ? JSON.parse(raw) : raw;
     return Array.isArray(source) ? source : [];
@@ -530,6 +707,14 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   catalog_filter_sizes_enabled: "true",
   catalog_filter_materials_enabled: "true",
   catalog_filter_colors_enabled: "true",
+  admin_orders_row_color_processing: "#e5e7eb",
+  admin_orders_row_color_created: "#e0f2fe",
+  admin_orders_row_color_paid: "#dbeafe",
+  admin_orders_row_color_in_transit: "#dbeafe",
+  admin_orders_row_color_delivered: "#dcfce7",
+  admin_orders_row_color_completed: "#bbf7d0",
+  admin_orders_row_color_canceled: "#fee2e2",
+  admin_orders_row_color_returned: "#ffedd5",
   dadata_api_key: "",
   yandex_delivery_base_cost: "350",
   yandex_delivery_cost_per_kg: "40",
@@ -563,6 +748,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [adminUser, setAdminUser] = useState<AdminSessionUser | null>(null);
   const [stockHistory, setStockHistory] = useState<StockHistoryEntry[]>([]);
   const [usersSearch, setUsersSearch] = useState("");
   const [usersRoleFilter, setUsersRoleFilter] = useState<"all" | "admin" | "user">("all");
@@ -605,8 +791,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [ordersStatusFilter, setOrdersStatusFilter] = useState("all");
+  const [ordersDateFrom, setOrdersDateFrom] = useState("");
+  const [ordersDateTo, setOrdersDateTo] = useState("");
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [ordersPageSize, setOrdersPageSize] = useState<(typeof ORDER_PAGE_SIZE_OPTIONS)[number]>(ORDER_PAGE_SIZE_OPTIONS[0]);
+  const [ordersTotalItems, setOrdersTotalItems] = useState(0);
+  const [ordersTotalPages, setOrdersTotalPages] = useState(1);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersReady, setOrdersReady] = useState(false);
+  const [orderActionDialog, setOrderActionDialog] = useState<OrderActionDialogState>({ open: false, action: "cancel", order: null, submitting: false });
+  const [orderTablePreferences, setOrderTablePreferences] = useState<OrderTablePreferences>(createDefaultOrderTablePreferences);
+  const [orderTableDraft, setOrderTableDraft] = useState<OrderTablePreferences>(createDefaultOrderTablePreferences);
+  const [isOrderTableDialogOpen, setIsOrderTableDialogOpen] = useState(false);
+  const [orderTableSaving, setOrderTableSaving] = useState(false);
+  const [pendingOrderSaveChanges, setPendingOrderSaveChanges] = useState<OrderFormChange[]>([]);
+  const [isOrderSaveConfirmOpen, setIsOrderSaveConfirmOpen] = useState(false);
   const [orderForm, setOrderForm] = useState({
-    status: "created",
+    status: "processing",
     shippingAddress: "",
     paymentMethod: "cod",
     customerName: "",
@@ -619,6 +822,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
+  const [selectedUserOrders, setSelectedUserOrders] = useState<AdminOrder[]>([]);
+  const [selectedUserOrdersTotal, setSelectedUserOrdersTotal] = useState(0);
+  const [selectedUserOrdersLoading, setSelectedUserOrdersLoading] = useState(false);
   const [selectedProductStockHistory, setSelectedProductStockHistory] = useState<Product | null>(null);
   const [telegramBotForm, setTelegramBotForm] = useState(getInitialTelegramBotForm);
   const [isTelegramBotDialogOpen, setIsTelegramBotDialogOpen] = useState(false);
@@ -629,6 +835,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotValidationError, setTelegramBotValidationError] = useState("");
   const [telegramBotTokenVisible, setTelegramBotTokenVisible] = useState(false);
   const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
+  const ordersRequestIdRef = useRef(0);
+  const deferredOrderSearch = useDeferredValue(orderSearch);
   const navigate = useNavigate();
   const location = useLocation();
   const isStandaloneAdmin = !embedded;
@@ -670,9 +878,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        await FLOW.adminMe();
+        const session = await FLOW.adminMe();
+        setAdminUser(session?.user || null);
         setIsAdmin(true);
-        await Promise.all([fetchProducts(), fetchAdminData()]);
+        await Promise.all([fetchProducts(), fetchAdminData(session?.user || null)]);
       } catch (error) {
         if (!embedded) {
           navigate("/profile");
@@ -694,11 +903,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const fetchAdminData = async () => {
+  const fetchAdminData = async (sessionUser: AdminSessionUser | null = adminUser) => {
     try {
-      const [usersRes, ordersRes, settingsRes, botsRes, galleryRes, dictionariesRes, stockHistoryRes] = await Promise.all([
+      const [usersRes, settingsRes, botsRes, galleryRes, dictionariesRes, stockHistoryRes] = await Promise.all([
         FLOW.adminGetUsers(),
-        FLOW.adminGetOrders(),
         FLOW.adminGetSettings(),
         FLOW.adminGetTelegramBots(),
         FLOW.getAdminGalleryImages(),
@@ -706,9 +914,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         FLOW.adminGetStockHistory()
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
-      setOrders(Array.isArray(ordersRes) ? ordersRes : []);
       setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
-      setSettings({ ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) });
+      const mergedSettings = { ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) };
+      const resolvedPreferences = sanitizeOrderTablePreferences(mergedSettings[getOrderTablePreferenceKey(sessionUser?.id)]);
+      setSettings(mergedSettings);
+      setOrderTablePreferences(resolvedPreferences);
+      setOrderTableDraft(resolvedPreferences);
+      setOrdersPageSize(resolvedPreferences.pageSize);
+      setOrdersReady(true);
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
       setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
       setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [] });
@@ -717,63 +930,398 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const formatOrderStatus = (value: string) => ORDER_STATUS_LABELS[value] || value || "—";
+  const persistOrderTablePreferences = async (nextPreferences: OrderTablePreferences) => {
+    const preferenceKey = getOrderTablePreferenceKey(adminUser?.id);
+    if (!preferenceKey) return;
 
-  const getOrderItemsSummary = (order: AdminOrder) => {
+    const serializedValue = JSON.stringify(nextPreferences);
+    await FLOW.adminSaveSettings({ input: { [preferenceKey]: serializedValue } });
+    setSettings((prev) => ({ ...prev, [preferenceKey]: serializedValue }));
+  };
+
+  const refreshStockHistory = async () => {
+    const stockHistoryRes = await FLOW.adminGetStockHistory();
+    setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
+  };
+
+  const loadOrders = async (overrides?: Partial<{ page: number; pageSize: number; search: string; status: string; dateFrom: string; dateTo: string; userId: string }>) => {
+    const requestId = ++ordersRequestIdRef.current;
+    setOrdersLoading(true);
+    try {
+      const response = await FLOW.adminGetOrders({
+        input: {
+          page: overrides?.page ?? ordersPage,
+          pageSize: overrides?.pageSize ?? ordersPageSize,
+          search: overrides?.search ?? deferredOrderSearch.trim(),
+          status: overrides?.status ?? ordersStatusFilter,
+          dateFrom: overrides?.dateFrom ?? ordersDateFrom,
+          dateTo: overrides?.dateTo ?? ordersDateTo,
+          userId: overrides?.userId,
+        }
+      });
+
+      if (requestId !== ordersRequestIdRef.current) return;
+
+      const responseItems = Array.isArray(response?.items)
+        ? response.items
+        : Array.isArray(response)
+          ? response
+          : [];
+
+      setOrders(responseItems);
+      setOrdersTotalItems(Number(response?.totalItems ?? responseItems.length ?? 0));
+      setOrdersTotalPages(Math.max(1, Number(response?.totalPages ?? 1)));
+
+      if (typeof response?.page === "number" && response.page !== ordersPage) {
+        setOrdersPage(response.page);
+      }
+    } catch (error) {
+      if (requestId !== ordersRequestIdRef.current) return;
+      toast.error(getErrorMessage(error, "Не удалось загрузить заказы"));
+    } finally {
+      if (requestId === ordersRequestIdRef.current) {
+        setOrdersLoading(false);
+      }
+    }
+  };
+
+  const openOrderTableDialog = () => {
+    setOrderTableDraft(orderTablePreferences);
+    setIsOrderTableDialogOpen(true);
+  };
+
+  const toggleOrderTableDraftColumn = (columnId: OrderTableColumnId, visible: boolean) => {
+    if (ORDER_TABLE_COLUMNS.find((column) => column.id === columnId)?.required) {
+      return;
+    }
+
+    setOrderTableDraft((prev) => ({
+      ...prev,
+      hiddenColumns: visible
+        ? prev.hiddenColumns.filter((item) => item !== columnId)
+        : [...prev.hiddenColumns, columnId],
+    }));
+  };
+
+  const moveOrderTableDraftColumn = (columnId: OrderTableColumnId, direction: -1 | 1) => {
+    setOrderTableDraft((prev) => {
+      const index = prev.columnOrder.indexOf(columnId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= prev.columnOrder.length) {
+        return prev;
+      }
+
+      const nextOrder = [...prev.columnOrder];
+      const [movedColumn] = nextOrder.splice(index, 1);
+      nextOrder.splice(nextIndex, 0, movedColumn);
+      return { ...prev, columnOrder: nextOrder };
+    });
+  };
+
+  const resetOrderTableDraft = () => {
+    setOrderTableDraft({ ...createDefaultOrderTablePreferences(), pageSize: ordersPageSize });
+  };
+
+  const saveOrderTableLayout = async () => {
+    const nextPreferences = sanitizeOrderTablePreferences({ ...orderTableDraft, pageSize: ordersPageSize });
+    setOrderTableSaving(true);
+    try {
+      await persistOrderTablePreferences(nextPreferences);
+      setOrderTablePreferences(nextPreferences);
+      setOrderTableDraft(nextPreferences);
+      setIsOrderTableDialogOpen(false);
+      toast.success("Вид таблицы сохранен");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось сохранить настройки таблицы"));
+    } finally {
+      setOrderTableSaving(false);
+    }
+  };
+
+  const changeOrdersPageSize = async (nextPageSize: (typeof ORDER_PAGE_SIZE_OPTIONS)[number]) => {
+    const previousPageSize = ordersPageSize;
+    const previousPreferences = orderTablePreferences;
+    const nextPreferences = { ...orderTablePreferences, pageSize: nextPageSize };
+
+    setOrdersPageSize(nextPageSize);
+    setOrdersPage(1);
+    setOrderTablePreferences(nextPreferences);
+
+    try {
+      await persistOrderTablePreferences(nextPreferences);
+    } catch (error) {
+      setOrdersPageSize(previousPageSize);
+      setOrderTablePreferences(previousPreferences);
+      toast.error(getErrorMessage(error, "Не удалось сохранить количество строк"));
+    }
+  };
+
+  const normalizeOrderStatusValue = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return normalized || "processing";
+  };
+
+  const formatOrderStatus = (value?: string | null) => {
+    const normalized = normalizeOrderStatusValue(value);
+    return ORDER_STATUS_LABELS[normalized] || value || "—";
+  };
+
+  const formatPaymentMethod = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return PAYMENT_METHOD_LABELS[normalized] || value || "—";
+  };
+
+  const formatPurchaseChannel = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return PURCHASE_CHANNEL_LABELS[normalized] || value || "—";
+  };
+
+  const getOrderStatusBadgeClassName = (value?: string | null) => {
+    switch (normalizeOrderStatusValue(value)) {
+      case "canceled":
+      case "returned":
+        return "border-red-200 bg-red-50 text-red-700";
+      case "delivered":
+      case "completed":
+        return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      case "paid":
+      case "in_transit":
+        return "border-sky-200 bg-sky-50 text-sky-700";
+      default:
+        return "border-gray-200 bg-gray-50 text-gray-800";
+    }
+  };
+
+  const getOrderRowStyle = (value?: string | null) => {
+    const colorKey = ORDER_STATUS_ROW_COLOR_SETTING_KEYS[normalizeOrderStatusValue(value)];
+    const color = normalizeHexColorSetting(settings[colorKey]);
+    if (!color) return undefined;
+
+    return {
+      backgroundColor: hexToRgba(color, 0.14),
+      boxShadow: `inset 4px 0 0 ${color}`,
+    } as const;
+  };
+
+  const getOrderTimestamp = (value?: string | number) => {
+    const parsed = value ? new Date(value).getTime() : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatOrderDateTime = (value?: string | number) => {
+    const timestamp = getOrderTimestamp(value);
+    return timestamp > 0 ? new Date(timestamp).toLocaleString("ru-RU") : "—";
+  };
+
+  const resolveOrderCustomerSnapshot = (order: AdminOrder) => {
+    const user = usersById.get(order.userId) || null;
+    const userProfile = order.userProfile || user?.profile || null;
+    const name = order.customerName || userProfile?.name || userProfile?.nickname || "";
+    const email = order.customerEmail || order.userEmail || user?.email || "";
+    const phone = order.customerPhone || userProfile?.phone || "";
+    const shippingAddress = order.shippingAddress || userProfile?.shippingAddress || "";
+
+    return {
+      user,
+      userProfile,
+      name,
+      email,
+      phone,
+      shippingAddress,
+    };
+  };
+
+  const getOrderItemsDetails = (order: AdminOrder) => {
     const items = parseOrderItems(order?.itemsJson || order?.items);
-    if (!items.length) return "—";
-
     return items.map((item: any) => {
-      const qty = Number(item?.quantity || 1);
-      const product = products.find((entry) => entry._id === item?.productId);
-      const title = item?.productName || product?.name || item?.productId || "Товар";
-      const size = item?.size ? ` (${item.size})` : "";
-      return `${title}${size} Г— ${qty}`;
-    }).join(", ");
+      const qty = Math.max(1, Number(item?.quantity || 1));
+      const product = productsById.get(item?.productId);
+      return {
+        productId: item?.productId || "",
+        title: item?.productName || product?.name || item?.productId || "Товар",
+        size: item?.size || "",
+        quantity: qty,
+      };
+    });
+  };
+
+  const formatOrderHistoryValue = (field: string | undefined, value: unknown) => {
+    if (value === null || value === undefined) return "—";
+    const textValue = String(value).trim();
+    if (!textValue) return "—";
+
+    switch (field) {
+      case "status":
+        return formatOrderStatus(textValue);
+      case "paymentMethod":
+        return formatPaymentMethod(textValue);
+      case "purchaseChannel":
+        return formatPurchaseChannel(textValue);
+      case "totalAmount": {
+        const numeric = Number(textValue);
+        return Number.isFinite(numeric) ? `${numeric.toFixed(2)} ₽` : textValue;
+      }
+      default:
+        return textValue;
+    }
+  };
+
+  const getOrderHistoryEntries = (order?: AdminOrder | null): OrderHistoryEntry[] => {
+    if (!order) return [];
+    return parseOrderHistory(order.statusHistoryJson);
+  };
+
+  const isOrderHistoryFieldChanged = (change?: OrderHistoryFieldChange | null) => {
+    if (!change?.field) return false;
+    const oldValue = String(change.oldValue ?? "").trim();
+    const newValue = String(change.newValue ?? "").trim();
+    return oldValue !== newValue;
+  };
+
+  const getOrderFormChanges = (order: AdminOrder, form = orderForm): OrderFormChange[] => {
+    const snapshot = resolveOrderCustomerSnapshot(order);
+    const nextValues = {
+      status: normalizeOrderStatusValue(form.status),
+      paymentMethod: (form.paymentMethod || "cod").trim().toLowerCase(),
+      customerName: form.customerName.trim(),
+      customerEmail: form.customerEmail.trim(),
+      customerPhone: form.customerPhone.trim(),
+      shippingAddress: form.shippingAddress.trim(),
+    };
+    const currentValues = {
+      status: normalizeOrderStatusValue(order.status),
+      paymentMethod: (order.paymentMethod || "cod").trim().toLowerCase(),
+      customerName: (snapshot.name || "").trim(),
+      customerEmail: (snapshot.email || "").trim(),
+      customerPhone: (snapshot.phone || "").trim(),
+      shippingAddress: (snapshot.shippingAddress || "").trim(),
+    };
+
+    return [
+      { field: "status", label: ORDER_HISTORY_FIELD_LABELS.status, oldValue: currentValues.status, newValue: nextValues.status },
+      { field: "paymentMethod", label: ORDER_HISTORY_FIELD_LABELS.paymentMethod, oldValue: currentValues.paymentMethod, newValue: nextValues.paymentMethod },
+      { field: "customerName", label: ORDER_HISTORY_FIELD_LABELS.customerName, oldValue: currentValues.customerName, newValue: nextValues.customerName },
+      { field: "customerEmail", label: ORDER_HISTORY_FIELD_LABELS.customerEmail, oldValue: currentValues.customerEmail, newValue: nextValues.customerEmail },
+      { field: "customerPhone", label: ORDER_HISTORY_FIELD_LABELS.customerPhone, oldValue: currentValues.customerPhone, newValue: nextValues.customerPhone },
+      { field: "shippingAddress", label: ORDER_HISTORY_FIELD_LABELS.shippingAddress, oldValue: currentValues.shippingAddress, newValue: nextValues.shippingAddress },
+    ].filter((change) => String(change.oldValue ?? "").trim() !== String(change.newValue ?? "").trim());
+  };
+
+  const closeOrderEditor = () => {
+    setIsOrderDialogOpen(false);
+    setEditingOrder(null);
+    setPendingOrderSaveChanges([]);
+    setIsOrderSaveConfirmOpen(false);
+    setOrderForm({
+      status: "processing",
+      shippingAddress: "",
+      paymentMethod: "cod",
+      customerName: "",
+      customerEmail: "",
+      customerPhone: "",
+      managerComment: "",
+    });
   };
 
   const openOrderEditor = (order: AdminOrder) => {
+    const snapshot = resolveOrderCustomerSnapshot(order);
     setEditingOrder(order);
     setOrderForm({
-      status: order?.status || "created",
-      shippingAddress: order?.shippingAddress || "",
-      paymentMethod: order?.paymentMethod || "cod",
-      customerName: order?.customerName || "",
-      customerEmail: order?.customerEmail || "",
-      customerPhone: order?.customerPhone || "",
+      status: normalizeOrderStatusValue(order?.status),
+      shippingAddress: snapshot.shippingAddress,
+      paymentMethod: (order?.paymentMethod || "cod").trim().toLowerCase(),
+      customerName: snapshot.name,
+      customerEmail: snapshot.email,
+      customerPhone: snapshot.phone,
       managerComment: "",
     });
     setIsOrderDialogOpen(true);
   };
 
-  const saveOrder = async () => {
+  const openOrderActionDialog = (action: OrderActionType, order: AdminOrder) => {
+    setOrderActionDialog({ open: true, action, order, submitting: false });
+  };
+
+  const closeOrderActionDialog = () => {
+    setOrderActionDialog((prev) => (prev.submitting ? prev : { ...prev, open: false, order: null }));
+  };
+
+  const confirmOrderAction = async () => {
+    const targetOrder = orderActionDialog.order;
+    if (!targetOrder?.id) return;
+
+    setOrderActionDialog((prev) => ({ ...prev, submitting: true }));
+    try {
+      if (orderActionDialog.action === "cancel") {
+        await FLOW.adminUpdateOrder({
+          input: {
+            orderId: targetOrder.id,
+            payload: {
+              status: "canceled",
+              managerComment: "Заказ отменен администратором",
+            },
+          },
+        });
+        toast.success("Заказ отменен");
+      } else {
+        await FLOW.adminDeleteOrder({ input: { orderId: targetOrder.id } });
+        toast.success("Заказ удален");
+      }
+
+      if (editingOrder?.id === targetOrder.id) {
+        closeOrderEditor();
+      }
+      setOrderActionDialog({ open: false, action: orderActionDialog.action, order: null, submitting: false });
+      await Promise.all([loadOrders(), refreshStockHistory()]);
+    } catch (error) {
+      toast.error(getErrorMessage(error, orderActionDialog.action === "cancel" ? "Не удалось отменить заказ" : "Не удалось удалить заказ"));
+      setOrderActionDialog((prev) => ({ ...prev, submitting: false }));
+    }
+  };
+
+  const requestOrderSave = () => {
+    if (!editingOrder) return;
+
+    const changes = getOrderFormChanges(editingOrder);
+    if (changes.length === 0) {
+      toast.info("Нет изменений для сохранения");
+      return;
+    }
+
+    setPendingOrderSaveChanges(changes);
+    setIsOrderSaveConfirmOpen(true);
+  };
+
+  const confirmOrderSave = async () => {
     if (!editingOrder?.id) return;
 
     setOrderSaving(true);
     try {
+      const payload: Record<string, string> = {};
+      pendingOrderSaveChanges.forEach((change) => {
+        payload[change.field] = String(change.newValue ?? "");
+      });
+      if (orderForm.managerComment.trim()) {
+        payload.managerComment = orderForm.managerComment.trim();
+      }
+
       await FLOW.adminUpdateOrder({
         input: {
           orderId: editingOrder.id,
-          payload: {
-            status: orderForm.status,
-            shippingAddress: orderForm.shippingAddress,
-            paymentMethod: orderForm.paymentMethod,
-            customerName: orderForm.customerName,
-            customerEmail: orderForm.customerEmail,
-            customerPhone: orderForm.customerPhone,
-            managerComment: orderForm.managerComment,
-          },
+          payload,
         },
       });
       toast.success("Заказ обновлен");
-      setIsOrderDialogOpen(false);
-      await fetchAdminData();
+      setIsOrderSaveConfirmOpen(false);
+      closeOrderEditor();
+      await Promise.all([loadOrders(), refreshStockHistory()]);
     } catch (error) {
-      toast.error("Не удалось сохранить заказ");
+      toast.error(getErrorMessage(error, "Не удалось сохранить заказ"));
     } finally {
       setOrderSaving(false);
     }
   };
+
   const toggleUserBlock = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
@@ -1145,7 +1693,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
   });
 
+  const usersById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
+  const productsById = useMemo(() => new Map(products.map((product) => [product._id, product])), [products]);
+
   const USERS_PER_PAGE = 10;
+  const visibleOrderColumns = useMemo(() => {
+    const hidden = new Set(orderTablePreferences.hiddenColumns);
+    return orderTablePreferences.columnOrder
+      .map((columnId) => ORDER_TABLE_COLUMNS.find((column) => column.id === columnId))
+      .filter((column): column is OrderTableColumnDefinition => Boolean(column))
+      .filter((column) => !hidden.has(column.id));
+  }, [orderTablePreferences]);
 
   const filteredUsers = useMemo(() => {
     const query = usersSearch.trim().toLowerCase();
@@ -1283,20 +1841,71 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setTimeout(() => setIsSensitiveConfirmOpen(true), 0);
   };
 
-  const selectedUserOrders = useMemo(() => {
-    if (!selectedUser) return [];
-    return orders
-      .filter((order) => order.userId === selectedUser.id)
-      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }, [orders, selectedUser]);
+  useEffect(() => {
+    if (!selectedUser?.id || !isUserEditModalOpen) {
+      setSelectedUserOrders([]);
+      setSelectedUserOrdersTotal(selectedUser?.ordersCount || 0);
+      setSelectedUserOrdersLoading(false);
+      return;
+    }
 
-  const userOrdersCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    orders.forEach((order) => {
-      map.set(order.userId, (map.get(order.userId) || 0) + 1);
-    });
-    return map;
-  }, [orders]);
+    let cancelled = false;
+    const loadSelectedUserOrders = async () => {
+      setSelectedUserOrdersLoading(true);
+      try {
+        const response = await FLOW.adminGetOrders({
+          input: {
+            userId: selectedUser.id,
+            page: 1,
+            pageSize: Math.min(Math.max(selectedUser.ordersCount || 20, 20), 100),
+          }
+        });
+
+        if (cancelled) return;
+        setSelectedUserOrders(Array.isArray(response?.items) ? response.items : []);
+        setSelectedUserOrdersTotal(Number(response?.totalItems ?? selectedUser.ordersCount ?? 0));
+      } catch (error) {
+        if (cancelled) return;
+        setSelectedUserOrders([]);
+        setSelectedUserOrdersTotal(selectedUser.ordersCount || 0);
+        toast.error(getErrorMessage(error, "Не удалось загрузить заказы пользователя"));
+      } finally {
+        if (!cancelled) {
+          setSelectedUserOrdersLoading(false);
+        }
+      }
+    };
+
+    void loadSelectedUserOrders();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUser?.id, selectedUser?.ordersCount, isUserEditModalOpen]);
+
+  useEffect(() => {
+    if (!ordersReady) return;
+    setOrdersPage(1);
+  }, [deferredOrderSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo, ordersPageSize, ordersReady]);
+
+  useEffect(() => {
+    if (!ordersReady || selectedAdminTab !== "orders") return;
+    void loadOrders();
+  }, [ordersReady, selectedAdminTab, ordersPage, ordersPageSize, deferredOrderSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo]);
+
+  const selectedOrderUser = useMemo(() => {
+    if (!editingOrder) return null;
+    return usersById.get(editingOrder.userId) || null;
+  }, [editingOrder, usersById]);
+
+  const editingOrderItems = useMemo(() => {
+    if (!editingOrder) return [];
+    return getOrderItemsDetails(editingOrder);
+  }, [editingOrder, productsById]);
+
+  const editingOrderHistory = useMemo(() => {
+    if (!editingOrder) return [];
+    return getOrderHistoryEntries(editingOrder).slice().reverse();
+  }, [editingOrder]);
 
   const stockHistoryByProductId = useMemo(() => {
     const map = new Map<string, StockHistoryEntry[]>();
@@ -1622,6 +2231,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const telegramBotFormErrors = getTelegramBotFormErrors(telegramBotForm);
 
   const settingsGroups = [
+    { id: "orders", label: "Заказы" },
     { id: "auth", label: "Авторизация" },
     { id: "operations", label: "Регламентные операции" },
     { id: "smtp", label: "Почта (SMTP)" },
@@ -1770,10 +2380,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const handleAdminTabChange = (value: string) => {
     setSelectedAdminTab(value);
-    if (value === "products") return;
+    if (value === "products") {
+      closeOrderEditor();
+      closeOrderActionDialog();
+      return;
+    }
 
     resetProductEditor();
     closeProductStockHistory();
+    if (value !== "orders") {
+      closeOrderEditor();
+      closeOrderActionDialog();
+    }
     if (isStandaloneAdmin && location.pathname !== "/admin") {
       navigate("/admin");
     }
@@ -1826,6 +2444,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setSelectedProductStockHistory(nextProduct);
     }
   }, [products, selectedProductStockHistory]);
+
+  useEffect(() => {
+    if (!editingOrder?.id) return;
+    const nextOrder = orders.find((order) => order.id === editingOrder.id);
+    if (nextOrder && nextOrder !== editingOrder) {
+      setEditingOrder(nextOrder);
+    }
+  }, [orders, editingOrder]);
 
   const buildProductPayload = () => {
     const mediaList = formData.media.filter(item => item.url);
@@ -2691,7 +3317,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </TableHeader>
                 <TableBody>
                   {paginatedUsers.map((user) => {
-                    const userOrdersCount = userOrdersCountMap.get(user.id) || 0;
+                    const userOrdersCount = user.ordersCount || 0;
                     return (
                       <TableRow key={user.id}>
                         <TableCell>
@@ -2808,7 +3434,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
                         </div>
                         <div className="space-y-1">
-                          <Label>РРјСЏ</Label>
+                          <Label>Имя</Label>
                           <Input
                             value={userEditForm.name}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -2872,7 +3498,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <TableRow key={order.id}>
                                   <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
                                   <TableCell>{order.totalAmount}</TableCell>
-                                  <TableCell>{order.status}</TableCell>
+                                  <TableCell>{formatOrderStatus(order.status)}</TableCell>
                                   <TableCell>{order.createdAt ? new Date(order.createdAt).toLocaleString() : "—"}</TableCell>
                                 </TableRow>
                               ))}
@@ -2942,97 +3568,701 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           </TabsContent>
 
           <TabsContent value="orders" className="mt-0">
-            <div className="border border-gray-200 p-4">
-              <h2 className="text-2xl font-black uppercase mb-4">История заказов</h2>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Пользователь</TableHead>
-                    <TableHead>Товары</TableHead>
-                    <TableHead>Как купил</TableHead>
-                    <TableHead>Куда отправили</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead>Сумма</TableHead>
-                    <TableHead className="text-right">Действия</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {orders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
-                      <TableCell>{order.userEmail || order.userId}</TableCell>
-                      <TableCell className="max-w-[280px] text-xs">{getOrderItemsSummary(order)}</TableCell>
-                      <TableCell>{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</TableCell>
-                      <TableCell className="max-w-[220px] text-xs">{order.shippingAddress || "—"}</TableCell>
-                      <TableCell>{formatOrderStatus(order.status)}</TableCell>
-                      <TableCell>{Number(order.totalAmount || 0).toFixed(2)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button type="button" variant="outline" size="sm" onClick={() => openOrderEditor(order)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-4">
+              <div className="border border-gray-200 p-4">
+                <div className="mb-4 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-black uppercase">История заказов</h2>
+                    <p className="text-sm text-muted-foreground">Фильтруйте заказы по датам, проверяйте состав и управляйте каждым заказом прямо из таблицы.</p>
+                  </div>
+                  <div className="text-sm text-muted-foreground">{ordersLoading ? "Загрузка..." : `Найдено: ${ordersTotalItems}`}</div>
+                </div>
 
-              <Dialog open={isOrderDialogOpen} onOpenChange={setIsOrderDialogOpen}>
-                <DialogContent className="max-w-3xl rounded-none">
-                  <DialogHeader>
-                    <DialogTitle className="uppercase">Редактирование заказа</DialogTitle>
-                  </DialogHeader>
+                <div className="mb-4 grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_210px_170px_170px_auto_auto]">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={orderSearch}
+                      onChange={(e) => setOrderSearch(e.target.value)}
+                      placeholder="Поиск: ID, клиент, телефон, email, товар"
+                      className="h-11 rounded-none pl-9"
+                    />
+                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Статус заказа</Label>
-                      <select className="w-full h-10 border border-black px-3 bg-white" value={orderForm.status} onChange={(e) => setOrderForm((prev) => ({ ...prev, status: e.target.value }))}>
-                        {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  <select
+                    value={ordersStatusFilter}
+                    onChange={(e) => setOrdersStatusFilter(e.target.value)}
+                    className="h-11 border border-input bg-background px-3 text-sm rounded-none"
+                  >
+                    <option value="all">Все статусы</option>
+                    {ORDER_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <Input
+                    type="date"
+                    value={ordersDateFrom}
+                    onChange={(e) => setOrdersDateFrom(e.target.value)}
+                    className="h-11 rounded-none"
+                  />
+
+                  <Input
+                    type="date"
+                    value={ordersDateTo}
+                    onChange={(e) => setOrdersDateTo(e.target.value)}
+                    className="h-11 rounded-none"
+                  />
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-none"
+                    onClick={openOrderTableDialog}
+                  >
+                    <Columns3 className="mr-2 h-4 w-4" />
+                    Колонки
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-none"
+                    onClick={() => {
+                      setOrderSearch("");
+                      setOrdersStatusFilter("all");
+                      setOrdersDateFrom("");
+                      setOrdersDateTo("");
+                    }}
+                  >
+                    Сбросить
+                  </Button>
+                </div>
+
+                <div className="overflow-x-auto border border-gray-200">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {visibleOrderColumns.map((column) => (
+                          <TableHead key={column.id} className={column.id === "actions" ? "text-right" : undefined}>
+                            {column.label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ordersLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={visibleOrderColumns.length} className="py-10 text-center text-muted-foreground">
+                            Загружаем заказы...
+                          </TableCell>
+                        </TableRow>
+                      ) : orders.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={visibleOrderColumns.length} className="py-10 text-center text-muted-foreground">
+                            Заказы по текущим фильтрам не найдены
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        orders.map((order) => {
+                          const customer = resolveOrderCustomerSnapshot(order);
+                          const items = getOrderItemsDetails(order);
+                          const isTerminalOrder = TERMINAL_ORDER_STATUSES.has(normalizeOrderStatusValue(order.status));
+
+                          return (
+                            <TableRow key={order.id} style={getOrderRowStyle(order.status)}>
+                              {visibleOrderColumns.map((column) => {
+                                if (column.id === "id") {
+                                  return (
+                                    <TableCell key={column.id} className="max-w-[190px] align-top">
+                                      <div className="font-mono text-xs break-all">{order.id}</div>
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "client") {
+                                  return (
+                                    <TableCell key={column.id} className="min-w-[220px] align-top">
+                                      <div className="font-semibold">{customer.email || order.userId}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {customer.name || "Без имени"}
+                                        {customer.phone ? ` · ${customer.phone}` : ""}
+                                      </div>
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "items") {
+                                  return (
+                                    <TableCell key={column.id} className="min-w-[300px] align-top">
+                                      {items.length === 0 ? (
+                                        <span className="text-sm text-muted-foreground">Нет данных по товарам</span>
+                                      ) : (
+                                        <div className="space-y-2">
+                                          {items.map((item, index) => (
+                                            <div key={`${order.id}-${item.productId}-${item.size}-${index}`} className="border-b border-dashed border-gray-200 pb-2 last:border-b-0 last:pb-0">
+                                              <div className="font-medium">{item.title}</div>
+                                              <div className="text-xs text-muted-foreground">
+                                                Размер: {item.size || "—"} · Количество: {item.quantity}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "payment") {
+                                  return (
+                                    <TableCell key={column.id} className="min-w-[170px] align-top">
+                                      <div>{formatPaymentMethod(order.paymentMethod)}</div>
+                                      <div className="text-xs text-muted-foreground">Канал: {formatPurchaseChannel(order.purchaseChannel)}</div>
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "delivery") {
+                                  return (
+                                    <TableCell key={column.id} className="min-w-[220px] align-top">
+                                      <div className="text-sm">{customer.shippingAddress || "—"}</div>
+                                      <div className="text-xs text-muted-foreground">Получатель: {customer.name || "—"}</div>
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "status") {
+                                  return (
+                                    <TableCell key={column.id} className="align-top">
+                                      <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(order.status)}`}>
+                                        {formatOrderStatus(order.status)}
+                                      </span>
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "amount") {
+                                  return (
+                                    <TableCell key={column.id} className="whitespace-nowrap align-top font-semibold">
+                                      {Number(order.totalAmount || 0).toFixed(2)} ₽
+                                    </TableCell>
+                                  );
+                                }
+
+                                if (column.id === "date") {
+                                  return (
+                                    <TableCell key={column.id} className="whitespace-nowrap align-top text-sm">
+                                      {formatOrderDateTime(order.createdAt)}
+                                    </TableCell>
+                                  );
+                                }
+
+                                return (
+                                  <TableCell key={column.id} className="align-top text-right">
+                                    <TooltipProvider delayDuration={150}>
+                                      <div className="flex justify-end gap-2">
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button type="button" variant="outline" size="icon" className="h-9 w-9 rounded-none" onClick={() => openOrderEditor(order)} aria-label="Изменить заказ">
+                                              <Pencil className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>Изменить</TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="icon"
+                                              className="h-9 w-9 rounded-none border-amber-200 text-amber-700 hover:bg-amber-50"
+                                              onClick={() => openOrderActionDialog("cancel", order)}
+                                              disabled={isTerminalOrder}
+                                              aria-label="Отменить заказ"
+                                            >
+                                              <Ban className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>{isTerminalOrder ? "Заказ уже завершен" : "Отменить"}</TooltipContent>
+                                        </Tooltip>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="icon"
+                                              className="h-9 w-9 rounded-none border-red-200 text-red-600 hover:bg-red-50"
+                                              onClick={() => openOrderActionDialog("delete", order)}
+                                              aria-label="Удалить заказ"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>Удалить</TooltipContent>
+                                        </Tooltip>
+                                      </div>
+                                    </TooltipProvider>
+                                  </TableCell>
+                                );
+                              })}
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-col gap-3 text-sm text-muted-foreground md:flex-row md:items-center">
+                    <span>
+                      {ordersTotalItems === 0
+                        ? "По текущим фильтрам нет заказов"
+                        : `Показано ${Math.min((ordersPage - 1) * ordersPageSize + 1, ordersTotalItems)}-${Math.min(ordersPage * ordersPageSize, ordersTotalItems)} из ${ordersTotalItems}`}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">Строк на странице</Label>
+                      <select
+                        value={ordersPageSize}
+                        onChange={(e) => void changeOrdersPageSize(Number(e.target.value) as (typeof ORDER_PAGE_SIZE_OPTIONS)[number])}
+                        className="h-9 rounded-none border border-input bg-background px-3 text-sm text-foreground"
+                      >
+                        {ORDER_PAGE_SIZE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
                       </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Способ оплаты</Label>
-                      <Input value={orderForm.paymentMethod} onChange={(e) => setOrderForm((prev) => ({ ...prev, paymentMethod: e.target.value }))} className="rounded-none border-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Получатель</Label>
-                      <Input value={orderForm.customerName} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerName: e.target.value }))} className="rounded-none border-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Email</Label>
-                      <Input value={orderForm.customerEmail} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerEmail: e.target.value }))} className="rounded-none border-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Телефон</Label>
-                      <Input value={orderForm.customerPhone} onChange={(e) => setOrderForm((prev) => ({ ...prev, customerPhone: e.target.value }))} className="rounded-none border-black" />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Адрес доставки</Label>
-                      <Textarea value={orderForm.shippingAddress} onChange={(e) => setOrderForm((prev) => ({ ...prev, shippingAddress: e.target.value }))} className="rounded-none border-black" />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Комментарий к смене статуса</Label>
-                      <Textarea value={orderForm.managerComment} onChange={(e) => setOrderForm((prev) => ({ ...prev, managerComment: e.target.value }))} placeholder="Например: Передан в службу доставки" className="rounded-none border-black" />
                     </div>
                   </div>
 
-                  <div className="border border-gray-200 p-3 max-h-48 overflow-auto">
-                    <p className="font-bold uppercase text-sm mb-2">Хроника статусов</p>
-                    <div className="space-y-2 text-sm">
-                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).length === 0 && <p className="text-muted-foreground">История пока пуста</p>}
-                      {parseOrderStatusHistory(editingOrder?.statusHistoryJson).slice().reverse().map((entry: any, index: number) => (
-                        <div key={`${entry?.changedAt || "row"}-${index}`} className="border-b border-gray-100 pb-2">
-                          <div className="font-semibold">{formatOrderStatus(String(entry?.status || ""))}</div>
-                          <div className="text-xs text-gray-500">{entry?.changedAt ? new Date(Number(entry.changedAt)).toLocaleString() : ""} · {entry?.changedBy || "system"}</div>
-                          {entry?.comment && <div className="text-xs">{String(entry.comment)}</div>}
-                        </div>
-                      ))}
+                  <div className="flex items-center justify-between gap-3 xl:justify-end">
+                    <div className="text-sm text-muted-foreground">
+                      Страница {Math.min(ordersPage, Math.max(ordersTotalPages, 1))} из {Math.max(ordersTotalPages, 1)}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-none"
+                        onClick={() => setOrdersPage((prev) => Math.max(1, prev - 1))}
+                        disabled={ordersLoading || ordersPage <= 1}
+                      >
+                        Назад
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-none"
+                        onClick={() => setOrdersPage((prev) => Math.min(Math.max(ordersTotalPages, 1), prev + 1))}
+                        disabled={ordersLoading || ordersPage >= Math.max(ordersTotalPages, 1)}
+                      >
+                        Вперёд
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Dialog open={isOrderTableDialogOpen} onOpenChange={(open) => (!orderTableSaving ? setIsOrderTableDialogOpen(open) : undefined)}>
+                <DialogContent className="max-w-3xl rounded-none">
+                  <DialogHeader>
+                    <DialogTitle className="uppercase">Настройка таблицы заказов</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                      <p>Скрывайте лишние колонки и меняйте их порядок. Настройка сохранится для вашего аккаунта.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {orderTableDraft.columnOrder.map((columnId, index) => {
+                        const column = ORDER_TABLE_COLUMNS.find((item) => item.id === columnId);
+                        if (!column) return null;
+
+                        const isVisible = !orderTableDraft.hiddenColumns.includes(columnId);
+                        const isRequired = Boolean(column.required);
+
+                        return (
+                          <div key={columnId} className="flex flex-col gap-3 border border-gray-200 p-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <div className="font-medium">{column.label}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {isRequired ? "Обязательная колонка" : isVisible ? "Колонка видна в таблице" : "Колонка скрыта"}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-9 w-9 rounded-none"
+                                onClick={() => moveOrderTableDraftColumn(columnId, -1)}
+                                disabled={index === 0}
+                                aria-label={`Поднять колонку ${column.label}`}
+                              >
+                                <ArrowUp className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-9 w-9 rounded-none"
+                                onClick={() => moveOrderTableDraftColumn(columnId, 1)}
+                                disabled={index === orderTableDraft.columnOrder.length - 1}
+                                aria-label={`Опустить колонку ${column.label}`}
+                              >
+                                <ArrowDown className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-9 rounded-none"
+                                onClick={() => toggleOrderTableDraftColumn(columnId, !isVisible)}
+                                disabled={isRequired}
+                              >
+                                {isVisible ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
+                                {isRequired ? "Обязательно" : isVisible ? "Скрыть" : "Показать"}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
                   <DialogFooter>
-                    <Button type="button" variant="outline" className="rounded-none" onClick={() => setIsOrderDialogOpen(false)}>Отмена</Button>
-                    <Button type="button" className="rounded-none bg-black text-white" onClick={saveOrder} disabled={orderSaving}>{orderSaving ? "Сохранение..." : "Сохранить"}</Button>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={resetOrderTableDraft} disabled={orderTableSaving}>
+                      Сбросить
+                    </Button>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => setIsOrderTableDialogOpen(false)} disabled={orderTableSaving}>
+                      Отмена
+                    </Button>
+                    <Button type="button" className="rounded-none bg-black text-white" onClick={saveOrderTableLayout} disabled={orderTableSaving}>
+                      {orderTableSaving ? "Сохранение..." : "Сохранить"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isOrderDialogOpen} onOpenChange={(open) => (!open ? closeOrderEditor() : setIsOrderDialogOpen(true))}>
+                <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto rounded-none">
+                  <DialogHeader>
+                    <DialogTitle className="uppercase">
+                      Редактирование заказа{editingOrder ? ` · ${editingOrder.id}` : ""}
+                    </DialogTitle>
+                  </DialogHeader>
+
+                  {editingOrder ? (
+                    <div className="space-y-6">
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+                        <div className="space-y-4">
+                          <div className="border border-gray-200 p-4 space-y-3">
+                            <h3 className="text-lg font-bold uppercase">Сводка</h3>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Статус</div>
+                                <span className={`mt-1 inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(editingOrder.status)}`}>
+                                  {formatOrderStatus(editingOrder.status)}
+                                </span>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Сумма</div>
+                                <div className="font-semibold">{Number(editingOrder.totalAmount || 0).toFixed(2)} ₽</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Создан</div>
+                                <div>{formatOrderDateTime(editingOrder.createdAt)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Обновлен</div>
+                                <div>{formatOrderDateTime(editingOrder.updatedAt)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Оплата</div>
+                                <div>{formatPaymentMethod(editingOrder.paymentMethod)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Канал заказа</div>
+                                <div>{formatPurchaseChannel(editingOrder.purchaseChannel)}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="border border-gray-200 p-4 space-y-3">
+                            <h3 className="text-lg font-bold uppercase">Клиент</h3>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Аккаунт</div>
+                                <div>{editingOrder.userEmail || selectedOrderUser?.email || editingOrder.userId}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Имя</div>
+                                <div>{orderForm.customerName || selectedOrderUser?.profile?.name || selectedOrderUser?.profile?.nickname || "—"}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Телефон</div>
+                                <div>{orderForm.customerPhone || selectedOrderUser?.profile?.phone || "—"}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Email заказа</div>
+                                <div>{orderForm.customerEmail || editingOrder.userEmail || "—"}</div>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Адрес</div>
+                                <div>{orderForm.shippingAddress || selectedOrderUser?.profile?.shippingAddress || "—"}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="border border-gray-200 p-4 space-y-3">
+                            <h3 className="text-lg font-bold uppercase">Товары в заказе</h3>
+                            {editingOrderItems.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">В заказе нет позиций</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {editingOrderItems.map((item, index) => (
+                                  <div key={`${editingOrder.id}-${item.productId}-${item.size}-${index}`} className="border border-dashed border-gray-200 p-3">
+                                    <div className="font-semibold">{item.title}</div>
+                                    <div className="text-sm text-muted-foreground">
+                                      Размер: {item.size || "—"} · Количество: {item.quantity}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="border border-gray-200 p-4 space-y-4">
+                            <h3 className="text-lg font-bold uppercase">Данные заказа</h3>
+
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>Статус заказа</Label>
+                                <select
+                                  className="h-10 w-full border border-black bg-white px-3 rounded-none"
+                                  value={orderForm.status}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, status: e.target.value }))}
+                                >
+                                  {!ORDER_STATUS_LABELS[orderForm.status] && <option value={orderForm.status}>{orderForm.status}</option>}
+                                  {ORDER_STATUS_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>Способ оплаты</Label>
+                                <select
+                                  className="h-10 w-full border border-black bg-white px-3 rounded-none"
+                                  value={orderForm.paymentMethod}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, paymentMethod: e.target.value }))}
+                                >
+                                  {!PAYMENT_METHOD_LABELS[orderForm.paymentMethod] && <option value={orderForm.paymentMethod}>{orderForm.paymentMethod}</option>}
+                                  {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>Получатель</Label>
+                                <Input
+                                  value={orderForm.customerName}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, customerName: e.target.value }))}
+                                  className="rounded-none border-black"
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>Email</Label>
+                                <Input
+                                  value={orderForm.customerEmail}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, customerEmail: e.target.value }))}
+                                  className="rounded-none border-black"
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>Телефон</Label>
+                                <Input
+                                  value={orderForm.customerPhone}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, customerPhone: e.target.value }))}
+                                  className="rounded-none border-black"
+                                />
+                              </div>
+
+                              <div className="space-y-2 md:col-span-2">
+                                <Label>Адрес доставки</Label>
+                                <Textarea
+                                  value={orderForm.shippingAddress}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
+                                  className="rounded-none border-black min-h-[110px]"
+                                />
+                              </div>
+
+                              <div className="space-y-2 md:col-span-2">
+                                <Label>Комментарий к изменению</Label>
+                                <Textarea
+                                  value={orderForm.managerComment}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, managerComment: e.target.value }))}
+                                  placeholder="Например: Клиент попросил изменить адрес или заказ передан в доставку"
+                                  className="rounded-none border-black min-h-[110px]"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-200 p-4 space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-bold uppercase">История изменений</h3>
+                            <p className="text-sm text-muted-foreground">Показывает, кто и когда менял поля заказа.</p>
+                          </div>
+                          <span className="text-xs uppercase tracking-wide text-muted-foreground">Записей: {editingOrderHistory.length}</span>
+                        </div>
+
+                        {editingOrderHistory.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">История изменений пока пуста</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {editingOrderHistory.map((entry, index) => {
+                              const changes = Array.isArray(entry.fieldChanges)
+                                ? entry.fieldChanges.filter((change) => isOrderHistoryFieldChanged(change))
+                                : [];
+                              const entryTitle = entry.kind === "created"
+                                ? "Заказ создан"
+                                : entry.kind === "canceled"
+                                  ? "Заказ отменен"
+                                  : "Заказ обновлен";
+
+                              return (
+                                <div key={`${entry.changedAt || "row"}-${index}`} className="border border-gray-200 p-4">
+                                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                    <div>
+                                      <div className="font-semibold">{entryTitle}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {formatOrderDateTime(entry.changedAt)} · {entry.changedBy || "system"}
+                                      </div>
+                                    </div>
+                                    {entry.status ? (
+                                      <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(String(entry.status))}`}>
+                                        {formatOrderStatus(String(entry.status))}
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+                                  {entry.comment && <p className="mt-3 text-sm">{entry.comment}</p>}
+
+                                  {changes.length > 0 && (
+                                    <div className="mt-3 space-y-2">
+                                      {changes.map((change, changeIndex) => (
+                                        <div key={`${entry.changedAt || "row"}-${change.field}-${changeIndex}`} className="grid gap-2 border-t border-dashed border-gray-200 pt-2 md:grid-cols-[180px_1fr_1fr]">
+                                          <div className="text-sm font-medium">{ORDER_HISTORY_FIELD_LABELS[String(change.field || "")] || change.field}</div>
+                                          <div className="text-sm text-muted-foreground">Было: {formatOrderHistoryValue(change.field, change.oldValue)}</div>
+                                          <div className="text-sm">Стало: {formatOrderHistoryValue(change.field, change.newValue)}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <DialogFooter>
+                        <Button type="button" variant="outline" className="rounded-none" onClick={closeOrderEditor}>
+                          Отмена
+                        </Button>
+                        <Button type="button" className="rounded-none bg-black text-white" onClick={requestOrderSave} disabled={orderSaving}>
+                          {orderSaving ? "Сохранение..." : "Сохранить"}
+                        </Button>
+                      </DialogFooter>
+                    </div>
+                  ) : null}
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isOrderSaveConfirmOpen} onOpenChange={(open) => (!orderSaving ? setIsOrderSaveConfirmOpen(open) : undefined)}>
+                <DialogContent className="max-w-2xl rounded-none border-black">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-black uppercase">Подтвердите сохранение заказа</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 text-sm">
+                    <p>Перед сохранением проверьте, какие поля изменятся в заказе.</p>
+                    <div className="space-y-3 border border-gray-200 p-4">
+                      {pendingOrderSaveChanges.map((change) => (
+                        <div key={change.field} className="grid gap-2 border-b border-dashed border-gray-200 pb-3 last:border-b-0 last:pb-0 md:grid-cols-[180px_1fr_1fr]">
+                          <div className="font-medium">{change.label}</div>
+                          <div className="text-muted-foreground">Было: {formatOrderHistoryValue(change.field, change.oldValue)}</div>
+                          <div>Станет: {formatOrderHistoryValue(change.field, change.newValue)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {orderForm.managerComment.trim() ? (
+                      <div className="border border-gray-200 p-4">
+                        <div className="mb-2 font-medium">Комментарий к изменению</div>
+                        <p className="whitespace-pre-wrap text-muted-foreground">{orderForm.managerComment.trim()}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={() => setIsOrderSaveConfirmOpen(false)} disabled={orderSaving}>
+                      Отмена
+                    </Button>
+                    <Button type="button" className="rounded-none bg-black text-white" onClick={confirmOrderSave} disabled={orderSaving}>
+                      {orderSaving ? "Сохранение..." : "Подтвердить"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={orderActionDialog.open} onOpenChange={(open) => { if (!open) closeOrderActionDialog(); }}>
+                <DialogContent className="max-w-md rounded-none border-black">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-black uppercase">
+                      {orderActionDialog.action === "cancel" ? "Подтвердить отмену заказа" : "Подтвердить удаление заказа"}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3 text-sm">
+                    <p>
+                      {orderActionDialog.action === "cancel"
+                        ? `Отменить заказ ${orderActionDialog.order?.id}?`
+                        : `Удалить заказ ${orderActionDialog.order?.id}?`}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {orderActionDialog.action === "cancel"
+                        ? "После отмены статус изменится на «Отменен», а остатки товара вернутся на склад."
+                        : "Удаление уберет заказ из списка. Если заказ еще не был отменен или возвращен, остатки товара тоже вернутся на склад."}
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={closeOrderActionDialog} disabled={orderActionDialog.submitting}>
+                      Отмена
+                    </Button>
+                    <Button
+                      type="button"
+                      className={`rounded-none text-white ${orderActionDialog.action === "cancel" ? "bg-amber-600 hover:bg-amber-700" : "bg-red-600 hover:bg-red-700"}`}
+                      onClick={confirmOrderAction}
+                      disabled={orderActionDialog.submitting}
+                    >
+                      {orderActionDialog.submitting
+                        ? (orderActionDialog.action === "cancel" ? "Отмена..." : "Удаление...")
+                        : (orderActionDialog.action === "cancel" ? "Отменить заказ" : "Удалить заказ")}
+                    </Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
@@ -3255,6 +4485,59 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
                           <Input id="auth-session-sliding-minutes" type="number" min={1} value={settings["auth_session_sliding_update_minutes"] || "5"} onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)} />
                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSettingsGroup === "orders" && (
+                    <div className="space-y-4 border p-3">
+                      <div className="space-y-1">
+                        <h3 className="font-semibold">Настройки заказов</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Цвета ниже управляют подложкой строки заказа в таблице. Сами значения сохраняются в БД через общие настройки.
+                        </p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {ORDER_STATUS_OPTIONS.map((option) => {
+                          const settingKey = ORDER_STATUS_ROW_COLOR_SETTING_KEYS[option.value];
+                          const colorValue = normalizeHexColorSetting(settings[settingKey]) || DEFAULT_APP_SETTINGS[settingKey] || "#e5e7eb";
+                          return (
+                            <div key={option.value} className="space-y-2 border border-gray-200 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{option.label}</div>
+                                  <div className="text-xs text-muted-foreground">{settingKey}</div>
+                                </div>
+                                <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(option.value)}`}>
+                                  {option.label}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                <Input
+                                  type="color"
+                                  value={colorValue}
+                                  onChange={(e) => updateSetting(settingKey, e.target.value)}
+                                  className="h-11 w-16 rounded-none border-black p-1"
+                                />
+                                <Input
+                                  value={settings[settingKey] || colorValue}
+                                  onChange={(e) => updateSetting(settingKey, e.target.value)}
+                                  className="h-11 rounded-none"
+                                  placeholder="#e5e7eb"
+                                />
+                              </div>
+
+                              <div
+                                className="border px-3 py-2 text-sm"
+                                style={{ backgroundColor: hexToRgba(colorValue, 0.14), boxShadow: `inset 4px 0 0 ${colorValue}` }}
+                              >
+                                Пример строки со статусом «{option.label}»
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -4180,7 +5463,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 {telegramBotFormErrors.length > 0 && (
                   <div className="space-y-1 border border-red-300 bg-red-50 p-3 text-sm text-red-700">
                     {telegramBotFormErrors.slice(0, 6).map((error) => (
-                      <div key={error}>вЂў {error}</div>
+                      <div key={error}>• {error}</div>
                     ))}
                     {telegramBotFormErrors.length > 6 && (
                       <div>• И еще {telegramBotFormErrors.length - 6} ошибок.</div>
@@ -4508,7 +5791,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         className="h-11 w-full justify-center rounded-none border-black"
                                         onClick={() => openMediaGalleryPicker(slot)}
                                       >
-                                        <Images className="mr-2 h-4 w-4" /> Из галереи
+                                        <Images className="mr-2 h-4 w-4" /> Рз галереи
                                       </Button>
                                     </span>
                                   </TooltipTrigger>
@@ -5069,4 +6352,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       </div>
   );
 }
+
+
 
