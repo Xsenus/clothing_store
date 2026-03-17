@@ -29,6 +29,7 @@ interface Product {
   slug: string;
   price: number;
   images: string[];
+  catalogImageUrl?: string;
   sizes: string[];
   category?: string;
   categories?: string[];

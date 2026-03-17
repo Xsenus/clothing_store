@@ -6,24 +6,25 @@ interface QuantitySelectorProps {
   min?: number;
   max?: number;
   onChange: (value: number) => void;
+  disabled?: boolean;
 }
 
-export default function QuantitySelector({ quantity, min = 1, max = 10, onChange }: QuantitySelectorProps) {
+export default function QuantitySelector({ quantity, min = 1, max = 10, onChange, disabled = false }: QuantitySelectorProps) {
   const handleDecrement = () => {
-    if (quantity > min) onChange(quantity - 1);
+    if (!disabled && quantity > min) onChange(quantity - 1);
   };
 
   const handleIncrement = () => {
-    if (quantity < max) onChange(quantity + 1);
+    if (!disabled && quantity < max) onChange(quantity + 1);
   };
 
   return (
-    <div className="flex items-center border rounded-md">
+    <div className={`flex items-center rounded-md border ${disabled ? "opacity-80" : ""}`}>
       <Button 
         variant="ghost" 
         size="icon" 
         onClick={handleDecrement}
-        disabled={quantity <= min}
+        disabled={disabled || quantity <= min}
         className="h-10 w-10"
       >
         <Minus className="h-4 w-4" />
@@ -33,7 +34,7 @@ export default function QuantitySelector({ quantity, min = 1, max = 10, onChange
         variant="ghost" 
         size="icon" 
         onClick={handleIncrement}
-        disabled={quantity >= max}
+        disabled={disabled || quantity >= max}
         className="h-10 w-10"
       >
         <Plus className="h-4 w-4" />

@@ -23,7 +23,14 @@ public class PublicSettingsController : ControllerBase
         "telegram_login_enabled",
         "telegram_bot_username",
         "site_title",
-        "site_favicon_url"
+        "site_favicon_url",
+        "product_card_background_mode",
+        "product_card_background_color",
+        "product_card_image_fit_mode",
+        "product_detail_background_mode",
+        "product_detail_background_color",
+        "product_detail_image_fit_mode",
+        "product_detail_media_size_mode"
     ];
 
     private readonly StoreDbContext _db;

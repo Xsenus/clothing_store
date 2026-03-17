@@ -16,6 +16,8 @@ import { Heart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import PageSeo from '@/components/PageSeo';
 import { resolveUrl, truncateText } from '@/lib/seo';
+import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
+import { getProductDetailImageDisplayClasses, getProductDetailMediaPageLayoutClasses } from '@/lib/product-card-background';
 
 interface Product {
   _id: string;
@@ -24,6 +26,7 @@ interface Product {
   description: string;
   price: number;
   images: string[];
+  catalogImageUrl?: string;
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
   sizes: string[];
@@ -75,7 +78,7 @@ export default function ProductDetailPage() {
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSize, setSelectedSize] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(0);
   const [imgError, setImgError] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [reviewText, setReviewText] = useState("");
@@ -94,6 +97,7 @@ export default function ProductDetailPage() {
   const productCategories = product ? normalizeProductValues(product.categories, product.category) : [];
   const productMaterials = product ? normalizeProductValues(product.materials, product.material) : [];
   const productColors = product ? normalizeProductValues(product.colors, product.color) : [];
+  const hasSizeStockInfo = Boolean(product?.sizeStock && Object.keys(product.sizeStock).length > 0);
   const hasStock = product
     ? product.sizeStock
       ? Object.values(product.sizeStock).some((value) => Number(value) > 0)
@@ -124,7 +128,7 @@ export default function ProductDetailPage() {
           setMediaIndex(0);
           // Reset selection
           setSelectedSize('');
-          setQuantity(1);
+          setQuantity(0);
           setImgError(false);
 
           // Fetch similar
@@ -156,6 +160,27 @@ export default function ProductDetailPage() {
           ])
     : [];
   const currentMedia = mediaItems[mediaIndex];
+  const currentMediaImage =
+    currentMedia?.type === "image"
+      ? currentMedia.url
+      : product?.images?.[0] || mediaImage || "";
+  const {
+    productDetailBackgroundMode,
+    productDetailBackgroundStyle,
+    productDetailStaticBackgroundStyle,
+    productDetailImageFitMode,
+    productDetailMediaSizeMode,
+  } = useProductMediaBackground(currentMediaImage);
+  const productDetailMediaLayout = getProductDetailMediaPageLayoutClasses(productDetailMediaSizeMode);
+  const productDetailMediaDisplay = getProductDetailImageDisplayClasses(productDetailImageFitMode);
+  const productDetailThumbnailPaddingClassName =
+    productDetailImageFitMode === "fill" || productDetailImageFitMode === "cover" ? "" : "p-2";
+  const selectedSizeAvailableQuantity = selectedSize
+    ? hasSizeStockInfo
+      ? Math.max(0, Number(product?.sizeStock?.[selectedSize] ?? 0))
+      : 10
+    : 0;
+  const displayedQuantity = selectedSize ? quantity : 0;
   const goPrev = () => {
     if (mediaItems.length === 0) return;
     setMediaIndex((prev) => (prev - 1 + mediaItems.length) % mediaItems.length);
@@ -168,12 +193,25 @@ export default function ProductDetailPage() {
   };
 
   useEffect(() => {
-    if (!product || !selectedSize) return;
-    const available = product.sizeStock?.[selectedSize];
-    if (available !== undefined) {
-      setQuantity((prev) => Math.min(prev, Math.max(1, available)));
+    if (!product) return;
+
+    if (!selectedSize) {
+      setQuantity(0);
+      return;
     }
-  }, [selectedSize, product]);
+
+    if (hasSizeStockInfo) {
+      const available = Math.max(0, Number(product.sizeStock?.[selectedSize] ?? 0));
+      setQuantity((prev) => {
+        if (available <= 0) return 0;
+        const nextBase = prev > 0 ? prev : 1;
+        return Math.min(nextBase, available);
+      });
+      return;
+    }
+
+    setQuantity((prev) => (prev > 0 ? prev : 1));
+  }, [selectedSize, product, hasSizeStockInfo]);
 
   useEffect(() => {
     if (!product || !isAuthenticated) {
@@ -199,6 +237,10 @@ export default function ProductDetailPage() {
     }
     if (!selectedSize) {
       toast.error("Пожалуйста, выберите размер");
+      return;
+    }
+    if (quantity <= 0) {
+      toast.error("Товар недоступен в выбранном размере");
       return;
     }
     const available = product.sizeStock?.[selectedSize];
@@ -346,21 +388,21 @@ export default function ProductDetailPage() {
       <Header />
       
       <main className="flex-1 container mx-auto px-4 pt-28 pb-12 md:pt-32">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-24">
+        <div className="grid grid-cols-1 gap-12 mb-24 lg:grid-cols-2 lg:items-start">
           {/* Left: Images */}
-          <div className="space-y-4">
-            <div className="aspect-[3/4] bg-gray-100 overflow-hidden relative border border-gray-200">
+          <div className={`space-y-4 lg:flex lg:flex-col ${productDetailMediaLayout.columnHeightClassName} lg:space-y-3`}>
+            <div className={`relative aspect-[3/4] overflow-hidden border border-gray-200 lg:flex-1 lg:min-h-0 lg:aspect-auto ${productDetailMediaLayout.framePaddingClassName}`} style={productDetailBackgroundStyle}>
               {currentMedia?.type === "video" ? (
-                <video src={currentMedia.url} controls className="w-full h-full object-cover" />
+                <video src={currentMedia.url} controls className={`relative z-[1] h-full w-full ${productDetailMediaDisplay.objectFitClassName} ${productDetailMediaDisplay.scaleClassName} ${productDetailMediaLayout.mediaPaddingClassName}`.trim()} />
               ) : currentMedia?.url && !imgError ? (
                 <img 
                   src={currentMedia.url} 
                   alt={product.name} 
-                  className="w-full h-full object-cover" 
+                  className={`relative z-[1] h-full w-full ${productDetailMediaDisplay.objectFitClassName} ${productDetailMediaDisplay.scaleClassName} ${productDetailMediaLayout.mediaPaddingClassName}`.trim()} 
                   onError={() => setImgError(true)}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gray-900 text-white font-bold text-2xl">
+                <div className={`relative z-[1] flex h-full w-full items-center justify-center bg-gray-900 text-white font-bold text-2xl ${productDetailMediaLayout.mediaPaddingClassName}`}>
                   {product.name}
                 </div>
               )}
@@ -374,14 +416,14 @@ export default function ProductDetailPage() {
                   <button
                     type="button"
                     onClick={goPrev}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/60 text-white flex items-center justify-center"
+                    className="absolute left-3 top-1/2 z-[3] -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white"
                   >
                     <ChevronLeft className="h-5 w-5" />
                   </button>
                   <button
                     type="button"
                     onClick={goNext}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-black/60 text-white flex items-center justify-center"
+                    className="absolute right-3 top-1/2 z-[3] -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white"
                   >
                     <ChevronRight className="h-5 w-5" />
                   </button>
@@ -391,7 +433,7 @@ export default function ProductDetailPage() {
             
             {/* Thumbnails */}
             {mediaItems.length > 1 && (
-              <div className="flex gap-4 overflow-x-auto pb-2">
+              <div className={productDetailMediaLayout.thumbnailsContainerClassName}>
                 {mediaItems.map((item, idx) => (
                   <button 
                     key={idx}
@@ -399,16 +441,21 @@ export default function ProductDetailPage() {
                       setMediaIndex(idx);
                       setImgError(false);
                     }}
-                    className={`relative w-24 h-32 flex-shrink-0 border-2 transition-all ${
+                    className={`${productDetailMediaLayout.thumbnailClassName} ${
                       mediaIndex === idx ? 'border-black opacity-100' : 'border-transparent opacity-60 hover:opacity-100'
                     }`}
+                    style={productDetailBackgroundMode === "auto" ? productDetailStaticBackgroundStyle : productDetailBackgroundStyle}
                   >
                     {item.type === "video" ? (
                       <div className="w-full h-full flex items-center justify-center bg-black text-white text-xs uppercase font-bold">
                         Видео
                       </div>
                     ) : (
-                      <img src={item.url} alt={`${product.name} ${idx}`} className="w-full h-full object-cover" />
+                      <img
+                        src={item.url}
+                        alt={`${product.name} ${idx}`}
+                        className={`h-full w-full ${productDetailMediaDisplay.objectFitClassName} ${productDetailMediaDisplay.thumbnailScaleClassName} ${productDetailThumbnailPaddingClassName}`.trim()}
+                      />
                     )}
                   </button>
                 ))}
@@ -440,25 +487,31 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            <div className="border-t border-b border-gray-100 py-6 space-y-6">
-              <div>
-                <label className="block text-sm font-bold uppercase tracking-widest mb-3">ВЫБЕРИТЕ РАЗМЕР</label>
-                <SizeSelector 
-                  sizes={product.sizes || []} 
-                  selectedSize={selectedSize} 
-                  onSelect={setSelectedSize}
-                  sizeStock={product.sizeStock || {}}
-                />
-                {!selectedSize && <p className="text-red-500 text-xs mt-2 font-bold uppercase">Пожалуйста, выберите размер</p>}
-              </div>
+            <div className="border-t border-b border-gray-100 py-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+                <div className="min-w-0 flex-1">
+                  <label className="mb-3 block text-sm font-bold uppercase tracking-widest">ВЫБЕРИТЕ РАЗМЕР</label>
+                  <SizeSelector 
+                    sizes={product.sizes || []} 
+                    selectedSize={selectedSize} 
+                    onSelect={setSelectedSize}
+                    sizeStock={product.sizeStock || {}}
+                  />
+                  {!selectedSize && <p className="mt-2 text-xs font-bold uppercase text-red-500">Пожалуйста, выберите размер</p>}
+                </div>
 
-              <div>
-                <label className="block text-sm font-bold uppercase tracking-widest mb-3">КОЛИЧЕСТВО</label>
-                <QuantitySelector 
-                  quantity={quantity} 
-                  onChange={setQuantity}
-                  max={selectedSize ? (product.sizeStock?.[selectedSize] ?? 10) : 10}
-                />
+                <div className="lg:min-w-[220px] lg:pt-0.5 lg:text-right">
+                  <label className="mb-3 block text-sm font-bold uppercase tracking-widest">КОЛИЧЕСТВО</label>
+                  <div className="flex lg:justify-end">
+                    <QuantitySelector 
+                      quantity={displayedQuantity}
+                      min={selectedSize ? 1 : 0}
+                      onChange={setQuantity}
+                      max={selectedSize ? selectedSizeAvailableQuantity : 0}
+                      disabled={!selectedSize || selectedSizeAvailableQuantity <= 0}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -466,7 +519,7 @@ export default function ProductDetailPage() {
               size="lg" 
               className="w-full py-8 text-xl font-black uppercase tracking-widest"
               onClick={handleAddToCart}
-              disabled={selectedSize ? (product.sizeStock?.[selectedSize] ?? 1) <= 0 : false}
+              disabled={!selectedSize || quantity <= 0}
             >
               В КОРЗИНУ
             </Button>

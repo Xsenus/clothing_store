@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { useCart } from '@/context/CartContext';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
+import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
+import { getProductCardImageDisplayClasses } from '@/lib/product-card-background';
 
 interface Product {
   _id: string;
@@ -17,6 +19,7 @@ interface Product {
   slug: string;
   price: number;
   images: string[];
+  catalogImageUrl?: string;
   isNew?: boolean;
   likesCount?: number;
   sizes?: string[];
@@ -89,6 +92,16 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const hasStockInfo = product.sizeStock && Object.keys(product.sizeStock).length > 0;
+  const productCardImage = product.catalogImageUrl || product.images[0] || "";
+  const { backgroundStyle: productCardBackgroundStyle, imageFitMode } = useProductMediaBackground(productCardImage);
+  const cardImageDisplay = getProductCardImageDisplayClasses(imageFitMode, "card");
+  const compactImageDisplay = getProductCardImageDisplayClasses(imageFitMode, "compact");
+  const cardHoverScaleClassName =
+    imageFitMode === "contain-zoom"
+      ? "group-hover:scale-[1.12]"
+      : imageFitMode === "fill"
+        ? ""
+        : "group-hover:scale-105";
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -138,9 +151,9 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
     const success = await addToCart(product._id, selectedSize, 1);
     
     if (success) {
-      if (imageRef.current) {
+      if (imageRef.current && productCardImage) {
         setFlyingImage({
-          src: product.images[0],
+          src: productCardImage,
           rect: imageRef.current.getBoundingClientRect()
         });
       }
@@ -153,17 +166,17 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
   return (
     <>
       <div className="group block relative overflow-hidden bg-card border border-transparent hover:border-border transition-all duration-300 transform-gpu origin-center hover:scale-[0.99]">
-        <Link to={`/product/${product.slug}`} className="block relative aspect-[3/4] overflow-hidden bg-gray-100">
-          {product.images && product.images.length > 0 && !imageError ? (
+        <Link to={`/product/${product.slug}`} className="block relative aspect-[25/24] overflow-hidden" style={productCardBackgroundStyle}>
+          {productCardImage && !imageError ? (
             <img 
               ref={imageRef}
-              src={product.images[0]} 
+              src={productCardImage} 
               alt={product.name}
-              className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-110"
+              className={`relative z-[1] h-full w-full transition-transform duration-500 ${cardHoverScaleClassName} ${cardImageDisplay.objectFitClassName} ${cardImageDisplay.paddingClassName} ${cardImageDisplay.scaleClassName}`.trim()}
               onError={() => setImageError(true)}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-900 text-white font-bold text-xl p-4 text-center">
+            <div className="relative z-[1] flex h-full w-full items-center justify-center bg-gray-900 p-4 text-center font-bold text-xl text-white">
               {product.name}
             </div>
           )}
@@ -204,12 +217,18 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                   <div className="flex items-center gap-4">
-                    <div className="w-20 h-20 rounded-md overflow-hidden bg-gray-100 flex-shrink-0">
-                      <img 
-                        src={product.images[0]} 
-                        alt={product.name} 
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md" style={productCardBackgroundStyle}>
+                      {productCardImage ? (
+                        <img 
+                          src={productCardImage} 
+                          alt={product.name} 
+                          className={`relative z-[1] h-full w-full ${compactImageDisplay.objectFitClassName} ${compactImageDisplay.paddingClassName} ${compactImageDisplay.scaleClassName}`.trim()}
+                        />
+                      ) : (
+                        <div className="relative z-[1] flex h-full w-full items-center justify-center p-2 text-center text-[10px] font-bold uppercase tracking-wide text-gray-500">
+                          {product.name}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <h3 className="font-bold">{product.name}</h3>
