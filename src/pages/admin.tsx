@@ -467,6 +467,9 @@ const normalizeDictionaryValues = (values?: string[] | null, fallback?: string |
   return result;
 };
 
+const getProductSizeNames = (product: Pick<Product, "sizes" | "sizeStock">) =>
+  normalizeDictionaryValues([...(product.sizes || []), ...Object.keys(product.sizeStock || {})]);
+
 const resolveCatalogImageUrl = (
   media: { type: "image" | "video"; url: string }[],
   preferredUrl?: string | null,
@@ -616,6 +619,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
+  const [selectedProductStockHistory, setSelectedProductStockHistory] = useState<Product | null>(null);
   const [telegramBotForm, setTelegramBotForm] = useState(getInitialTelegramBotForm);
   const [isTelegramBotDialogOpen, setIsTelegramBotDialogOpen] = useState(false);
   const [editingTelegramBotId, setEditingTelegramBotId] = useState<string | null>(null);
@@ -1294,6 +1298,38 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return map;
   }, [orders]);
 
+  const stockHistoryByProductId = useMemo(() => {
+    const map = new Map<string, StockHistoryEntry[]>();
+    stockHistory.forEach((entry) => {
+      if (!entry.productId) return;
+      const existing = map.get(entry.productId);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        map.set(entry.productId, [entry]);
+      }
+    });
+    return map;
+  }, [stockHistory]);
+
+  const selectedProductStockHistoryEntries = useMemo(() => {
+    if (!selectedProductStockHistory?._id) return [];
+    return stockHistoryByProductId.get(selectedProductStockHistory._id) || [];
+  }, [selectedProductStockHistory, stockHistoryByProductId]);
+
+  const selectedProductStockSizes = useMemo(() => {
+    if (!selectedProductStockHistory) return [];
+    return getProductSizeNames(selectedProductStockHistory);
+  }, [selectedProductStockHistory]);
+
+  const selectedProductTotalStock = useMemo(() => {
+    if (!selectedProductStockHistory) return 0;
+    return selectedProductStockSizes.reduce(
+      (sum, size) => sum + Math.max(0, Number(selectedProductStockHistory.sizeStock?.[size] ?? 0)),
+      0
+    );
+  }, [selectedProductStockHistory, selectedProductStockSizes]);
+
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message.trim()) {
       return error.message;
@@ -1724,11 +1760,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const openProductStockHistory = (product: Product) => {
+    setSelectedProductStockHistory(product);
+  };
+
+  const closeProductStockHistory = () => {
+    setSelectedProductStockHistory(null);
+  };
+
   const handleAdminTabChange = (value: string) => {
     setSelectedAdminTab(value);
     if (value === "products") return;
 
     resetProductEditor();
+    closeProductStockHistory();
     if (isStandaloneAdmin && location.pathname !== "/admin") {
       navigate("/admin");
     }
@@ -1769,6 +1814,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
     setIsOpen(false);
   }, [isStandaloneAdmin, isCreateProductRoute, routeEditingProductId, products, loading, navigate]);
+
+  useEffect(() => {
+    if (!selectedProductStockHistory?._id) return;
+    const nextProduct = products.find((product) => product._id === selectedProductStockHistory._id);
+    if (!nextProduct) {
+      setSelectedProductStockHistory(null);
+      return;
+    }
+    if (nextProduct !== selectedProductStockHistory) {
+      setSelectedProductStockHistory(nextProduct);
+    }
+  }, [products, selectedProductStockHistory]);
 
   const buildProductPayload = () => {
     const mediaList = formData.media.filter(item => item.url);
@@ -2198,50 +2255,215 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           <TabsContent value="products" className="mt-0">
           {!isOpen && (
             <div className="border border-gray-200 rounded-none overflow-hidden">
+              <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm text-muted-foreground">
+                Нажмите на название товара, чтобы открыть историю остатков по размерам.
+              </div>
               <Table>
                 <TableHeader className="bg-gray-50">
                   <TableRow>
                     <TableHead className="w-[100px]">Изображение</TableHead>
                     <TableHead>Название</TableHead>
                     <TableHead>Цена</TableHead>
-                    <TableHead>Категория</TableHead>
+                    <TableHead>Размеры</TableHead>
+                    <TableHead>Остатки</TableHead>
                     <TableHead>Метки</TableHead>
                     <TableHead className="text-right">Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {products.map((product) => (
-                    <TableRow key={product._id}>
-                      <TableCell>
-                        {(product.images?.[0] || product.media?.find((m) => m.type === "image")?.url) ? (
-                          <img src={product.catalogImageUrl || product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
-                        ) : (
-                          <div className="w-12 h-16 bg-gray-200" />
-                        )}
-                      </TableCell>
-                      <TableCell className="font-bold">{product.name}</TableCell>
-                      <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
-                      <TableCell className="uppercase text-xs tracking-wide">{normalizeDictionaryValues(product.categories, product.category).join(", ") || "-"}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 flex-wrap">
-                          {product.isNew && <span className="px-2 py-0.5 bg-black text-white text-[10px] uppercase font-bold">Новинка</span>}
-                          {product.isPopular && <span className="px-2 py-0.5 bg-gray-200 text-black text-[10px] uppercase font-bold">Хит</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleOpen(product)}>
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(product._id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {products.map((product) => {
+                    const sizeNames = getProductSizeNames(product);
+                    const hasStockInfo = Boolean(product.sizeStock && Object.keys(product.sizeStock).length > 0);
+                    const stockEntries = hasStockInfo
+                      ? sizeNames.map((size) => ({
+                          size,
+                          stock: Math.max(0, Number(product.sizeStock?.[size] ?? 0))
+                        }))
+                      : [];
+                    const totalStock = stockEntries.reduce((sum, entry) => sum + entry.stock, 0);
+
+                    return (
+                      <TableRow key={product._id}>
+                        <TableCell>
+                          {(product.images?.[0] || product.media?.find((m) => m.type === "image")?.url) ? (
+                            <img src={product.catalogImageUrl || product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
+                          ) : (
+                            <div className="w-12 h-16 bg-gray-200" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            type="button"
+                            onClick={() => openProductStockHistory(product)}
+                            className="text-left transition-opacity hover:opacity-80"
+                          >
+                            <div className="font-bold">{product.name}</div>
+                          </button>
+                        </TableCell>
+                        <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
+                        <TableCell>
+                          {sizeNames.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {sizeNames.map((size) => (
+                                <span key={size} className="inline-flex items-center border border-gray-200 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide">
+                                  {size}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Не указаны</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {hasStockInfo ? (
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-1">
+                                {stockEntries.map(({ size, stock }) => (
+                                  <span
+                                    key={size}
+                                    className={`inline-flex items-center gap-1 border px-2 py-1 text-[11px] font-semibold ${stock > 0 ? "border-gray-200 text-black" : "border-red-200 bg-red-50 text-red-600"}`}
+                                  >
+                                    <span className="uppercase tracking-wide">{size}</span>
+                                    <span>{stock}</span>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Всего: {totalStock}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Не заданы</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1 flex-wrap">
+                            {product.isNew && <span className="px-2 py-0.5 bg-black text-white text-[10px] uppercase font-bold">Новинка</span>}
+                            {product.isPopular && <span className="px-2 py-0.5 bg-gray-200 text-black text-[10px] uppercase font-bold">Хит</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <Button variant="ghost" size="icon" onClick={() => handleOpen(product)}>
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(product._id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
           )}
+          <Dialog open={Boolean(selectedProductStockHistory)} onOpenChange={(open) => (!open ? closeProductStockHistory() : undefined)}>
+            <DialogContent className="max-w-5xl rounded-none">
+              <DialogHeader>
+                <DialogTitle className="uppercase">
+                  История остатков{selectedProductStockHistory ? `: ${selectedProductStockHistory.name}` : ""}
+                </DialogTitle>
+              </DialogHeader>
+
+              {selectedProductStockHistory ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="border border-gray-200 p-4 space-y-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Товар</div>
+                        <div className="font-bold">{selectedProductStockHistory.name}</div>
+                        <div className="text-sm text-muted-foreground">{selectedProductStockHistory.slug}</div>
+                      </div>
+
+                      <div>
+                        <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Текущие остатки по размерам</div>
+                        {selectedProductStockSizes.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {selectedProductStockSizes.map((size) => {
+                              const stock = Math.max(0, Number(selectedProductStockHistory.sizeStock?.[size] ?? 0));
+                              return (
+                                <span
+                                  key={size}
+                                  className={`inline-flex items-center gap-1 border px-2 py-1 text-[11px] font-semibold ${stock > 0 ? "border-gray-200 text-black" : "border-red-200 bg-red-50 text-red-600"}`}
+                                >
+                                  <span className="uppercase tracking-wide">{size}</span>
+                                  <span>{stock}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">Размеры для товара пока не указаны.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 p-4 space-y-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Записей в истории</div>
+                        <div className="text-3xl font-black">{selectedProductStockHistoryEntries.length}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Текущий общий остаток</div>
+                        <div className="text-3xl font-black">{selectedProductTotalStock}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 max-h-[60vh] overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Дата</TableHead>
+                          <TableHead>Размер</TableHead>
+                          <TableHead>Было</TableHead>
+                          <TableHead>Стало</TableHead>
+                          <TableHead>Изменение</TableHead>
+                          <TableHead>Причина</TableHead>
+                          <TableHead>Кто</TableHead>
+                          <TableHead>Заказ</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedProductStockHistoryEntries.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                              История остатков по этому товару пока пуста
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          selectedProductStockHistoryEntries.map((entry) => {
+                            const delta = entry.newValue - entry.oldValue;
+                            const deltaClassName = delta > 0 ? "text-emerald-600" : delta < 0 ? "text-red-600" : "text-muted-foreground";
+                            const deltaLabel = `${delta > 0 ? "+" : ""}${delta}`;
+
+                            return (
+                              <TableRow key={entry.id}>
+                                <TableCell>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("ru-RU") : "—"}</TableCell>
+                                <TableCell>{entry.size || entry.sizeId}</TableCell>
+                                <TableCell>{entry.oldValue}</TableCell>
+                                <TableCell>{entry.newValue}</TableCell>
+                                <TableCell className={deltaClassName}>{deltaLabel}</TableCell>
+                                <TableCell>{getStockHistoryReasonLabel(entry.reason)}</TableCell>
+                                <TableCell>{entry.changedBy || entry.changedByUserId || "—"}</TableCell>
+                                <TableCell className="max-w-[180px] truncate">{entry.orderId || "—"}</TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <DialogFooter>
+                    <Button type="button" variant="outline" className="rounded-none" onClick={closeProductStockHistory}>
+                      Закрыть
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ) : null}
+            </DialogContent>
+          </Dialog>
           </TabsContent>
 
           <TabsContent value="gallery" className="mt-0">
@@ -2814,50 +3036,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
-
-              <div className="mt-6 border border-gray-200 p-4">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-black uppercase">История остатков</h2>
-                    <p className="text-sm text-muted-foreground">Кто, когда и почему изменил остаток по размеру.</p>
-                  </div>
-                  <span className="text-xs uppercase tracking-wide text-muted-foreground">Записей: {stockHistory.length}</span>
-                </div>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Дата</TableHead>
-                      <TableHead>Товар</TableHead>
-                      <TableHead>Размер</TableHead>
-                      <TableHead>Было</TableHead>
-                      <TableHead>Стало</TableHead>
-                      <TableHead>Причина</TableHead>
-                      <TableHead>Кто</TableHead>
-                      <TableHead>Заказ</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {stockHistory.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center text-muted-foreground">История остатков пока пуста</TableCell>
-                      </TableRow>
-                    ) : (
-                      stockHistory.map((entry) => (
-                        <TableRow key={entry.id}>
-                          <TableCell>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("ru-RU") : "—"}</TableCell>
-                          <TableCell>{entry.product || entry.productId}</TableCell>
-                          <TableCell>{entry.size || entry.sizeId}</TableCell>
-                          <TableCell>{entry.oldValue}</TableCell>
-                          <TableCell>{entry.newValue}</TableCell>
-                          <TableCell>{getStockHistoryReasonLabel(entry.reason)}</TableCell>
-                          <TableCell>{entry.changedBy || entry.changedByUserId || "—"}</TableCell>
-                          <TableCell className="max-w-[180px] truncate">{entry.orderId || "—"}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
             </div>
           </TabsContent>
 
