@@ -25,10 +25,25 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  getProductCardImageDisplayClasses,
+  buildProductCardBackgroundStyleFromColor,
+  buildStandardProductCardBackgroundStyle,
+  buildTransparentProductCardBackgroundStyle,
+  getProductDetailImageDisplayClasses,
+  getProductDetailMediaPreviewLayoutClasses,
+  normalizeProductCardBackgroundColor,
+  normalizeProductCardBackgroundMode,
+  normalizeProductCardImageFitMode,
+  normalizeProductDetailBackgroundColor,
+  normalizeProductDetailBackgroundMode,
+  normalizeProductDetailImageFitMode,
+  normalizeProductDetailMediaSizeMode,
+} from '@/lib/product-card-background';
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, MinusCircle, Search, ShieldAlert, ShieldX, UserCog } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -235,6 +250,7 @@ interface Product {
   discountPercent?: number;
   discountedPrice?: number;
   images: string[];
+  catalogImageUrl?: string;
   videos?: string[];
   media?: { type: "image" | "video"; url: string }[];
   sizes: string[];
@@ -371,6 +387,22 @@ interface ProductDictionarySelectorState {
   kind: DictionaryKind;
 }
 
+interface DictionaryCreateDialogState {
+  open: boolean;
+  kind: DictionaryKind;
+  submitting: boolean;
+  attachToProduct: boolean;
+  name: string;
+  slug: string;
+  color: string;
+  description: string;
+}
+
+interface MediaDeleteDialogState {
+  open: boolean;
+  slot: number | null;
+}
+
 interface StockHistoryEntry {
   id: string;
   productId: string;
@@ -397,6 +429,7 @@ const createEmptyProductForm = () => ({
   images: "",
   videos: "",
   media: [{ type: "image" as const, url: "" }],
+  catalogImageUrl: "",
   sizes: [] as string[],
   isNew: false,
   isPopular: false,
@@ -434,11 +467,36 @@ const normalizeDictionaryValues = (values?: string[] | null, fallback?: string |
   return result;
 };
 
+const resolveCatalogImageUrl = (
+  media: { type: "image" | "video"; url: string }[],
+  preferredUrl?: string | null,
+) => {
+  const imageUrls = media
+    .filter((item) => item.type === "image" && item.url.trim())
+    .map((item) => item.url.trim());
+
+  if (imageUrls.length === 0) return "";
+
+  const normalizedPreferredUrl = preferredUrl?.trim();
+  if (normalizedPreferredUrl && imageUrls.includes(normalizedPreferredUrl)) {
+    return normalizedPreferredUrl;
+  }
+
+  return imageUrls[0];
+};
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
   site_title: "fashiondemon",
   site_favicon_url: "",
+  product_card_background_mode: "standard",
+  product_card_background_color: "#e9e3da",
+  product_card_image_fit_mode: "contain",
+  product_detail_background_mode: "standard",
+  product_detail_background_color: "#e9e3da",
+  product_detail_image_fit_mode: "contain",
+  product_detail_media_size_mode: "compact",
   privacy_policy: "",
   user_agreement: "",
   public_offer: "",
@@ -482,6 +540,22 @@ const DICTIONARY_FILTER_SETTING_KEYS: Record<DictionaryKind, string> = {
   colors: "catalog_filter_colors_enabled"
 };
 
+const PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 300">
+  <rect width="220" height="300" fill="#ffffff"/>
+  <g>
+    <path d="M76 48h68l14 20 26 20-18 134H54L36 88l26-20z" fill="#171717"/>
+    <path d="M70 61h80l-8 22H78z" fill="#2a2a2a"/>
+    <path d="M84 52h18v20H84zM118 52h18v20h-18z" fill="#e53935"/>
+    <path d="M50 96l14-10 18 28-18 88H44z" fill="#101010"/>
+    <path d="M170 96l-14-10-18 28 18 88h20z" fill="#101010"/>
+    <path d="M128 104c18 0 32 12 32 28s-16 34-34 34c-5 0-9 7-3 16l-10 7c-12-13-15-22-13-31 2-10 11-19 18-22-12-3-18-10-18-20 0-13 11-24 28-24z" fill="#ff4338"/>
+    <path d="M60 120c10 14 10 30 0 48" stroke="#ff4338" stroke-width="10" fill="none" stroke-linecap="round"/>
+    <path d="M160 120c-10 14-10 30 0 48" stroke="#ff4338" stroke-width="10" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>
+`)}`;
+
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -511,6 +585,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     submitting: false,
     error: ""
   });
+  const [dictionaryCreateDialog, setDictionaryCreateDialog] = useState<DictionaryCreateDialogState>({
+    open: false,
+    kind: "categories",
+    submitting: false,
+    attachToProduct: false,
+    name: "",
+    slug: "",
+    color: "#3b82f6",
+    description: ""
+  });
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [productDictionarySelector, setProductDictionarySelector] = useState<ProductDictionarySelectorState>({ open: false, kind: "sizes" });
   const [loading, setLoading] = useState(true);
@@ -528,6 +612,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     managerComment: "",
   });
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
+  const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState("branding");
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
@@ -555,6 +640,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(createEmptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productSubmitting, setProductSubmitting] = useState(false);
+  const [productUpdateConfirmOpen, setProductUpdateConfirmOpen] = useState(false);
+  const [mediaDeleteDialog, setMediaDeleteDialog] = useState<MediaDeleteDialogState>({ open: false, slot: null });
   const [uploading, setUploading] = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
   const faviconUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -573,6 +661,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [mediaGallerySlot, setMediaGallerySlot] = useState<number | null>(null);
   const [mediaGallerySearch, setMediaGallerySearch] = useState("");
   const mediaGalleryUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedProductEditorDictionaryTab, setSelectedProductEditorDictionaryTab] = useState<DictionaryKind>("categories");
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -635,7 +724,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       const product = products.find((entry) => entry._id === item?.productId);
       const title = item?.productName || product?.name || item?.productId || "Товар";
       const size = item?.size ? ` (${item.size})` : "";
-      return `${title}${size} × ${qty}`;
+      return `${title}${size} Г— ${qty}`;
     }).join(", ");
   };
 
@@ -748,19 +837,65 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const createDictionaryItem = async (kind: DictionaryKind) => {
-    const name = window.prompt("Введите отображаемое название (например, Хлопок)");
-    if (!name) return;
-    const slug = window.prompt("Введите slug на английском (можно оставить пустым для автогенерации)") || undefined;
+  const createDictionaryItem = (kind: DictionaryKind, attachToProduct = false) => {
+    setSelectedProductEditorDictionaryTab(kind);
+    setDictionaryCreateDialog({
+      open: true,
+      kind,
+      submitting: false,
+      attachToProduct,
+      name: "",
+      slug: "",
+      color: getDictionaryDotColor(kind),
+      description: ""
+    });
+  };
+
+  const submitCreateDictionaryItem = async () => {
+    const name = dictionaryCreateDialog.name.trim();
+    const slug = dictionaryCreateDialog.slug.trim().toLowerCase();
+
+    if (!name) {
+      toast.error("Название обязательно");
+      return;
+    }
+
+    if (slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      toast.error("Slug должен быть на латинице");
+      return;
+    }
+
+    setDictionaryCreateDialog((prev) => ({ ...prev, submitting: true }));
     try {
-      await FLOW.adminCreateDictionaryItem({ input: { kind, name, slug, isActive: true, showInCatalogFilter: true } });
+      await FLOW.adminCreateDictionaryItem({
+        input: {
+          kind: dictionaryCreateDialog.kind,
+          name,
+          slug: slug || undefined,
+          color: dictionaryCreateDialog.color.trim() || undefined,
+          description: dictionaryCreateDialog.description.trim() || undefined,
+          isActive: true,
+          showInCatalogFilter: true
+        }
+      });
       await fetchAdminData();
       toast.success("Элемент словаря добавлен");
-      if (kind === "sizes") setFormData((prev) => ({ ...prev, sizes: [...new Set([...prev.sizes, name])] }));
-      if (kind === "materials") setFormData((prev) => ({ ...prev, materials: normalizeDictionaryValues([...(prev.materials || []), name]) }));
-      if (kind === "colors") setFormData((prev) => ({ ...prev, colors: normalizeDictionaryValues([...(prev.colors || []), name]) }));
-      if (kind === "categories") setFormData((prev) => ({ ...prev, categories: normalizeDictionaryValues([...(prev.categories || []), name]) }));
+      if (dictionaryCreateDialog.attachToProduct) {
+        setSelectedProductEditorDictionaryTab(dictionaryCreateDialog.kind);
+        addDictionaryValueToProduct(dictionaryCreateDialog.kind, name);
+      }
+      setDictionaryCreateDialog((prev) => ({
+        ...prev,
+        open: false,
+        submitting: false,
+        attachToProduct: false,
+        name: "",
+        slug: "",
+        color: "#3b82f6",
+        description: ""
+      }));
     } catch (error) {
+      setDictionaryCreateDialog((prev) => ({ ...prev, submitting: false }));
       toast.error((error as Error)?.message || "Не удалось добавить элемент словаря");
     }
   };
@@ -773,6 +908,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     isActive: item.isActive ?? true,
     showInCatalogFilter: item.showInCatalogFilter ?? true
   });
+
+  const closeCreateDictionaryDialog = () => {
+    setDictionaryCreateDialog((prev) => {
+      if (prev.submitting) return prev;
+      return {
+        ...prev,
+        open: false,
+        attachToProduct: false,
+        name: "",
+        slug: "",
+        color: "#3b82f6",
+        description: ""
+      };
+    });
+  };
 
   const startEditDictionaryItem = (item: any) => {
     setEditingDictionaryItemId(item.id);
@@ -1445,6 +1595,56 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "general", label: "Общие" }
   ] as const;
 
+  const productCardBackgroundMode = normalizeProductCardBackgroundMode(settings.product_card_background_mode);
+  const productCardBackgroundColor = normalizeProductCardBackgroundColor(settings.product_card_background_color);
+  const productCardImageFitMode = normalizeProductCardImageFitMode(settings.product_card_image_fit_mode);
+  const productDetailBackgroundMode = normalizeProductDetailBackgroundMode(settings.product_detail_background_mode);
+  const productDetailBackgroundColor = normalizeProductDetailBackgroundColor(settings.product_detail_background_color);
+  const productDetailImageFitMode = normalizeProductDetailImageFitMode(settings.product_detail_image_fit_mode);
+  const productDetailMediaSizeMode = normalizeProductDetailMediaSizeMode(settings.product_detail_media_size_mode);
+  const productCardBackgroundPreviewStyle = useMemo(() => {
+    if (productCardBackgroundMode === "none") {
+      return buildTransparentProductCardBackgroundStyle();
+    }
+
+    if (productCardBackgroundMode === "color") {
+      return buildProductCardBackgroundStyleFromColor(productCardBackgroundColor);
+    }
+
+    if (productCardBackgroundMode === "auto") {
+      return buildProductCardBackgroundStyleFromColor("#ffffff");
+    }
+
+    return buildStandardProductCardBackgroundStyle();
+  }, [productCardBackgroundColor, productCardBackgroundMode]);
+  const productDetailBackgroundPreviewStyle = useMemo(() => {
+    if (productDetailBackgroundMode === "none") {
+      return buildTransparentProductCardBackgroundStyle();
+    }
+
+    if (productDetailBackgroundMode === "color") {
+      return buildProductCardBackgroundStyleFromColor(productDetailBackgroundColor);
+    }
+
+    if (productDetailBackgroundMode === "auto") {
+      return buildProductCardBackgroundStyleFromColor("#ffffff");
+    }
+
+    return buildStandardProductCardBackgroundStyle();
+  }, [productDetailBackgroundColor, productDetailBackgroundMode]);
+  const productCardPreviewImageDisplay = useMemo(
+    () => getProductCardImageDisplayClasses(productCardImageFitMode, "card"),
+    [productCardImageFitMode],
+  );
+  const productDetailPreviewImageDisplay = useMemo(
+    () => getProductDetailImageDisplayClasses(productDetailImageFitMode),
+    [productDetailImageFitMode],
+  );
+  const productDetailMediaPreviewLayout = useMemo(
+    () => getProductDetailMediaPreviewLayoutClasses(productDetailMediaSizeMode),
+    [productDetailMediaSizeMode],
+  );
+
   const dictionaryGroups = [
     { key: "sizes", label: "Размеры" },
     { key: "materials", label: "Материалы" },
@@ -1471,6 +1671,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setEditingId(null);
     setEditingProduct(null);
     setFormData(createEmptyProductForm());
+    setSelectedProductEditorDictionaryTab("categories");
+    setProductSubmitting(false);
+    setProductUpdateConfirmOpen(false);
+    setMediaDeleteDialog({ open: false, slot: null });
     setIsOpen(false);
   };
 
@@ -1478,6 +1682,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (product) {
       setEditingId(product._id);
       setEditingProduct(product);
+      setSelectedProductEditorDictionaryTab("categories");
       const mediaList = buildMediaFromProduct(product);
       setFormData({
         name: product.name,
@@ -1490,6 +1695,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
         media: mediaList.length > 0 ? mediaList : [{ type: "image", url: "" }],
+        catalogImageUrl: product.catalogImageUrl || "",
         sizes: product.sizes,
         isNew: product.isNew,
         isPopular: product.isPopular,
@@ -1506,6 +1712,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setEditingId(null);
       setEditingProduct(null);
       setFormData(createEmptyProductForm());
+      setSelectedProductEditorDictionaryTab("categories");
     }
     setIsOpen(true);
   };
@@ -1563,38 +1770,44 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setIsOpen(false);
   }, [isStandaloneAdmin, isCreateProductRoute, routeEditingProductId, products, loading, navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const buildProductPayload = () => {
+    const mediaList = formData.media.filter(item => item.url);
+    const imagesFromMedia = mediaList.filter(item => item.type === "image").map(item => item.url);
+    const videosFromMedia = mediaList.filter(item => item.type === "video").map(item => item.url);
+    const catalogImageUrl = resolveCatalogImageUrl(mediaList, formData.catalogImageUrl);
+    return {
+      name: formData.name,
+      slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
+      description: formData.description,
+      basePrice: parseFloat(formData.basePrice || "0"),
+      discountPercent: parseFloat(formData.discountPercent || "0"),
+      discountedPrice: parseFloat(formData.discountedPrice || "0"),
+      category: formData.categories[0] || "",
+      categories: formData.categories,
+      images: imagesFromMedia,
+      catalogImageUrl,
+      videos: videosFromMedia,
+      media: mediaList,
+      sizes: formData.sizes,
+      isNew: formData.isNew,
+      isPopular: formData.isPopular,
+      sku: formData.sku,
+      material: formData.materials[0] || "",
+      materials: formData.materials,
+      printType: formData.printType,
+      fit: formData.fit,
+      gender: formData.gender,
+      color: formData.colors[0] || "",
+      colors: formData.colors,
+      shipping: formData.shipping,
+      sizeStock: formData.sizeStock
+    };
+  };
+
+  const submitProductForm = async () => {
+    setProductSubmitting(true);
     try {
-      const mediaList = formData.media.filter(item => item.url);
-      const imagesFromMedia = mediaList.filter(item => item.type === "image").map(item => item.url);
-      const videosFromMedia = mediaList.filter(item => item.type === "video").map(item => item.url);
-      const payload = {
-        name: formData.name,
-        slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
-        description: formData.description,
-        basePrice: parseFloat(formData.basePrice || "0"),
-        discountPercent: parseFloat(formData.discountPercent || "0"),
-        discountedPrice: parseFloat(formData.discountedPrice || "0"),
-        category: formData.categories[0] || "",
-        categories: formData.categories,
-        images: imagesFromMedia,
-        videos: videosFromMedia,
-        media: mediaList,
-        sizes: formData.sizes,
-        isNew: formData.isNew,
-        isPopular: formData.isPopular,
-        sku: formData.sku,
-        material: formData.materials[0] || "",
-        materials: formData.materials,
-        printType: formData.printType,
-        fit: formData.fit,
-        gender: formData.gender,
-        color: formData.colors[0] || "",
-        colors: formData.colors,
-        shipping: formData.shipping,
-        sizeStock: formData.sizeStock
-      };
+      const payload = buildProductPayload();
 
       if (editingId) {
         const targetProduct = products.find((p) => p._id === editingId || (p as any).id === editingId);
@@ -1607,6 +1820,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             ...payload
           }
         });
+        setProductUpdateConfirmOpen(false);
         toast.success("Товар обновлен");
       } else {
         await FLOW.createProduct({
@@ -1623,7 +1837,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       fetchProducts();
     } catch (error) {
       toast.error("Операция не удалась. Проверьте формат данных.");
+    } finally {
+      setProductSubmitting(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (productSubmitting) return;
+    if (editingId) {
+      setProductUpdateConfirmOpen(true);
+      return;
+    }
+    await submitProductForm();
   };
 
   const handleDelete = async (id: string) => {
@@ -1681,6 +1907,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const openProductDictionarySelector = (kind: DictionaryKind) => {
+    setSelectedProductEditorDictionaryTab(kind);
     setProductDictionarySelector({ open: true, kind });
   };
 
@@ -1764,25 +1991,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const handleUploadSlot = async (file: File | null, index: number) => {
-    if (!file) return;
-    setUploading(true);
-    try {
-      const formDataUpload = new FormData();
-      formDataUpload.append("files", file);
-      const res = await FLOW.adminUpload({ input: formDataUpload });
-      const urls = res?.urls || [];
-      if (urls[0]) {
-        const nextType = file.type.startsWith("video") ? "video" : "image";
-        setMediaSlot(index, nextType, urls[0]);
-      }
-    } catch (error) {
-      toast.error("Не удалось загрузить файлы");
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const updateMediaSlot = (index: number, next: Partial<{ type: "image" | "video"; url: string }>) => {
     setFormData(prev => {
       const media = [...prev.media];
@@ -1792,6 +2000,45 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       const current = media[index - 1] || { type: "image", url: "" };
       media[index - 1] = { ...current, ...next };
       return { ...prev, media };
+    });
+  };
+
+  const moveMediaSlot = (index: number, direction: -1 | 1) => {
+    setFormData((prev) => {
+      const from = index - 1;
+      const to = from + direction;
+      if (from < 0 || to < 0 || from >= prev.media.length || to >= prev.media.length) {
+        return prev;
+      }
+
+      const media = [...prev.media];
+      const [current] = media.splice(from, 1);
+      if (!current) return prev;
+      media.splice(to, 0, current);
+      return { ...prev, media };
+    });
+  };
+
+  const setMediaSlotAsCover = (index: number) => {
+    setFormData((prev) => {
+      const from = index - 1;
+      if (from <= 0 || from >= prev.media.length) return prev;
+
+      const media = [...prev.media];
+      const [current] = media.splice(from, 1);
+      if (!current) return prev;
+      media.unshift(current);
+      return { ...prev, media };
+    });
+  };
+
+  const setMediaSlotAsIcon = (index: number) => {
+    setFormData((prev) => {
+      const from = index - 1;
+      const current = prev.media[from];
+      if (!current || current.type !== "image" || !current.url.trim()) return prev;
+      if (prev.catalogImageUrl === current.url) return prev;
+      return { ...prev, catalogImageUrl: current.url };
     });
   };
 
@@ -1810,6 +2057,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         media: nextMedia.length > 0 ? nextMedia : [{ type: "image", url: "" }]
       };
     });
+  };
+
+  const requestRemoveMediaSlot = (slot: number) => {
+    setMediaDeleteDialog({ open: true, slot });
+  };
+
+  const confirmRemoveMediaSlot = () => {
+    if (!mediaDeleteDialog.slot) return;
+    removeMediaSlot(mediaDeleteDialog.slot);
+    setMediaDeleteDialog({ open: false, slot: null });
   };
 
   const openMediaGalleryPicker = (slot: number) => {
@@ -1857,6 +2114,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!q) return true;
     return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
   });
+
+  const mediaDeleteTarget = mediaDeleteDialog.slot ? formData.media[mediaDeleteDialog.slot - 1] ?? null : null;
+  const resolvedCatalogImageUrl = resolveCatalogImageUrl(formData.media, formData.catalogImageUrl);
+
+  const productEditorDictionaryTabs = [
+    { key: "categories" as const, label: "Категории", count: formData.categories.length },
+    { key: "sizes" as const, label: "Размеры", count: formData.sizes.length },
+    { key: "materials" as const, label: "Материалы", count: formData.materials.length },
+    { key: "colors" as const, label: "Цвета", count: formData.colors.length }
+  ];
 
   const runSeedDemoData = async () => {
     setOperationsLoading(true);
@@ -1947,7 +2214,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <TableRow key={product._id}>
                       <TableCell>
                         {(product.images?.[0] || product.media?.find((m) => m.type === "image")?.url) ? (
-                          <img src={product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
+                          <img src={product.catalogImageUrl || product.images?.[0] || product.media?.find((m) => m.type === "image")?.url} alt={product.name} className="w-12 h-16 object-cover bg-gray-100" />
                         ) : (
                           <div className="w-12 h-16 bg-gray-200" />
                         )}
@@ -2319,7 +2586,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
                         </div>
                         <div className="space-y-1">
-                          <Label>Имя</Label>
+                          <Label>РРјСЏ</Label>
                           <Input
                             value={userEditForm.name}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -2783,7 +3050,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="order-2 space-y-4 lg:order-2">
                   {selectedSettingsGroup === "auth" && (
-                    <div className="space-y-3 border p-3">
+                    <div className="space-y-4 border p-3">
                       <h3 className="font-semibold">Авторизация</h3>
                       <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
@@ -2815,7 +3082,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
 
                   {selectedSettingsGroup === "operations" && (
-                    <div className="space-y-3 border p-3">
+                    <div className="space-y-4 border p-3">
                       <h3 className="font-semibold">Регламентные операции</h3>
                       <p className="text-sm text-muted-foreground max-w-3xl">
                         Сервисные действия для быстрого запуска полностью рабочего демо-магазина:
@@ -2850,7 +3117,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
 
                   {selectedSettingsGroup === "smtp" && (
-                    <div className="space-y-3 border p-3">
+                    <div className="space-y-4 border p-3">
                       <h3 className="font-semibold">Почта (SMTP)</h3>
                       <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
@@ -3092,7 +3359,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "general" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Общие настройки</h3>
-                      <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">
+                        Здесь собраны настройки бренда, карточек каталога и страницы товара. Можно быстро переключаться между
+                        подкаталогами и не пролистывать весь раздел целиком.
+                      </p>
+                      <Tabs value={selectedGeneralSettingsCatalog} onValueChange={setSelectedGeneralSettingsCatalog} className="space-y-4">
+                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-3">
+                          <TabsTrigger value="branding" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Брендинг
+                          </TabsTrigger>
+                          <TabsTrigger value="catalog-card" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Карточки каталога
+                          </TabsTrigger>
+                          <TabsTrigger value="product-page" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Страница товара
+                          </TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="branding" className="mt-0 space-y-3">
+                          <div className="space-y-1">
                         <Label htmlFor="store-name">Название магазина</Label>
                         <Input id="store-name" value={settings.storeName || ""} onChange={(e) => updateSetting("storeName", e.target.value)} />
                       </div>
@@ -3162,6 +3446,220 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           Для этого поля поддерживается прямая загрузка только файла <b>favicon.ico</b>. Файл используется только как иконка вкладки.
                         </p>
                       </div>
+                        </TabsContent>
+                        <TabsContent value="catalog-card" className="mt-0">
+                      <div className="space-y-3 border border-gray-200 p-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="product-card-background-mode">Фон карточек товара</Label>
+                          <select
+                            id="product-card-background-mode"
+                            value={productCardBackgroundMode}
+                            onChange={(e) => updateSetting("product_card_background_mode", e.target.value)}
+                            className="h-11 w-full border border-black bg-white px-3"
+                          >
+                            <option value="standard">Стандартный студийный</option>
+                            <option value="none">Без фона</option>
+                            <option value="color">Свой цвет</option>
+                            <option value="auto">Автоподбор по краям изображения</option>
+                          </select>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-[96px_minmax(0,1fr)]">
+                          <div className="space-y-1">
+                            <Label htmlFor="product-card-background-color-picker">Цвет</Label>
+                            <input
+                              id="product-card-background-color-picker"
+                              type="color"
+                              value={productCardBackgroundColor}
+                              onChange={(e) => updateSetting("product_card_background_color", e.target.value)}
+                              className="h-11 w-full cursor-pointer border border-black bg-white p-1"
+                              disabled={productCardBackgroundMode !== "color"}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="product-card-background-color">HEX цвета</Label>
+                            <Input
+                              id="product-card-background-color"
+                              value={settings.product_card_background_color || ""}
+                              onChange={(e) => updateSetting("product_card_background_color", e.target.value)}
+                              placeholder="#e9e3da"
+                              disabled={productCardBackgroundMode !== "color"}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="product-card-image-fit-mode">Изображение в карточке</Label>
+                          <select
+                            id="product-card-image-fit-mode"
+                            value={productCardImageFitMode}
+                            onChange={(e) => updateSetting("product_card_image_fit_mode", e.target.value)}
+                            className="h-11 w-full border border-black bg-white px-3"
+                          >
+                            <option value="contain">Вписать целиком</option>
+                            <option value="contain-zoom">Вписать крупнее</option>
+                            <option value="cover">Заполнить с обрезкой</option>
+                            <option value="fill">Растянуть по карточке</option>
+                          </select>
+                        </div>
+
+                          <div className="space-y-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Предпросмотр</span>
+                          <div className="border border-black bg-white p-3">
+                            <div className="mx-auto max-w-[190px] overflow-hidden border border-black/20 bg-white shadow-sm">
+                              <div className="relative aspect-[25/24] overflow-hidden border-b border-black/10" style={productCardBackgroundPreviewStyle}>
+                                <span className="absolute left-2 top-2 z-[2] border border-black/10 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-black">
+                                  Новинка
+                                </span>
+                                <img
+                                  src={PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE}
+                                  alt="Пример товара"
+                                  className={`h-full w-full ${productCardPreviewImageDisplay.objectFitClassName} ${productCardPreviewImageDisplay.paddingClassName} ${productCardPreviewImageDisplay.scaleClassName}`.trim()}
+                                />
+                              </div>
+                              <div className="space-y-2 bg-white px-3 py-3">
+                                <div className="text-sm font-bold leading-tight">Пример карточки товара</div>
+                                <div className="flex items-center justify-between gap-3 text-xs">
+                                  <span className="text-base font-black text-black">6500₽</span>
+                                  <span className="text-muted-foreground line-through">7800₽</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-xs leading-5 text-muted-foreground">
+                          <p>
+                            `Стандартный` использует нейтральный студийный фон. `Свой цвет` задает фон вручную. `Автоподбор` считывает оттенок с внешних краев изображения. Если у фото по краям белый фон, карточка тоже станет светлой.
+                          </p>
+                          <p>
+                            `Вписать целиком` оставляет товар полностью в кадре. `Вписать крупнее` уменьшает пустые поля без сильной обрезки. `Заполнить с обрезкой` делает карточку плотнее. `Растянуть` заполняет всю площадь, но может исказить пропорции.
+                          </p>
+                        </div>
+                      </div>
+                        </TabsContent>
+                        <TabsContent value="product-page" className="mt-0">
+                      <div className="space-y-3 border border-gray-200 p-3">
+                        <div className="grid gap-3 xl:grid-cols-2">
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              <Label htmlFor="product-detail-background-mode">Фон медиа на странице товара</Label>
+                              <select
+                                id="product-detail-background-mode"
+                                value={productDetailBackgroundMode}
+                                onChange={(e) => updateSetting("product_detail_background_mode", e.target.value)}
+                                className="h-11 w-full border border-black bg-white px-3"
+                              >
+                                <option value="standard">Стандартный студийный</option>
+                                <option value="none">Без фона</option>
+                                <option value="color">Свой цвет</option>
+                                <option value="auto">Автоподбор по краям изображения</option>
+                              </select>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-[96px_minmax(0,1fr)]">
+                              <div className="space-y-1">
+                                <Label htmlFor="product-detail-background-color-picker">Цвет</Label>
+                                <input
+                                  id="product-detail-background-color-picker"
+                                  type="color"
+                                  value={productDetailBackgroundColor}
+                                  onChange={(e) => updateSetting("product_detail_background_color", e.target.value)}
+                                  className="h-11 w-full cursor-pointer border border-black bg-white p-1"
+                                  disabled={productDetailBackgroundMode !== "color"}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="product-detail-background-color">HEX цвета</Label>
+                                <Input
+                                  id="product-detail-background-color"
+                                  value={settings.product_detail_background_color || ""}
+                                  onChange={(e) => updateSetting("product_detail_background_color", e.target.value)}
+                                  placeholder="#e9e3da"
+                                  disabled={productDetailBackgroundMode !== "color"}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <Label htmlFor="product-detail-image-fit-mode">Изображение на странице товара</Label>
+                              <select
+                                id="product-detail-image-fit-mode"
+                                value={productDetailImageFitMode}
+                                onChange={(e) => updateSetting("product_detail_image_fit_mode", e.target.value)}
+                                className="h-11 w-full border border-black bg-white px-3"
+                              >
+                                <option value="contain">Вписать целиком</option>
+                                <option value="contain-zoom">Вписать крупнее</option>
+                                <option value="cover">Заполнить с обрезкой</option>
+                                <option value="fill">Растянуть по карточке</option>
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                          <Label htmlFor="product-detail-media-size-mode">Медиа на странице товара</Label>
+                          <select
+                            id="product-detail-media-size-mode"
+                            value={productDetailMediaSizeMode}
+                            onChange={(e) => updateSetting("product_detail_media_size_mode", e.target.value)}
+                            className="h-11 w-full border border-black bg-white px-3"
+                          >
+                            <option value="compact">Компактный</option>
+                            <option value="standard">Стандартный</option>
+                            <option value="large">Крупный</option>
+                          </select>
+                        </div>
+
+                          </div>
+
+                          <div className="space-y-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Предпросмотр</span>
+                          <div className="border border-black bg-white p-3">
+                            <div className={`mx-auto flex max-w-[260px] flex-col gap-3 border border-black/20 bg-white p-3 shadow-sm ${productDetailMediaPreviewLayout.panelHeightClassName}`}>
+                              <div
+                                className={`relative min-h-0 flex-1 overflow-hidden border border-black/10 ${productDetailMediaPreviewLayout.framePaddingClassName}`}
+                                style={productDetailBackgroundPreviewStyle}
+                              >
+                                <span className="absolute left-2 top-2 z-[2] border border-black/10 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-black">
+                                  Новинка
+                                </span>
+                                <img
+                                  src={PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE}
+                                  alt="Пример медиа товара"
+                                  className={`h-full w-full ${productDetailPreviewImageDisplay.objectFitClassName} ${productDetailPreviewImageDisplay.scaleClassName} ${productDetailMediaPreviewLayout.mediaPaddingClassName}`.trim()}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                {[0, 1, 2].map((index) => (
+                                  <div
+                                    key={index}
+                                    className={`overflow-hidden border ${index === 0 ? "border-black" : "border-black/20 opacity-70"} ${productDetailMediaPreviewLayout.thumbnailClassName}`}
+                                    style={productDetailBackgroundMode === "auto" ? buildProductCardBackgroundStyleFromColor("#ffffff") : productDetailBackgroundPreviewStyle}
+                                  >
+                                    <img
+                                      src={PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE}
+                                      alt=""
+                                      className={`h-full w-full ${productDetailPreviewImageDisplay.objectFitClassName} ${productDetailPreviewImageDisplay.thumbnailScaleClassName} ${productDetailImageFitMode === "fill" || productDetailImageFitMode === "cover" ? "" : "p-1.5"}`.trim()}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        </div>
+
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          `Компактный` старается уместить главный кадр и миниатюры в экран без лишней прокрутки. `Стандартный` оставляет больше воздуха. `Крупный` делает акцент на изображении, если для вас фото важнее описания.
+                        </p>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Здесь можно отдельно настроить фон и способ показа изображения на странице товара. Это удобно, если
+                          карточки каталога должны быть одними, а в карточке товара нужен другой режим, например `Растянуть по
+                          карточке` или свой фон.
+                        </p>
+                      </div>
+                        </TabsContent>
+                      </Tabs>
                     </div>
                   )}
 
@@ -3504,7 +4002,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 {telegramBotFormErrors.length > 0 && (
                   <div className="space-y-1 border border-red-300 bg-red-50 p-3 text-sm text-red-700">
                     {telegramBotFormErrors.slice(0, 6).map((error) => (
-                      <div key={error}>• {error}</div>
+                      <div key={error}>вЂў {error}</div>
                     ))}
                     {telegramBotFormErrors.length > 6 && (
                       <div>• И еще {telegramBotFormErrors.length - 6} ошибок.</div>
@@ -3565,11 +4063,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label htmlFor="prod-price">Цена (₽)</Label>
-                    <Input 
-                      id="prod-price" 
+                    <Input
+                      id="prod-price"
                       type="number"
                       value={formData.basePrice}
                       onChange={(e) => setFormData({...formData, basePrice: e.target.value})}
@@ -3579,138 +4077,463 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-discount">Скидка (%)</Label>
-                    <Input id="prod-discount" type="number" min="0" max="100" value={formData.discountPercent} onChange={(e) => setFormData({...formData, discountPercent: e.target.value})} className="rounded-none border-black"/>
+                    <Input
+                      id="prod-discount"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={formData.discountPercent}
+                      onChange={(e) => setFormData({...formData, discountPercent: e.target.value})}
+                      className="rounded-none border-black"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="prod-discounted">Цена со скидкой</Label>
-                    <Input id="prod-discounted" type="number" value={formData.discountedPrice} onChange={(e) => setFormData({...formData, discountedPrice: e.target.value})} className="rounded-none border-black"/>
+                    <Input
+                      id="prod-discounted"
+                      type="number"
+                      value={formData.discountedPrice}
+                      onChange={(e) => setFormData({...formData, discountedPrice: e.target.value})}
+                      className="rounded-none border-black"
+                    />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="prod-cat">Категория</Label>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("categories")}>Словарь</Button>
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("categories")}>+</Button>
+                </div>
+
+                <div className="space-y-4 border border-black bg-stone-50 p-4 md:p-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-1">
+                      <div className="text-base font-bold uppercase tracking-wide">Медиа</div>
+                      <p className="text-xs text-muted-foreground">
+                        Фото идут через общую галерею: можно загрузить новый файл в галерею или выбрать уже существующий. Прямая загрузка сразу в слот отключена.
+                      </p>
+                    </div>
+                    <TooltipProvider delayDuration={150}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button type="button" size="sm" variant="outline" className="rounded-none border-black" onClick={addMediaSlot}>
+                            <PlusCircle className="mr-1 h-4 w-4" /> Добавить медиа
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Добавляет новый слот в конец медиагалереи товара.</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
+                  <TooltipProvider delayDuration={150}>
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    {formData.media.map((item, mediaIndex) => {
+                      const slot = mediaIndex + 1;
+                      const isVideo = item.type === "video";
+                      const hasPreview = item.url.trim().length > 0;
+                      const isCover = mediaIndex === 0;
+                      const isIcon = item.type === "image" && item.url.trim().length > 0 && item.url === resolvedCatalogImageUrl;
+                      return (
+                        <div key={`media-slot-${slot}`} className="border border-black bg-white">
+                          <div className="grid min-h-[104px] grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-black px-4 py-3">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center border border-black bg-black text-sm font-black text-white">
+                                {slot}
+                              </div>
+                              <div className="min-w-0 space-y-2">
+                                <div className="flex min-h-[24px] flex-wrap items-center gap-2 font-semibold">
+                                  {isVideo ? <Play className="h-4 w-4" /> : <Images className="h-4 w-4" />}
+                                  <span>{isVideo ? "Видео" : "Фото"}</span>
+                                  {isCover && <span className="border border-black px-2 py-0.5 text-[10px] uppercase tracking-wide">Обложка</span>}
+                                  {isIcon && <span className="border border-black px-2 py-0.5 text-[10px] uppercase tracking-wide">Иконка</span>}
+                                </div>
+                                <p className="min-h-[2.5rem] text-xs leading-5 text-muted-foreground">
+                                  {isCover && isIcon
+                                    ? "Этот файл сейчас главный и в галерее товара, и в карточке каталога."
+                                    : isCover
+                                      ? "Этот элемент открывает галерею товара первым."
+                                      : isIcon
+                                        ? "Это фото выбрано для карточки товара в каталоге и списках."
+                                        : "Порядок влияет на показ в карточке товара."}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2 self-start">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-9 w-9 rounded-none border-black"
+                                      onClick={() => moveMediaSlot(slot, -1)}
+                                      disabled={slot === 1}
+                                      aria-label="Переместить выше"
+                                    >
+                                      <ArrowUp className="h-4 w-4" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{slot === 1 ? "Элемент уже стоит первым." : "Поднимает элемент на одну позицию выше."}</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-9 w-9 rounded-none border-black"
+                                      onClick={() => moveMediaSlot(slot, 1)}
+                                      disabled={slot === formData.media.length}
+                                      aria-label="Переместить ниже"
+                                    >
+                                      <ArrowDown className="h-4 w-4" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{slot === formData.media.length ? "Элемент уже стоит последним." : "Опускает элемент на одну позицию ниже."}</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-9 w-9 rounded-none border-black"
+                                      onClick={() => requestRemoveMediaSlot(slot)}
+                                      aria-label="Удалить медиа"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Удаляет этот медиа-элемент из товара после подтверждения.</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4 p-4">
+                            <div className="flex aspect-[4/5] items-center justify-center overflow-hidden border border-dashed border-black/40 bg-stone-100 p-3">
+                              {hasPreview ? (
+                                isVideo ? (
+                                  <video src={item.url} controls className="h-full w-full bg-black object-contain" />
+                                ) : (
+                                  <img src={item.url} alt={`Медиа ${slot}`} className="max-h-full max-w-full object-contain" />
+                                )
+                              ) : (
+                                <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                                  {isVideo ? "Добавьте видео товара, чтобы сразу увидеть превью." : "Добавьте фото товара, чтобы сразу увидеть превью."}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`media-type-${slot}`}>Тип</Label>
+                              <select
+                                id={`media-type-${slot}`}
+                                value={item.type}
+                                onChange={(e) => updateMediaSlot(slot, { type: e.target.value as "image" | "video" })}
+                                className="h-11 w-full border border-black bg-white px-3"
+                              >
+                                <option value="image">Фото</option>
+                                <option value="video">Видео</option>
+                              </select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`media-url-${slot}`}>URL медиа</Label>
+                              <Input
+                                id={`media-url-${slot}`}
+                                placeholder={isVideo ? "https://example.com/video.mp4" : "https://example.com/image.jpg"}
+                                value={item.url}
+                                onChange={(e) => updateMediaSlot(slot, { url: e.target.value })}
+                                className="h-11 rounded-none border-black"
+                              />
+                            </div>
+
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex w-full">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-11 w-full justify-center rounded-none border-black"
+                                      onClick={() => setMediaSlotAsCover(slot)}
+                                      disabled={isCover || !hasPreview}
+                                    >
+                                      Сделать обложкой
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {!hasPreview
+                                    ? "Сначала загрузите файл в этот слот."
+                                    : isCover
+                                      ? "Этот элемент уже открывает галерею товара первым."
+                                      : "Перемещает медиа в начало галереи товара. Иконка каталога выбирается отдельно."}
+                                </TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex w-full">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-11 w-full justify-center rounded-none border-black"
+                                      onClick={() => setMediaSlotAsIcon(slot)}
+                                      disabled={!hasPreview || isVideo || isIcon}
+                                    >
+                                      Сделать иконкой
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {!hasPreview
+                                    ? "Сначала загрузите фото в этот слот."
+                                    : isVideo
+                                      ? "Иконкой товара может быть только фото."
+                                      : isIcon
+                                        ? "Это фото уже используется как иконка товара в списках и карточках."
+                                        : "Выбирает это фото для карточки товара в каталоге, админ-списке и превью."}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+
+                            {!isVideo && (
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <label className="inline-flex min-h-[44px] w-full cursor-pointer items-center justify-center whitespace-nowrap border border-black px-3 text-center text-sm font-bold">
+                                      <ImagePlus className="mr-2 h-4 w-4" />
+                                      Загрузить в галерею
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => uploadMediaToGalleryAndAssign(e.target.files?.[0] || null, slot)}
+                                        disabled={uploading}
+                                      />
+                                    </label>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Загружает фото в общую галерею и сразу подставляет его в этот слот.</TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="inline-flex w-full">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-11 w-full justify-center rounded-none border-black"
+                                        onClick={() => openMediaGalleryPicker(slot)}
+                                      >
+                                        <Images className="mr-2 h-4 w-4" /> Из галереи
+                                      </Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Открывает общую галерею и позволяет выбрать уже загруженное фото.</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
+
+                            <div className="rounded-none border border-dashed border-black/40 px-3 py-2 text-xs text-muted-foreground">
+                              {isVideo
+                                ? "Для видео сейчас используется ссылка в поле URL. Прямая загрузка в слот отключена."
+                                : "Фото можно только загрузить в общую галерею или выбрать из уже загруженных изображений."}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  </TooltipProvider>
+                </div>
+
+                <div className="space-y-4 border border-black bg-white p-4 md:p-5">
+                  <div className="space-y-1">
+                    <div className="text-base font-bold uppercase tracking-wide">Словари товара</div>
+                    <p className="text-xs text-muted-foreground">
+                      Категории и размеры вынесены в первые вкладки, чтобы быстрее собрать карточку товара. Остальные справочники доступны рядом и не перегружают форму.
+                    </p>
+                  </div>
+
+                  <Tabs
+                    value={selectedProductEditorDictionaryTab}
+                    onValueChange={(value) => setSelectedProductEditorDictionaryTab(value as DictionaryKind)}
+                    className="w-full"
+                  >
+                    <TabsList className="grid h-auto grid-cols-2 gap-2 rounded-none bg-transparent p-0 lg:grid-cols-4">
+                      {productEditorDictionaryTabs.map((tab) => (
+                        <TabsTrigger
+                          key={tab.key}
+                          value={tab.key}
+                          className="rounded-none border border-black bg-white px-3 py-3 data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none"
+                        >
+                          <span className="flex w-full items-center justify-between gap-2">
+                            <span>{tab.label}</span>
+                            <span className="text-xs opacity-70">{tab.count}</span>
+                          </span>
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+
+                    <TabsContent value="categories" className="mt-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => openProductDictionarySelector("categories")}>
+                          Словарь
+                        </Button>
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => createDictionaryItem("categories", true)}>
+                          +
+                        </Button>
                       </div>
+
                       {formData.categories.length > 0 ? (
-                        <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
                           {formData.categories.map((category) => (
-                            <div key={category} className="flex items-center justify-between border border-black px-3 py-2">
-                              <span>{category}</span>
-                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("categories", category)}>Удалить</Button>
+                            <div key={category} className="flex items-center gap-2 border border-black bg-stone-50 px-3 py-2">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getDictionaryDotColor(category) }} />
+                              <span className="font-medium">{category}</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-auto rounded-none px-1 text-xs"
+                                onClick={() => removeDictionaryValueFromProduct("categories", category)}
+                              >
+                                Удалить
+                              </Button>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-xs text-muted-foreground">Категория не выбрана</p>
+                        <p className="text-sm text-muted-foreground">Категория пока не выбрана.</p>
                       )}
-                    </div>
-                  </div>
-                </div>
+                    </TabsContent>
 
-                <div className="space-y-3">
-                  <Label>Медиа (по порядку)</Label>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground">Можно добавить любое количество фото/видео. Поддерживается выбор из галереи.</p>
-                    <Button type="button" size="sm" variant="outline" className="rounded-none" onClick={addMediaSlot}>
-                      <PlusCircle className="w-4 h-4 mr-1" /> Добавить блок
-                    </Button>
-                  </div>
-                  <div className="space-y-3">
-                    {formData.media.map((item, mediaIndex) => {
-                      const slot = mediaIndex + 1;
-                      return (
-                        <div key={`media-slot-${slot}`} className="grid grid-cols-[40px_120px_1fr_120px_120px_40px] items-center gap-3">
-                          <div className="w-10 h-10 border border-black flex items-center justify-center font-bold">
-                            {slot}
-                          </div>
-                          <select
-                            value={item.type}
-                            onChange={(e) => updateMediaSlot(slot, { type: e.target.value as "image" | "video" })}
-                            className="h-10 border border-black px-2"
-                          >
-                            <option value="image">Фото</option>
-                            <option value="video">Видео</option>
-                          </select>
-                          <Input
-                            placeholder="URL"
-                            value={item.url}
-                            onChange={(e) => updateMediaSlot(slot, { url: e.target.value })}
-                            className="rounded-none border-black"
-                          />
-                          <label className="inline-flex items-center justify-center h-10 border border-black font-bold cursor-pointer">
-                            Файл
-                            <input
-                              type="file"
-                              accept="image/*,video/*"
-                              className="hidden"
-                              onChange={(e) => handleUploadSlot(e.target.files?.[0] || null, slot)}
-                              disabled={uploading}
-                            />
-                          </label>
-                          <label className="inline-flex items-center justify-center h-10 border border-black font-bold cursor-pointer">
-                            В галерею
-                            <input
-                              type="file"
-                              accept="image/*,video/*"
-                              className="hidden"
-                              onChange={(e) => uploadMediaToGalleryAndAssign(e.target.files?.[0] || null, slot)}
-                              disabled={uploading}
-                            />
-                          </label>
-                          <Button type="button" size="icon" variant="outline" className="rounded-none h-10 w-10" onClick={() => removeMediaSlot(slot)}>
-                            <MinusCircle className="w-4 h-4" />
-                          </Button>
-                          <Button type="button" size="sm" variant="outline" className="rounded-none col-span-6 justify-start" onClick={() => openMediaGalleryPicker(slot)}>
-                            <Images className="w-4 h-4 mr-2" /> Выбрать из галереи
-                          </Button>
+                    <TabsContent value="sizes" className="mt-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => openProductDictionarySelector("sizes")}>
+                          Словарь
+                        </Button>
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => createDictionaryItem("sizes", true)}>
+                          +
+                        </Button>
+                      </div>
+
+                      {formData.sizes.length > 0 ? (
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                          {formData.sizes.map((size) => (
+                            <div key={size} className="flex h-full flex-col gap-3 border border-black bg-stone-50 p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="inline-flex h-12 min-w-12 items-center justify-center border border-black bg-white px-4 text-lg font-black">
+                                  {size}
+                                </span>
+                                <span className="text-xs uppercase tracking-wide text-muted-foreground">Размер</span>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label htmlFor={`stock-${size}`} className="text-xs uppercase tracking-wide text-muted-foreground">
+                                  Остаток
+                                </Label>
+                                <Input
+                                  id={`stock-${size}`}
+                                  type="number"
+                                  min="0"
+                                  value={formData.sizeStock[size] ?? 0}
+                                  onChange={(e) => updateSizeStock(size, e.target.value)}
+                                  className="h-11 rounded-none border-black bg-white"
+                                />
+                              </div>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="mt-auto h-11 w-full rounded-none border-black"
+                                onClick={() => removeDictionaryValueFromProduct("sizes", size)}
+                              >
+                                Удалить размер
+                              </Button>
+                            </div>
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Размеры пока не выбраны.</p>
+                      )}
+                    </TabsContent>
 
-                <div className="space-y-2">
-                  <Label>Размеры</Label>
-                  <div className="space-y-2">
-                    <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("sizes")}>Словарь</Button>
-                    {formData.sizes.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Размеры не выбраны</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {formData.sizes.map((size) => (
-                          <div key={size} className="flex items-center justify-between border border-black px-3 py-2">
-                            <span>{size}</span>
-                            <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("sizes", size)}>Удалить</Button>
-                          </div>
-                        ))}
+                    <TabsContent value="materials" className="mt-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => openProductDictionarySelector("materials")}>
+                          Словарь
+                        </Button>
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => createDictionaryItem("materials", true)}>
+                          +
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                </div>
 
-                <div className="space-y-2">
-                  <Label>Остатки по размерам</Label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(formData.sizes || []).map((size) => {
-                      return (
-                      <div key={`stock-${size}`} className="space-y-1">
-                        <Label htmlFor={`stock-${size}`} className="text-xs">{size}</Label>
-                        <Input
-                          id={`stock-${size}`}
-                          type="number"
-                          min="0"
-                          value={formData.sizeStock[size] ?? 0}
-                          onChange={(e) => updateSizeStock(size, e.target.value)}
-                          className="rounded-none border-black"
-                        />
+                      {formData.materials.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {formData.materials.map((material) => (
+                            <div key={material} className="flex items-center gap-2 border border-black bg-stone-50 px-3 py-2">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getDictionaryDotColor(material) }} />
+                              <span className="font-medium">{material}</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-auto rounded-none px-1 text-xs"
+                                onClick={() => removeDictionaryValueFromProduct("materials", material)}
+                              >
+                                Удалить
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Материалы пока не выбраны.</p>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="colors" className="mt-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => openProductDictionarySelector("colors")}>
+                          Словарь
+                        </Button>
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => createDictionaryItem("colors", true)}>
+                          +
+                        </Button>
                       </div>
-                      );
-                    })}
-                  </div>
+
+                      {formData.colors.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {formData.colors.map((color) => (
+                            <div key={color} className="flex items-center gap-2 border border-black bg-stone-50 px-3 py-2">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getDictionaryDotColor(color) }} />
+                              <span className="font-medium">{color}</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-auto rounded-none px-1 text-xs"
+                                onClick={() => removeDictionaryValueFromProduct("colors", color)}
+                              >
+                                Удалить
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Цвета пока не выбраны.</p>
+                      )}
+                    </TabsContent>
+                  </Tabs>
                 </div>
 
-                <div className="flex gap-8">
+                <div className="flex flex-wrap gap-8">
                   <div className="flex items-center space-x-2">
                     <Checkbox 
                       id="is-new" 
@@ -3729,47 +4552,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label htmlFor="prod-sku">Артикул</Label>
                     <Input
                       id="prod-sku"
                       value={formData.sku}
                       onChange={(e) => setFormData({...formData, sku: e.target.value})}
-                      className="rounded-none border-black"
+                      className="h-11 rounded-none border-black"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="prod-material">Материал</Label>
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("materials")}>Словарь</Button>
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("materials")}>+</Button>
-                      </div>
-                      {formData.materials.length > 0 ? (
-                        <div className="space-y-2">
-                          {formData.materials.map((material) => (
-                            <div key={material} className="flex items-center justify-between border border-black px-3 py-2">
-                              <span>{material}</span>
-                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("materials", material)}>Удалить</Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Материал не выбран</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="prod-print">Принт</Label>
                     <Input
                       id="prod-print"
                       value={formData.printType}
                       onChange={(e) => setFormData({...formData, printType: e.target.value})}
-                      className="rounded-none border-black"
+                      className="h-11 rounded-none border-black"
                     />
                   </div>
                   <div className="space-y-2">
@@ -3778,15 +4577,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       id="prod-fit"
                       value={formData.fit}
                       onChange={(e) => setFormData({...formData, fit: e.target.value})}
-                      className="rounded-none border-black"
+                      className="h-11 rounded-none border-black"
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="prod-gender">Пол</Label>
-                    <select id="prod-gender" value={formData.gender} onChange={(e) => setFormData({...formData, gender: e.target.value})} className="h-10 w-full border border-black px-3">
+                    <select id="prod-gender" value={formData.gender} onChange={(e) => setFormData({...formData, gender: e.target.value})} className="h-11 w-full border border-black bg-white px-3">
                       <option value="">Выберите пол</option>
                       <option value="male">мужской</option>
                       <option value="female">женский</option>
@@ -3794,44 +4590,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="prod-color">Цвет</Label>
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openProductDictionarySelector("colors")}>Словарь</Button>
-                        <Button type="button" variant="outline" className="rounded-none" onClick={() => createDictionaryItem("colors")}>+</Button>
-                      </div>
-                      {formData.colors.length > 0 ? (
-                        <div className="space-y-2">
-                          {formData.colors.map((color) => (
-                            <div key={color} className="flex items-center justify-between border border-black px-3 py-2">
-                              <span>{color}</span>
-                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => removeDictionaryValueFromProduct("colors", color)}>Удалить</Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Цвет не выбран</p>
-                      )}
-                    </div>
+                    <Label htmlFor="prod-shipping">Отправка</Label>
+                    <Input
+                      id="prod-shipping"
+                      value={formData.shipping}
+                      onChange={(e) => setFormData({...formData, shipping: e.target.value})}
+                      className="h-11 rounded-none border-black"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="prod-shipping">Отправка</Label>
-                  <Input
-                    id="prod-shipping"
-                    value={formData.shipping}
-                    onChange={(e) => setFormData({...formData, shipping: e.target.value})}
-                    className="rounded-none border-black"
-                  />
-                </div>
-
                 <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={closeProductForm} className="rounded-none">
+                  <Button type="button" variant="outline" onClick={closeProductForm} className="h-11 rounded-none" disabled={productSubmitting}>
                     ОТМЕНА
                   </Button>
-                  <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest">
-                    {editingId ? 'ОБНОВИТЬ ТОВАР' : 'СОЗДАТЬ ТОВАР'}
+                  <Button type="submit" className="h-11 bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest" disabled={productSubmitting}>
+                    {productSubmitting ? (editingId ? 'ОБНОВЛЕНИЕ...' : 'СОЗДАНИЕ...') : (editingId ? 'ОБНОВИТЬ ТОВАР' : 'СОЗДАТЬ ТОВАР')}
                   </Button>
                 </div>
               </form>
@@ -3839,6 +4613,139 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           )}
 
 
+
+          <Dialog open={mediaDeleteDialog.open} onOpenChange={(open) => setMediaDeleteDialog(open ? mediaDeleteDialog : { open: false, slot: null })}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Подтвердить удаление медиа</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Удалить {mediaDeleteTarget?.type === "video" ? "видео" : "фото"}{mediaDeleteDialog.slot ? ` #${mediaDeleteDialog.slot}` : ""} из товара?
+                </p>
+                <p className="text-muted-foreground">
+                  Элемент будет удален из порядка показа. Если это была обложка, основной станет следующий медиа-элемент.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={() => setMediaDeleteDialog({ open: false, slot: null })}>
+                  Отмена
+                </Button>
+                <Button type="button" className="rounded-none bg-red-600 text-white hover:bg-red-700" onClick={confirmRemoveMediaSlot}>
+                  Удалить
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={productUpdateConfirmOpen} onOpenChange={(open) => { if (!productSubmitting) setProductUpdateConfirmOpen(open); }}>
+            <DialogContent className="max-w-md rounded-none border-black">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black uppercase">Подтвердить обновление товара</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Сохранить изменения в товаре «{formData.name || "без названия"}»?
+                </p>
+                <p className="text-muted-foreground">
+                  После подтверждения карточка товара будет обновлена в каталоге и в админке.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" className="rounded-none" onClick={() => setProductUpdateConfirmOpen(false)} disabled={productSubmitting}>
+                  Отмена
+                </Button>
+                <Button type="button" className="rounded-none bg-black text-white hover:bg-gray-800" onClick={() => void submitProductForm()} disabled={productSubmitting}>
+                  {productSubmitting ? "Обновление..." : "Обновить товар"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={dictionaryCreateDialog.open} onOpenChange={(open) => { if (!open) closeCreateDictionaryDialog(); }}>
+            <DialogContent className="max-w-xl rounded-none border-black">
+              <form onSubmit={(e) => { e.preventDefault(); void submitCreateDictionaryItem(); }} className="space-y-4">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-black uppercase">
+                    Добавить в словарь: {dictionaryGroups.find((group) => group.key === dictionaryCreateDialog.kind)?.label}
+                  </DialogTitle>
+                </DialogHeader>
+
+                {dictionaryCreateDialog.attachToProduct && (
+                  <div className="rounded-none border border-black bg-stone-50 px-3 py-2 text-sm">
+                    После сохранения значение сразу добавится в текущий товар.
+                  </div>
+                )}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-dictionary-name">Название *</Label>
+                    <Input
+                      id="create-dictionary-name"
+                      value={dictionaryCreateDialog.name}
+                      onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, name: e.target.value }))}
+                      className="h-11 rounded-none border-black"
+                      placeholder="Например, Хлопок"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-dictionary-slug">Slug</Label>
+                    <Input
+                      id="create-dictionary-slug"
+                      value={dictionaryCreateDialog.slug}
+                      onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, slug: e.target.value.toLowerCase() }))}
+                      className="h-11 rounded-none border-black"
+                      placeholder="latin-slug"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_64px]">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-dictionary-color">Цвет метки</Label>
+                    <Input
+                      id="create-dictionary-color"
+                      value={dictionaryCreateDialog.color}
+                      onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, color: e.target.value }))}
+                      className="h-11 rounded-none border-black"
+                      placeholder="#3b82f6"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-dictionary-color-picker">Пикер</Label>
+                    <input
+                      id="create-dictionary-color-picker"
+                      type="color"
+                      value={dictionaryCreateDialog.color || "#3b82f6"}
+                      onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, color: e.target.value }))}
+                      className="h-11 w-full cursor-pointer rounded-none border border-black bg-white p-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="create-dictionary-description">Описание</Label>
+                  <Textarea
+                    id="create-dictionary-description"
+                    value={dictionaryCreateDialog.description}
+                    onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, description: e.target.value }))}
+                    className="min-h-[110px] rounded-none border-black"
+                    placeholder="Необязательно, но помогает быстрее ориентироваться в словаре"
+                  />
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" className="rounded-none" onClick={closeCreateDictionaryDialog} disabled={dictionaryCreateDialog.submitting}>
+                    Отмена
+                  </Button>
+                  <Button type="submit" className="rounded-none bg-black text-white hover:bg-gray-800" disabled={dictionaryCreateDialog.submitting}>
+                    {dictionaryCreateDialog.submitting ? "Создание..." : "Добавить"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={productDictionarySelector.open} onOpenChange={(open) => setProductDictionarySelector((prev) => ({ ...prev, open }))}>
             <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto rounded-none border-black">
@@ -3984,3 +4891,4 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       </div>
   );
 }
+
