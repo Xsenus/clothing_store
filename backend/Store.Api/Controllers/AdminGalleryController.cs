@@ -10,6 +10,9 @@ namespace Store.Api.Controllers;
 [Route("admin/gallery")]
 public class AdminGalleryController : ControllerBase
 {
+    private const long DefaultMaxGalleryFileSizeBytes = 20 * 1024 * 1024;
+    private const long GalleryRequestLimitBytes = 25_000_000;
+
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
     private readonly GalleryStorageService _galleryStorage;
@@ -20,7 +23,7 @@ public class AdminGalleryController : ControllerBase
         _db = db;
         _auth = auth;
         _galleryStorage = galleryStorage;
-        _maxFileSizeBytes = configuration.GetValue<long?>("Storage:MaxUploadFileSizeBytes") ?? 10 * 1024 * 1024;
+        _maxFileSizeBytes = configuration.GetValue<long?>("Storage:MaxUploadFileSizeBytes") ?? DefaultMaxGalleryFileSizeBytes;
     }
 
     [HttpGet]
@@ -36,12 +39,13 @@ public class AdminGalleryController : ControllerBase
     }
 
     [HttpPost]
-    [RequestSizeLimit(20_000_000)]
+    [RequestSizeLimit(GalleryRequestLimitBytes)]
     public async Task<IResult> Upload([FromForm] IFormFile file, [FromForm] string? name, [FromForm] string? description)
     {
         if (!await _auth.RequireAdminAsync(Request)) return Results.Unauthorized();
         if (file.Length <= 0) return Results.BadRequest(new { detail = "Файл пустой." });
-        if (file.Length > _maxFileSizeBytes) return Results.BadRequest(new { detail = "Файл слишком большой." });
+        if (file.Length > _maxFileSizeBytes)
+            return Results.BadRequest(new { detail = $"Файл слишком большой. Максимум {FormatMegabytes(_maxFileSizeBytes)}." });
 
         string extension;
         try
@@ -77,6 +81,12 @@ public class AdminGalleryController : ControllerBase
         _db.GalleryImages.Add(image);
         await _db.SaveChangesAsync();
         return Results.Ok(MapGalleryImage(image, Request.PathBase));
+    }
+
+    private static string FormatMegabytes(long bytes)
+    {
+        var megabytes = bytes / 1024d / 1024d;
+        return $"{megabytes:0.#} МБ";
     }
 
     [HttpPatch("{id}")]

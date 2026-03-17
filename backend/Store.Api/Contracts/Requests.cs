@@ -49,6 +49,7 @@ public record LikeTogglePayload(string ProductId);
 /// Данные отзыва.
 /// </summary>
 public record ReviewPayload(string Text, List<string>? Media);
+public record ReviewModerationPayload(string Action);
 
 /// <summary>
 /// Данные для создания заказа.

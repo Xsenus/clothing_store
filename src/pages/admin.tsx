@@ -268,8 +268,22 @@ interface Product {
   color?: string;
   colors?: string[];
   shipping?: string;
-  reviews?: { author: string; date: string; text: string }[];
+  reviewsEnabled?: boolean;
   sizeStock?: Record<string, number>;
+}
+
+interface AdminProductReview {
+  id: string;
+  author: string;
+  text: string;
+  media?: string[];
+  createdAt?: number | null;
+  editedAt?: number | null;
+  isHidden?: boolean;
+  hiddenAt?: number | null;
+  isDeleted?: boolean;
+  deletedAt?: number | null;
+  deletedByRole?: string | null;
 }
 
 interface AdminUser {
@@ -610,6 +624,7 @@ const createEmptyProductForm = () => ({
   sizes: [] as string[],
   isNew: false,
   isPopular: false,
+  reviewsEnabled: true,
   sku: "",
   materials: [] as string[],
   printType: "",
@@ -852,6 +867,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(createEmptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productReviews, setProductReviews] = useState<AdminProductReview[]>([]);
+  const [productReviewsLoading, setProductReviewsLoading] = useState(false);
   const [productSubmitting, setProductSubmitting] = useState(false);
   const [productUpdateConfirmOpen, setProductUpdateConfirmOpen] = useState(false);
   const [mediaDeleteDialog, setMediaDeleteDialog] = useState<MediaDeleteDialogState>({ open: false, slot: null });
@@ -1582,7 +1599,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       }
       toast.success("Иконка вкладки загружена");
     } catch (error) {
-      toast.error("Не удалось загрузить иконку");
+      toast.error(getErrorMessage(error, "Не удалось загрузить иконку"));
     } finally {
       setFaviconUploading(false);
     }
@@ -1610,7 +1627,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       payload.append("file", file);
       payload.append("name", galleryName || file.name);
       payload.append("description", galleryDescription);
-      await FLOW.uploadAdminGalleryImage({ input: payload });
+      const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
+      if (!uploaded?.url) {
+        throw new Error("Не удалось получить URL загруженного изображения");
+      }
       setGalleryName("");
       setGalleryDescription("");
       setSelectedGalleryFileName("");
@@ -1619,8 +1639,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       }
       await fetchAdminData();
       toast.success("Изображение добавлено в галерею");
-    } catch {
-      toast.error("Не удалось загрузить изображение в галерею");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось загрузить изображение в галерею"));
     } finally {
       setGalleryUploading(false);
     }
@@ -2316,6 +2336,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const resetProductEditor = () => {
     setEditingId(null);
     setEditingProduct(null);
+    setProductReviews([]);
+    setProductReviewsLoading(false);
     setFormData(createEmptyProductForm());
     setSelectedProductEditorDictionaryTab("categories");
     setProductSubmitting(false);
@@ -2324,10 +2346,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setIsOpen(false);
   };
 
+  const fetchProductReviews = async (productId: string) => {
+    setProductReviewsLoading(true);
+    try {
+      const response = await FLOW.getAdminProductReviews({ input: { productId } });
+      setProductReviews(Array.isArray(response?.items) ? response.items : []);
+    } catch (error) {
+      toast.error("Не удалось загрузить отзывы товара");
+      setProductReviews([]);
+    } finally {
+      setProductReviewsLoading(false);
+    }
+  };
+
   const openProductForm = (product?: Product) => {
     if (product) {
       setEditingId(product._id);
       setEditingProduct(product);
+      setProductReviews([]);
+      void fetchProductReviews(product._id);
       setSelectedProductEditorDictionaryTab("categories");
       const mediaList = buildMediaFromProduct(product);
       setFormData({
@@ -2345,6 +2382,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         sizes: product.sizes,
         isNew: product.isNew,
         isPopular: product.isPopular,
+        reviewsEnabled: product.reviewsEnabled !== false,
         sku: product.sku || "",
         materials: normalizeDictionaryValues(product.materials, product.material),
         printType: product.printType || "",
@@ -2357,6 +2395,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     } else {
       setEditingId(null);
       setEditingProduct(null);
+      setProductReviews([]);
+      setProductReviewsLoading(false);
       setFormData(createEmptyProductForm());
       setSelectedProductEditorDictionaryTab("categories");
     }
@@ -2474,6 +2514,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       sizes: formData.sizes,
       isNew: formData.isNew,
       isPopular: formData.isPopular,
+      reviewsEnabled: formData.reviewsEnabled !== false,
       sku: formData.sku,
       material: formData.materials[0] || "",
       materials: formData.materials,
@@ -2773,13 +2814,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       payload.append("file", file);
       payload.append("name", file.name);
       const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
-      if (uploaded?.url) {
-        setMediaSlot(slot, file.type.startsWith("video") ? "video" : "image", uploaded.url);
-        await fetchAdminData();
-        toast.success("Файл загружен в галерею и выбран");
+      if (!uploaded?.url) {
+        throw new Error("Не удалось получить URL загруженного файла");
       }
-    } catch {
-      toast.error("Не удалось загрузить файл в галерею");
+      setMediaSlot(slot, file.type.startsWith("video") ? "video" : "image", uploaded.url);
+      await fetchAdminData();
+      toast.success("Файл загружен в галерею и выбран");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось загрузить файл в галерею"));
     } finally {
       setUploading(false);
     }
@@ -2833,15 +2875,34 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const handleDeleteReview = async (reviewId: string) => {
+  const handleModerateReview = async (reviewId: string, action: "hide" | "show" | "delete" | "restore") => {
     if (!editingProduct) return;
+
+    if (action === "delete" && !window.confirm("Удалить отзыв? Он пропадет с витрины, но останется в базе.")) {
+      return;
+    }
+
     try {
-      await FLOW.deleteProductReview({ input: { productId: editingProduct._id, reviewId } });
-      const nextReviews = (editingProduct.reviews || []).filter((review: any) => review.id !== reviewId);
-      setEditingProduct({ ...editingProduct, reviews: nextReviews });
-      toast.success("Отзыв удален");
+      const review = await FLOW.moderateProductReview({
+        input: {
+          productId: editingProduct._id,
+          reviewId,
+          action,
+        },
+      });
+
+      setProductReviews((prev) => prev.map((item) => (item.id === reviewId ? review : item)));
+
+      const actionLabel = action === "hide"
+        ? "Отзыв скрыт"
+        : action === "show"
+          ? "Отзыв снова опубликован"
+          : action === "restore"
+            ? "Отзыв восстановлен"
+            : "Отзыв удален";
+      toast.success(actionLabel);
     } catch (error) {
-      toast.error("Не удалось удалить отзыв");
+      toast.error("Не удалось изменить статус отзыва");
     }
   };
 
@@ -3119,7 +3180,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <input
                       ref={galleryFileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.avif,.jfif"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0] || null;
@@ -5771,7 +5832,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       Загрузить в галерею
                                       <input
                                         type="file"
-                                        accept="image/*"
+                                        accept="image/*,.avif,.jfif"
                                         className="hidden"
                                         onChange={(e) => uploadMediaToGalleryAndAssign(e.target.files?.[0] || null, slot)}
                                         disabled={uploading}
@@ -5791,7 +5852,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         className="h-11 w-full justify-center rounded-none border-black"
                                         onClick={() => openMediaGalleryPicker(slot)}
                                       >
-                                        <Images className="mr-2 h-4 w-4" /> Рз галереи
+                                        <Images className="mr-2 h-4 w-4" /> Из галереи
                                       </Button>
                                     </span>
                                   </TooltipTrigger>
@@ -6011,6 +6072,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     />
                     <Label htmlFor="is-pop" className="cursor-pointer font-bold uppercase">Популярный / Хит</Label>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="reviews-enabled"
+                      checked={formData.reviewsEnabled !== false}
+                      onCheckedChange={(checked) => setFormData({ ...formData, reviewsEnabled: !!checked })}
+                    />
+                    <Label htmlFor="reviews-enabled" className="cursor-pointer font-bold uppercase">Отзывы включены</Label>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
@@ -6060,6 +6129,118 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     />
                   </div>
                 </div>
+
+                {editingId && (
+                  <div className="space-y-4 border-t border-black/10 pt-6">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h3 className="text-lg font-bold uppercase tracking-widest">Отзывы по товару</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Здесь можно скрывать отзывы, мягко удалять их без физического удаления из базы и при необходимости восстанавливать.
+                        </p>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {productReviewsLoading ? "Загрузка..." : `Всего отзывов: ${productReviews.length}`}
+                      </div>
+                    </div>
+
+                    {productReviewsLoading ? (
+                      <p className="text-sm text-muted-foreground">Загружаем отзывы...</p>
+                    ) : productReviews.length > 0 ? (
+                      <div className="space-y-4">
+                        {productReviews.map((review) => (
+                          <div key={review.id} className="space-y-3 border border-black/10 bg-stone-50 p-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold">{review.author || "Покупатель"}</span>
+                                  {review.isDeleted ? (
+                                    <span className="border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                                      Удален
+                                    </span>
+                                  ) : review.isHidden ? (
+                                    <span className="border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                      Скрыт
+                                    </span>
+                                  ) : (
+                                    <span className="border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                                      Опубликован
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  <span>Создан: {review.createdAt ? new Date(review.createdAt).toLocaleString("ru-RU") : "—"}</span>
+                                  {review.editedAt && <span>Изменен: {new Date(review.editedAt).toLocaleString("ru-RU")}</span>}
+                                  {review.deletedAt && <span>Удален: {new Date(review.deletedAt).toLocaleString("ru-RU")}</span>}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                {review.isDeleted ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-none"
+                                    onClick={() => handleModerateReview(review.id, "restore")}
+                                  >
+                                    <RefreshCcw className="mr-2 h-4 w-4" />
+                                    Восстановить
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-none"
+                                    onClick={() => handleModerateReview(review.id, review.isHidden ? "show" : "hide")}
+                                  >
+                                    {review.isHidden ? (
+                                      <>
+                                        <Eye className="mr-2 h-4 w-4" />
+                                        Показать
+                                      </>
+                                    ) : (
+                                      <>
+                                        <EyeOff className="mr-2 h-4 w-4" />
+                                        Скрыть
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                                {!review.isDeleted && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-none"
+                                    onClick={() => handleModerateReview(review.id, "delete")}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Удалить
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="text-sm leading-relaxed whitespace-pre-wrap">{review.text}</div>
+
+                            {Array.isArray(review.media) && review.media.length > 0 && (
+                              <div className="flex flex-wrap gap-3 pt-1">
+                                {review.media.map((mediaUrl, index) => (
+                                  /\.(mp4|webm|mov|m4v|avi|ogg)(\?.*)?$/i.test(mediaUrl) ? (
+                                    <video key={`${mediaUrl}-${index}`} src={mediaUrl} controls className="h-28 w-28 border border-black/10 object-cover" />
+                                  ) : (
+                                    <img key={`${mediaUrl}-${index}`} src={mediaUrl} alt="" className="h-28 w-28 border border-black/10 object-cover" />
+                                  )
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Пока отзывов нет.</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" onClick={closeProductForm} className="h-11 rounded-none" disabled={productSubmitting}>
@@ -6312,7 +6493,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <input
                     ref={mediaGalleryUploadInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.avif,.jfif"
                     className="hidden"
                     onChange={(e) => uploadFromPickerToGallery(e.target.files?.[0] || null)}
                   />

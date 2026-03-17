@@ -6,18 +6,56 @@ import QuantitySelector from '@/components/QuantitySelector';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { FLOW } from '@/lib/api-mapping';
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router';
 import { useCart } from '@/context/CartContext';
 import { toast } from 'sonner';
-import { Heart, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Heart, ChevronLeft, ChevronRight, EyeOff, Loader2, MessageSquarePlus, Pencil, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import PageSeo from '@/components/PageSeo';
 import { resolveUrl, truncateText } from '@/lib/seo';
 import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
 import { getProductDetailImageDisplayClasses, getProductDetailMediaPageLayoutClasses } from '@/lib/product-card-background';
+
+interface ProductReview {
+  id: string;
+  productId?: string;
+  userId?: string;
+  author: string;
+  text: string;
+  media: string[];
+  createdAt: number;
+  editedAt?: number | null;
+  isHidden?: boolean;
+  hiddenAt?: number | null;
+  isDeleted?: boolean;
+  deletedAt?: number | null;
+  deletedByRole?: string | null;
+  isMine?: boolean;
+}
+
+interface ProductReviewsPayload {
+  reviewsEnabled: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  items: ProductReview[];
+  myReview?: ProductReview | null;
+}
 
 interface Product {
   _id: string;
@@ -43,7 +81,7 @@ interface Product {
   color?: string;
   colors?: string[];
   shipping?: string;
-  reviews?: { id?: string; author: string; date: string; text: string; media?: string[] }[];
+  reviewsEnabled?: boolean;
   commentsCount?: number;
   sizeStock?: Record<string, number>;
 }
@@ -72,6 +110,52 @@ const normalizeProductValues = (values?: string[] | null, fallback?: string | nu
   return result;
 };
 
+const formatReviewDate = (value?: number | null) => {
+  if (!value) return "";
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return fallback;
+};
+
+const isVideoReviewMedia = (url: string) => {
+  const normalized = String(url || "")
+    .split("#")[0]
+    .split("?")[0]
+    .toLowerCase();
+
+  return [".mp4", ".webm", ".mov", ".m4v", ".avi", ".ogg"].some((extension) => normalized.endsWith(extension));
+};
+
+const getGenderLabel = (value?: string | null) => {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "male":
+      return "Мужской";
+    case "female":
+      return "Женский";
+    case "unisex":
+      return "Unisex";
+    default:
+      return String(value || "").trim();
+  }
+};
+
 export default function ProductDetailPage() {
   const { slug } = useParams();
   const [product, setProduct] = useState<Product | null>(null);
@@ -81,8 +165,15 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(0);
   const [imgError, setImgError] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [reviewsData, setReviewsData] = useState<ProductReviewsPayload | null>(null);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsPage, setReviewsPage] = useState(1);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewDeleteDialogOpen, setReviewDeleteDialogOpen] = useState(false);
   const [reviewText, setReviewText] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewDeleting, setReviewDeleting] = useState(false);
+  const [reviewUploading, setReviewUploading] = useState(false);
   const [reviewMedia, setReviewMedia] = useState<string[]>([]);
   const [mediaIndex, setMediaIndex] = useState(0);
   
@@ -97,6 +188,17 @@ export default function ProductDetailPage() {
   const productCategories = product ? normalizeProductValues(product.categories, product.category) : [];
   const productMaterials = product ? normalizeProductValues(product.materials, product.material) : [];
   const productColors = product ? normalizeProductValues(product.colors, product.color) : [];
+  const productCharacteristics = product
+    ? [
+        { label: "Артикул", value: product.sku?.trim() || "" },
+        { label: "Материал", value: productMaterials.join(", ").trim() },
+        { label: "Принт", value: product.printType?.trim() || "" },
+        { label: "Лекала", value: product.fit?.trim() || "" },
+        { label: "Пол", value: getGenderLabel(product.gender) },
+        { label: "Цвет", value: productColors.join(", ").trim() },
+        { label: "Отправка", value: product.shipping?.trim() || "" },
+      ].filter((item) => item.value)
+    : [];
   const hasSizeStockInfo = Boolean(product?.sizeStock && Object.keys(product.sizeStock).length > 0);
   const hasStock = product
     ? product.sizeStock
@@ -115,6 +217,25 @@ export default function ProductDetailPage() {
   const seoTitle = product ? product.name : (loading ? "Товар" : "Товар не найден");
   const seoPath = slug ? `/product/${slug}` : "/catalog";
   const seoRobots = product ? "index,follow" : "noindex,nofollow";
+  const reviewsEnabled = reviewsData?.reviewsEnabled ?? product?.reviewsEnabled ?? true;
+  const myReview = reviewsData?.myReview || null;
+  const hasOwnActiveReview = Boolean(myReview && !myReview.isDeleted);
+  const canRestoreOwnReview = Boolean(myReview?.isDeleted && myReview.deletedByRole === "user" && reviewsEnabled);
+  const canOpenReviewDialog = Boolean(
+    isAuthenticated
+    && (hasOwnActiveReview || (reviewsEnabled && (!myReview || canRestoreOwnReview)))
+  );
+  const reviewDialogTitle = hasOwnActiveReview
+    ? "Редактировать отзыв"
+    : canRestoreOwnReview
+      ? "Оставить отзыв снова"
+      : "Оставить отзыв";
+  const reviewSubmitLabel = hasOwnActiveReview
+    ? "Сохранить изменения"
+    : canRestoreOwnReview
+      ? "Восстановить отзыв"
+      : "Оставить отзыв";
+  const reviewPageNumbers = Array.from({ length: reviewsData?.totalPages || 0 }, (_, index) => index + 1);
 
   useEffect(() => {
     if (!slug) return;
@@ -126,6 +247,12 @@ export default function ProductDetailPage() {
         if (productRes) {
           setProduct(productRes);
           setMediaIndex(0);
+          setReviewsPage(1);
+          setReviewsData(null);
+          setReviewDialogOpen(false);
+          setReviewDeleteDialogOpen(false);
+          setReviewText("");
+          setReviewMedia([]);
           // Reset selection
           setSelectedSize('');
           setQuantity(0);
@@ -150,6 +277,37 @@ export default function ProductDetailPage() {
     
     fetchData();
   }, [slug]);
+
+  const fetchReviews = async (productId: string, page: number) => {
+    setReviewsLoading(true);
+    try {
+      const response = await FLOW.getProductReviews({
+        input: {
+          productId,
+          page,
+          pageSize: 10,
+        },
+      });
+
+      setReviewsData(response);
+      if (response?.page && response.page !== reviewsPage) {
+        setReviewsPage(response.page);
+      }
+
+      return response;
+    } catch (error) {
+      toast.error("Не удалось загрузить отзывы");
+      return null;
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!product?._id) return;
+
+    void fetchReviews(product._id, reviewsPage);
+  }, [product?._id, reviewsPage, isAuthenticated]);
 
   const mediaItems = product
     ? (product.media && product.media.length > 0
@@ -278,7 +436,7 @@ export default function ProductDetailPage() {
     }
   };
 
-  const handleAddReview = async () => {
+  const legacyHandleAddReview = async () => {
     if (!product) return;
     if (!isAuthenticated) {
       navigate("/auth");
@@ -311,6 +469,99 @@ export default function ProductDetailPage() {
       toast.error("Не удалось добавить отзыв");
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  void legacyHandleAddReview;
+
+  const openReviewEditor = () => {
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+
+    if (!canOpenReviewDialog) return;
+
+    const sourceReview = myReview && myReview.deletedByRole !== "admin" ? myReview : null;
+    setReviewText(sourceReview?.text || "");
+    setReviewMedia(sourceReview?.media || []);
+    setReviewDialogOpen(true);
+  };
+
+  const handleReviewMediaUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    setReviewUploading(true);
+    try {
+      const formDataUpload = new FormData();
+      Array.from(files).forEach((file) => formDataUpload.append("files", file));
+      const result = await FLOW.uploadMedia({ input: formDataUpload });
+      const uploadedUrls = Array.isArray(result?.urls) ? result.urls : [];
+      if (uploadedUrls.length === 0) {
+        throw new Error("Не удалось получить URL загруженных файлов");
+      }
+      setReviewMedia((prev) => Array.from(new Set([...prev, ...uploadedUrls])));
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось загрузить фото или видео"));
+    } finally {
+      setReviewUploading(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleRemoveReviewMedia = (mediaUrl: string) => {
+    setReviewMedia((prev) => prev.filter((item) => item !== mediaUrl));
+  };
+
+  const handleAddReview = async () => {
+    if (!product) return;
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+    if (!reviewText.trim()) {
+      toast.error("Введите отзыв");
+      return;
+    }
+
+    setReviewSubmitting(true);
+    try {
+      await FLOW.addProductReview({
+        input: {
+          productId: product._id,
+          text: reviewText.trim(),
+          media: reviewMedia,
+        },
+      });
+      setReviewDialogOpen(false);
+      setReviewsPage(1);
+      await fetchReviews(product._id, 1);
+      toast.success(hasOwnActiveReview ? "Отзыв обновлен" : "Отзыв сохранен");
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Не удалось сохранить отзыв";
+      toast.error(message);
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const handleDeleteReview = async () => {
+    if (!product || !myReview || myReview.isDeleted) return;
+
+    setReviewDeleting(true);
+    try {
+      await FLOW.deleteOwnProductReview({ input: { productId: product._id } });
+      setReviewDeleteDialogOpen(false);
+      setReviewDialogOpen(false);
+      setReviewsPage(1);
+      await fetchReviews(product._id, 1);
+      toast.success("Отзыв удален");
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Не удалось удалить отзыв";
+      toast.error(message);
+    } finally {
+      setReviewDeleting(false);
     }
   };
 
@@ -470,7 +721,7 @@ export default function ProductDetailPage() {
                 {product.name}
               </h1>
               <div className="text-xs uppercase tracking-widest text-gray-500">
-                {product.reviews?.length || 0} отзывы {product.commentsCount || 0} комментарии
+                {reviewsData?.total || 0} отзывов {product.commentsCount || 0} комментариев
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -551,80 +802,132 @@ export default function ProductDetailPage() {
               </DialogContent>
             </Dialog>
 
-            <div className="space-y-3 pt-4">
-              <h3 className="text-lg font-bold uppercase tracking-widest">Характеристики</h3>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <div className="text-gray-500">Артикул</div>
-                <div className="text-black">{product.sku || "-"}</div>
-                <div className="text-gray-500">Материал</div>
-                <div className="text-black">{productMaterials.join(", ") || "-"}</div>
-                <div className="text-gray-500">Принт</div>
-                <div className="text-black">{product.printType || "-"}</div>
-                <div className="text-gray-500">Лекала</div>
-                <div className="text-black">{product.fit || "-"}</div>
-                <div className="text-gray-500">Пол</div>
-                <div className="text-black">{product.gender || "-"}</div>
-                <div className="text-gray-500">Цвет</div>
-                <div className="text-black">{productColors.join(", ") || "-"}</div>
-                <div className="text-gray-500">Отправка</div>
-                <div className="text-black">{product.shipping || "-"}</div>
+            {productCharacteristics.length > 0 && (
+              <div className="space-y-3 pt-4">
+                <h3 className="text-lg font-bold uppercase tracking-widest">Характеристики</h3>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  {productCharacteristics.map((item) => (
+                    <div key={item.label} className="contents">
+                      <div className="text-gray-500">{item.label}</div>
+                      <div className="text-black">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             
             <div className="space-y-4 pt-8 border-t">
-              <h3 className="text-lg font-bold uppercase tracking-widest">Отзывы</h3>
-              {isAuthenticated ? <div className="space-y-3">
-                <textarea
-                  value={reviewText}
-                  onChange={(e) => setReviewText(e.target.value)}
-                  placeholder="Ваш отзыв"
-                  className="w-full border border-gray-300 px-3 py-2 text-sm min-h-[80px]"
-                />
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center justify-center h-10 px-4 border border-black font-bold uppercase tracking-widest cursor-pointer">
-                    Фото/Видео
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      multiple
-                      className="hidden"
-                      onChange={async (e) => {
-                        const files = e.target.files;
-                        if (!files || files.length === 0) return;
-                        try {
-                        const formDataUpload = new FormData();
-                        Array.from(files).forEach((file) => formDataUpload.append("files", file));
-                        const res = await FLOW.uploadMedia({ input: formDataUpload });
-                        const urls = res?.urls || [];
-                        setReviewMedia((prev) => [...prev, ...urls]);
-                        } catch (error) {
-                          toast.error("Не удалось загрузить файлы");
-                        }
-                      }}
-                    />
-                  </label>
-                  {reviewMedia.length > 0 && (
-                    <div className="text-xs text-gray-500">{reviewMedia.length} файл(ов)</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-lg font-bold uppercase tracking-widest">Отзывы</h3>
+                {canOpenReviewDialog && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="uppercase font-bold tracking-widest"
+                    onClick={openReviewEditor}
+                  >
+                    {hasOwnActiveReview ? (
+                      <>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Редактировать отзыв
+                      </>
+                    ) : (
+                      <>
+                        <MessageSquarePlus className="mr-2 h-4 w-4" />
+                        {canRestoreOwnReview ? "Оставить отзыв снова" : "Оставить отзыв"}
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+
+              {!isAuthenticated && (
+                <div className="text-sm text-gray-500">Оставлять отзывы могут только авторизованные пользователи.</div>
+              )}
+
+              {isAuthenticated && !reviewsEnabled && !hasOwnActiveReview && !canRestoreOwnReview && (
+                <div className="text-sm text-gray-500">Отзывы для этого товара отключены администратором.</div>
+              )}
+
+              {myReview && (
+                <div className="space-y-3 border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <div className="text-sm font-bold uppercase tracking-widest">Ваш отзыв</div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                        <span>Создан: {formatReviewDate(myReview.createdAt)}</span>
+                        {myReview.editedAt && <span>Изменен: {formatReviewDate(myReview.editedAt)}</span>}
+                      </div>
+                    </div>
+                    {!myReview.isDeleted && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="uppercase font-bold tracking-widest"
+                        onClick={() => setReviewDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Удалить
+                      </Button>
+                    )}
+                  </div>
+
+                  {myReview.isDeleted ? (
+                    <div className="text-sm text-gray-600">
+                      {myReview.deletedByRole === "admin"
+                        ? "Ваш отзыв удален администратором и больше не отображается на странице товара."
+                        : "Вы удалили свой отзыв. Его можно оставить снова, пока отзывы для товара включены."}
+                    </div>
+                  ) : (
+                    <>
+                      {myReview.isHidden && (
+                        <div className="flex items-start gap-2 text-sm text-gray-600">
+                          <EyeOff className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span>Отзыв скрыт администратором. Вы можете его отредактировать, но пока его не видят другие покупатели.</span>
+                        </div>
+                      )}
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">{myReview.text}</div>
+                      {myReview.media && myReview.media.length > 0 && (
+                        <div className="flex flex-wrap gap-3 pt-1">
+                          {myReview.media.map((mediaUrl, index) => (
+                            isVideoReviewMedia(mediaUrl) ? (
+                              <video key={`${mediaUrl}-${index}`} src={mediaUrl} controls className="w-40 border border-gray-200" />
+                            ) : (
+                              <img key={`${mediaUrl}-${index}`} src={mediaUrl} alt="" className="h-24 w-24 object-cover border border-gray-200" />
+                            )
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-                <Button onClick={handleAddReview} disabled={reviewSubmitting} className="uppercase font-bold tracking-widest">
-                  {reviewSubmitting ? "Отправка..." : "Оставить отзыв"}
-                </Button>
-              </div> : <div className="text-sm text-gray-500">Оставлять отзывы могут только авторизованные пользователи.</div>}
-              {product.reviews && product.reviews.length > 0 ? (
+              )}
+
+              {isAuthenticated && !myReview && reviewsEnabled && (
+                <div className="text-sm text-gray-500">
+                  На этот товар можно оставить только один отзыв. Позже его можно отредактировать или удалить.
+                </div>
+              )}
+
+              {reviewsLoading && !reviewsData ? (
+                <div className="text-sm text-gray-500">Загружаем отзывы...</div>
+              ) : reviewsData?.items && reviewsData.items.length > 0 ? (
                 <div className="space-y-6">
-                  {product.reviews.map((review, index) => (
-                    <div key={review.id || `${review.author}-${index}`} className="space-y-2">
+                  {reviewsData.items.map((review) => (
+                    <div key={review.id} className="space-y-2 border-b border-gray-100 pb-6 last:border-b-0 last:pb-0">
                       <div className="text-sm font-bold">{review.author}</div>
-                      <div className="text-xs text-gray-500">{review.date}</div>
-                      <div className="text-sm text-gray-700">{review.text}</div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                        <span>Создан: {formatReviewDate(review.createdAt)}</span>
+                        {review.editedAt && <span>Изменен: {formatReviewDate(review.editedAt)}</span>}
+                      </div>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">{review.text}</div>
                       {review.media && review.media.length > 0 && (
                         <div className="flex flex-wrap gap-3 pt-2">
-                          {review.media.map((mediaUrl, idx) => (
-                            mediaUrl.match(/\.(mp4|webm|mov)$/i) ? (
-                              <video key={`${mediaUrl}-${idx}`} src={mediaUrl} controls className="w-40 border border-gray-200" />
+                          {review.media.map((mediaUrl, index) => (
+                            isVideoReviewMedia(mediaUrl) ? (
+                              <video key={`${mediaUrl}-${index}`} src={mediaUrl} controls className="w-40 border border-gray-200" />
                             ) : (
-                              <img key={`${mediaUrl}-${idx}`} src={mediaUrl} alt="" className="w-24 h-24 object-cover border border-gray-200" />
+                              <img key={`${mediaUrl}-${index}`} src={mediaUrl} alt="" className="h-24 w-24 object-cover border border-gray-200" />
                             )
                           ))}
                         </div>
@@ -633,9 +936,153 @@ export default function ProductDetailPage() {
                   ))}
                 </div>
               ) : (
-                <div className="text-sm text-gray-500">Пока нет отзывов</div>
+                <div className="text-sm text-gray-500">
+                  {reviewsLoading ? "Загружаем отзывы..." : "Пока нет отзывов"}
+                </div>
+              )}
+
+              {reviewsData && reviewsData.totalPages > 1 && (
+                <div className="flex flex-wrap items-center gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setReviewsPage((prev) => Math.max(1, prev - 1))}
+                    disabled={reviewsPage <= 1 || reviewsLoading}
+                  >
+                    Назад
+                  </Button>
+                  {reviewPageNumbers.map((pageNumber) => (
+                    <Button
+                      key={pageNumber}
+                      type="button"
+                      size="sm"
+                      variant={pageNumber === reviewsPage ? "default" : "outline"}
+                      onClick={() => setReviewsPage(pageNumber)}
+                      disabled={reviewsLoading}
+                      className="min-w-10"
+                    >
+                      {pageNumber}
+                    </Button>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setReviewsPage((prev) => Math.min(reviewsData.totalPages, prev + 1))}
+                    disabled={reviewsPage >= reviewsData.totalPages || reviewsLoading}
+                  >
+                    Вперед
+                  </Button>
+                </div>
               )}
             </div>
+
+            <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="text-2xl font-black uppercase tracking-tighter">
+                    {reviewDialogTitle}
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  <Textarea
+                    value={reviewText}
+                    onChange={(event) => setReviewText(event.target.value)}
+                    placeholder="Поделитесь впечатлением о товаре"
+                    className="min-h-[160px] rounded-none border-black"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="inline-flex cursor-pointer items-center justify-center border border-black px-4 py-2 font-bold uppercase tracking-widest">
+                      Фото/Видео
+                      <input
+                        type="file"
+                        accept="image/*,.avif,.jfif,video/*"
+                        multiple
+                        className="hidden"
+                        onChange={handleReviewMediaUpload}
+                      />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      {reviewUploading ? "Загружаем файлы..." : `${reviewMedia.length} файл(ов) выбрано`}
+                    </div>
+                  </div>
+
+                  {reviewMedia.length > 0 && (
+                    <div className="flex flex-wrap gap-3">
+                      {reviewMedia.map((mediaUrl, index) => (
+                        <div key={`${mediaUrl}-${index}`} className="relative">
+                          {isVideoReviewMedia(mediaUrl) ? (
+                            <video src={mediaUrl} controls className="h-24 w-24 border border-gray-200 object-cover" />
+                          ) : (
+                            <img src={mediaUrl} alt="" className="h-24 w-24 border border-gray-200 object-cover" />
+                          )}
+                          <button
+                            type="button"
+                            className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black text-white"
+                            onClick={() => handleRemoveReviewMedia(mediaUrl)}
+                            aria-label="Удалить вложение"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {myReview?.isHidden && !myReview.isDeleted && (
+                    <div className="flex items-start gap-2 text-sm text-gray-600">
+                      <EyeOff className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>После сохранения отзыв останется скрытым, пока администратор не вернет его в публикацию.</span>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="flex-col gap-3 sm:flex-row sm:justify-between">
+                  {hasOwnActiveReview ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="uppercase font-bold tracking-widest"
+                      onClick={() => setReviewDeleteDialogOpen(true)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Удалить отзыв
+                    </Button>
+                  ) : (
+                    <div />
+                  )}
+                  <Button
+                    type="button"
+                    className="uppercase font-bold tracking-widest"
+                    onClick={handleAddReview}
+                    disabled={reviewSubmitting || reviewUploading}
+                  >
+                    {reviewSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {reviewSubmitLabel}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <AlertDialog open={reviewDeleteDialogOpen} onOpenChange={setReviewDeleteDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Удалить отзыв?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Отзыв исчезнет со страницы товара, но останется в системе как удаленный. Это действие нужно подтвердить.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Отмена</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDeleteReview} disabled={reviewDeleting}>
+                    {reviewDeleting ? "Удаляем..." : "Удалить"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             <div className="text-xs text-gray-400 uppercase tracking-widest pt-4">
               <p>Категория: {productCategories.join(", ") || "-"}</p>

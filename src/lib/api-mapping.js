@@ -199,6 +199,20 @@ const normalizeProduct = (product) => {
 const normalizeProducts = (products) =>
   Array.isArray(products) ? products.map(normalizeProduct) : [];
 
+const normalizeProductReview = (review) => {
+  if (!review) return review;
+  return {
+    ...review,
+    media: Array.isArray(review.media) ? review.media.map(toAbsoluteMediaUrl) : [],
+  };
+};
+
+const normalizeProductReviewsPage = (payload) => ({
+  ...payload,
+  items: Array.isArray(payload?.items) ? payload.items.map(normalizeProductReview) : [],
+  myReview: normalizeProductReview(payload?.myReview),
+});
+
 export const FLOW = {
   getNewProducts: async () => normalizeProducts(await request("/products/new")),
 
@@ -322,6 +336,43 @@ export const FLOW = {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  })),
+
+  getProductReviews: async ({ input }) => {
+    const params = new URLSearchParams();
+    if (input?.page) params.set("page", String(input.page));
+    if (input?.pageSize) params.set("pageSize", String(input.pageSize));
+    const query = params.toString();
+    return normalizeProductReviewsPage(await request(query
+      ? `/products/${input.productId}/reviews?${query}`
+      : `/products/${input.productId}/reviews`));
+  },
+
+  getAdminProductReviews: async ({ input }) => normalizeProductReviewsPage(await request(`/products/${input.productId}/reviews/admin`)),
+
+  addProductReview: async ({ input }) => normalizeProductReview(await request(`/products/${input.productId}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: input.text,
+      media: Array.isArray(input.media) ? input.media : [],
+    }),
+  })),
+
+  deleteOwnProductReview: async ({ input }) => request(`/products/${input.productId}/reviews/mine`, {
+    method: "DELETE",
+  }),
+
+  moderateProductReview: async ({ input }) => normalizeProductReview(await request(`/products/${input.productId}/reviews/${input.reviewId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: input.action }),
+  })),
+
+  deleteProductReview: async ({ input }) => normalizeProductReview(await request(`/products/${input.productId}/reviews/${input.reviewId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete" }),
   })),
 
   deleteProduct: async ({ input }) => request(`/products/${input.id}`, {

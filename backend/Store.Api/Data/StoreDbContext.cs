@@ -44,6 +44,7 @@ public class StoreDbContext : DbContext
     /// Возвращает набор товаров.
     /// </summary>
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<ProductReview> ProductReviews => Set<ProductReview>();
     public DbSet<SizeDictionary> SizeDictionaries => Set<SizeDictionary>();
     public DbSet<MaterialDictionary> MaterialDictionaries => Set<MaterialDictionary>();
     public DbSet<ColorDictionary> ColorDictionaries => Set<ColorDictionary>();
@@ -77,6 +78,8 @@ public class StoreDbContext : DbContext
 
         modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
         modelBuilder.Entity<Product>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<ProductReview>().HasIndex(x => new { x.ProductId, x.UserId }).IsUnique();
+        modelBuilder.Entity<ProductReview>().HasIndex(x => new { x.ProductId, x.CreatedAt });
         modelBuilder.Entity<CartItem>().HasIndex(x => new { x.UserId, x.ProductId, x.Size }).IsUnique();
         modelBuilder.Entity<Like>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
@@ -130,6 +133,18 @@ public class StoreDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<CartItem>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductReview>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductReview>()
             .HasOne<Product>()
             .WithMany()
             .HasForeignKey(x => x.ProductId)

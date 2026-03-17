@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -237,6 +238,7 @@ public class ProductsController : ControllerBase
         if (admin is null) return Results.Unauthorized();
         var id = payload["id"]?.ToString() ?? Guid.NewGuid().ToString("N");
         payload["id"] = id;
+        EnsureProductDefaults(payload);
         NormalizePriceFields(payload);
 
         var product = new Product
@@ -266,6 +268,7 @@ public class ProductsController : ControllerBase
 
         var before = ProductJsonService.Parse(product);
         var json = ProductJsonService.Merge(before.DeepClone().AsObject(), payload);
+        EnsureProductDefaults(json);
         NormalizePriceFields(json);
 
         product.Slug = json["slug"]?.ToString() ?? product.Slug;
@@ -296,52 +299,297 @@ public class ProductsController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
+    [HttpGet("{productId}/reviews")]
+    public async Task<IResult> GetReviews(string productId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    {
+        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
+        if (product is null) return Results.NotFound(new { detail = "Product not found" });
+
+        var currentUser = await _auth.RequireUserAsync(Request);
+        var productJson = ProductJsonService.Parse(product);
+        var reviewsEnabled = IsReviewsEnabled(productJson);
+        var normalizedPageSize = Math.Clamp(pageSize <= 0 ? 10 : pageSize, 1, 10);
+
+        var visibleQuery = _db.ProductReviews
+            .AsNoTracking()
+            .Where(x => x.ProductId == productId && !x.IsDeleted && !x.IsHidden);
+
+        var total = await visibleQuery.CountAsync();
+        var totalPages = total == 0 ? 1 : (int)Math.Ceiling(total / (double)normalizedPageSize);
+        var normalizedPage = Math.Clamp(page <= 0 ? 1 : page, 1, totalPages);
+
+        var items = total == 0
+            ? new List<ProductReview>()
+            : await visibleQuery
+                .OrderByDescending(x => x.CreatedAt)
+                .Skip((normalizedPage - 1) * normalizedPageSize)
+                .Take(normalizedPageSize)
+                .ToListAsync();
+
+        ProductReview? myReview = null;
+        if (currentUser is not null)
+        {
+            myReview = await _db.ProductReviews
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProductId == productId && x.UserId == currentUser.Id);
+        }
+
+        return Results.Ok(new
+        {
+            reviewsEnabled,
+            page = normalizedPage,
+            pageSize = normalizedPageSize,
+            total,
+            totalPages,
+            items = items.Select(x => MapReviewResponse(x, currentUser?.Id)),
+            myReview = myReview is null ? null : MapReviewResponse(myReview, currentUser?.Id)
+        });
+    }
+
+    [HttpGet("{productId}/reviews/admin")]
+    public async Task<IResult> GetAdminReviews(string productId)
+    {
+        var admin = await _auth.RequireAdminUserAsync(Request);
+        if (admin is null) return Results.Unauthorized();
+
+        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
+        if (product is null) return Results.NotFound(new { detail = "Product not found" });
+
+        var productJson = ProductJsonService.Parse(product);
+        var reviews = await _db.ProductReviews
+            .AsNoTracking()
+            .Where(x => x.ProductId == productId)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        return Results.Ok(new
+        {
+            reviewsEnabled = IsReviewsEnabled(productJson),
+            items = reviews.Select(x => MapReviewResponse(x, admin.Id))
+        });
+    }
 
     [HttpPost("{productId}/reviews")]
-    public async Task<IResult> AddReview(string productId, [FromBody] ReviewPayload payload)
+    public async Task<IResult> AddOrUpdateReview(string productId, [FromBody] ReviewPayload payload)
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
-        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
-        if (product is null) return Results.NotFound(new { detail = "Product not found" });
-        var json = ProductJsonService.Parse(product);
-        var reviews = json["reviews"] as JsonArray ?? new JsonArray();
-        json["reviews"] = reviews;
-        var review = new JsonObject
-        {
-            ["id"] = Guid.NewGuid().ToString("N"),
-            ["userId"] = user.Id,
-            ["text"] = payload.Text,
-            ["media"] = new JsonArray((payload.Media ?? []).Select(x => JsonValue.Create(x)).ToArray()),
-            ["createdAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-        reviews.Add(review);
-        product.Data = json.ToJsonString();
-        await _db.SaveChangesAsync();
-        return Results.Json(review);
-    }
 
-    [HttpDelete("{productId}/reviews/{reviewId}")]
-    public async Task<IResult> DeleteReview(string productId, string reviewId)
-    {
-        if (!await _auth.RequireAdminAsync(Request)) return Results.Unauthorized();
         var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
         if (product is null) return Results.NotFound(new { detail = "Product not found" });
-        var json = ProductJsonService.Parse(product);
-        var reviews = json["reviews"] as JsonArray;
-        if (reviews is null) return Results.Ok(new { ok = true });
-        for (var i = 0; i < reviews.Count; i++)
+
+        var productJson = ProductJsonService.Parse(product);
+        var existingReview = await _db.ProductReviews.FirstOrDefaultAsync(x => x.ProductId == productId && x.UserId == user.Id);
+        var reviewsEnabled = IsReviewsEnabled(productJson);
+        if (!reviewsEnabled && (existingReview is null || existingReview.IsDeleted))
+            return Results.BadRequest(new { detail = "Reviews are disabled for this product" });
+
+        if (existingReview?.IsDeleted == true && string.Equals(existingReview.DeletedByRole, "admin", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { detail = "This review was deleted by an administrator" });
+
+        var normalizedText = NormalizeReviewText(payload.Text);
+        if (string.IsNullOrWhiteSpace(normalizedText))
+            return Results.BadRequest(new { detail = "Review text is required" });
+
+        var normalizedMedia = NormalizeReviewMedia(payload.Media);
+        var serializedMedia = JsonSerializer.Serialize(normalizedMedia);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var authorName = await ResolveReviewAuthorNameAsync(user);
+
+        ProductReview review;
+        if (existingReview is null)
         {
-            if (reviews[i]?["id"]?.ToString() == reviewId)
+            review = new ProductReview
             {
-                reviews.RemoveAt(i);
-                break;
+                ProductId = productId,
+                UserId = user.Id,
+                AuthorName = authorName,
+                Text = normalizedText,
+                MediaJson = serializedMedia,
+                CreatedAt = now
+            };
+            _db.ProductReviews.Add(review);
+        }
+        else
+        {
+            review = existingReview;
+            var contentChanged =
+                !string.Equals(review.Text, normalizedText, StringComparison.Ordinal)
+                || !string.Equals(review.MediaJson, serializedMedia, StringComparison.Ordinal)
+                || !string.Equals(review.AuthorName, authorName, StringComparison.Ordinal);
+
+            review.AuthorName = authorName;
+            review.Text = normalizedText;
+            review.MediaJson = serializedMedia;
+
+            if (review.IsDeleted)
+            {
+                review.IsDeleted = false;
+                review.DeletedAt = null;
+                review.DeletedByUserId = null;
+                review.DeletedByRole = null;
+                review.EditedAt = now;
+            }
+            else if (contentChanged)
+            {
+                review.EditedAt = now;
             }
         }
 
-        product.Data = json.ToJsonString();
         await _db.SaveChangesAsync();
+        return Results.Ok(MapReviewResponse(review, user.Id));
+    }
+
+    [HttpDelete("{productId}/reviews/mine")]
+    public async Task<IResult> DeleteOwnReview(string productId)
+    {
+        var user = await _auth.RequireUserAsync(Request);
+        if (user is null) return Results.Unauthorized();
+
+        var review = await _db.ProductReviews.FirstOrDefaultAsync(x => x.ProductId == productId && x.UserId == user.Id);
+        if (review is null || review.IsDeleted)
+            return Results.Ok(new { ok = true });
+
+        review.IsDeleted = true;
+        review.DeletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        review.DeletedByUserId = user.Id;
+        review.DeletedByRole = "user";
+        await _db.SaveChangesAsync();
+
         return Results.Ok(new { ok = true });
+    }
+
+    [HttpPatch("{productId}/reviews/{reviewId}")]
+    public async Task<IResult> ModerateReview(string productId, string reviewId, [FromBody] ReviewModerationPayload payload)
+    {
+        var admin = await _auth.RequireAdminUserAsync(Request);
+        if (admin is null) return Results.Unauthorized();
+
+        var review = await _db.ProductReviews.FirstOrDefaultAsync(x => x.ProductId == productId && x.Id == reviewId);
+        if (review is null) return Results.NotFound(new { detail = "Review not found" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var action = (payload.Action ?? string.Empty).Trim().ToLowerInvariant();
+        switch (action)
+        {
+            case "hide":
+                if (review.IsDeleted)
+                    return Results.BadRequest(new { detail = "Deleted review cannot be hidden" });
+                review.IsHidden = true;
+                review.HiddenAt = now;
+                review.HiddenByUserId = admin.Id;
+                break;
+
+            case "show":
+                if (review.IsDeleted)
+                    return Results.BadRequest(new { detail = "Deleted review cannot be shown" });
+                review.IsHidden = false;
+                review.HiddenAt = null;
+                review.HiddenByUserId = null;
+                break;
+
+            case "delete":
+                review.IsDeleted = true;
+                review.DeletedAt = now;
+                review.DeletedByUserId = admin.Id;
+                review.DeletedByRole = "admin";
+                break;
+
+            case "restore":
+                review.IsDeleted = false;
+                review.DeletedAt = null;
+                review.DeletedByUserId = null;
+                review.DeletedByRole = null;
+                break;
+
+            default:
+                return Results.BadRequest(new { detail = "Unsupported moderation action" });
+        }
+
+        await _db.SaveChangesAsync();
+        return Results.Ok(MapReviewResponse(review, admin.Id));
+    }
+
+    private async Task<string> ResolveReviewAuthorNameAsync(User user)
+    {
+        var profile = await _db.Profiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == user.Id);
+
+        var preferredName = profile?.Nickname?.Trim();
+        if (!string.IsNullOrWhiteSpace(preferredName))
+            return preferredName!;
+
+        preferredName = profile?.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(preferredName))
+            return preferredName!;
+
+        var email = user.Email?.Trim();
+        if (!string.IsNullOrWhiteSpace(email))
+            return email!;
+
+        return "Покупатель";
+    }
+
+    private static object MapReviewResponse(ProductReview review, string? currentUserId)
+    {
+        return new
+        {
+            id = review.Id,
+            productId = review.ProductId,
+            userId = review.UserId,
+            author = string.IsNullOrWhiteSpace(review.AuthorName) ? "Покупатель" : review.AuthorName,
+            text = review.Text,
+            media = DeserializeReviewMedia(review.MediaJson),
+            createdAt = review.CreatedAt,
+            editedAt = review.EditedAt,
+            isHidden = review.IsHidden,
+            hiddenAt = review.HiddenAt,
+            isDeleted = review.IsDeleted,
+            deletedAt = review.DeletedAt,
+            deletedByRole = review.DeletedByRole,
+            isMine = !string.IsNullOrWhiteSpace(currentUserId) && string.Equals(review.UserId, currentUserId, StringComparison.Ordinal)
+        };
+    }
+
+    private static List<string> DeserializeReviewMedia(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            return items
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<string> NormalizeReviewMedia(IEnumerable<string>? media)
+    {
+        return (media ?? [])
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static string NormalizeReviewText(string? value) => value?.Trim() ?? string.Empty;
+
+    private static bool IsReviewsEnabled(JsonObject productJson) => productJson["reviewsEnabled"]?.GetValue<bool>() ?? true;
+
+    private static void EnsureProductDefaults(JsonObject payload)
+    {
+        if (payload["reviewsEnabled"] is null)
+            payload["reviewsEnabled"] = true;
     }
 
     private static void NormalizePriceFields(JsonObject payload)

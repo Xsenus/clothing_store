@@ -9,7 +9,7 @@ public class GalleryStorageService
 {
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".avif", ".jfif"
     };
 
     private readonly IServiceScopeFactory _scopeFactory;
@@ -35,7 +35,7 @@ public class GalleryStorageService
     {
         var ext = Path.GetExtension(fileName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(ext) || !AllowedExtensions.Contains(ext))
-            throw new InvalidOperationException("Недопустимый формат изображения.");
+            throw new InvalidOperationException("Недопустимый формат изображения. Разрешены: JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, AVIF, JFIF.");
 
         return ext.ToLowerInvariant();
     }

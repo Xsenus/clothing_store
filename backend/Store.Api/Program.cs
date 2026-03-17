@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.StaticFiles;
 using Store.Api.Configuration;
 using Store.Api.Data;
 using Store.Api.Services;
@@ -172,10 +173,14 @@ if (!string.IsNullOrWhiteSpace(appPathBase))
 }
 
 app.UseCors("app");
+var uploadsContentTypeProvider = new FileExtensionContentTypeProvider();
+uploadsContentTypeProvider.Mappings[".avif"] = "image/avif";
+uploadsContentTypeProvider.Mappings[".jfif"] = "image/jpeg";
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(storeRuntimePaths.UploadsDir),
-    RequestPath = "/uploads"
+    RequestPath = "/uploads",
+    ContentTypeProvider = uploadsContentTypeProvider
 });
 app.MapControllers();
 

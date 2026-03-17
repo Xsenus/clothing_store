@@ -11,7 +11,13 @@ public static class ProductJsonService
     /// <summary>
     /// Преобразует JSON товара в объект.
     /// </summary>
-    public static JsonObject Parse(Product product) => JsonNode.Parse(product.Data)?.AsObject() ?? new JsonObject();
+    public static JsonObject Parse(Product product)
+    {
+        var json = JsonNode.Parse(product.Data)?.AsObject() ?? new JsonObject();
+        if (json["reviewsEnabled"] is null)
+            json["reviewsEnabled"] = true;
+        return json;
+    }
 
     /// <summary>
     /// Применяет изменяемые поля из запроса к товару.

@@ -500,6 +500,56 @@ public class Product
     public string Data { get; set; } = "{}";
 }
 
+[Table("product_reviews")]
+public class ProductReview
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Column("author_name")]
+    public string AuthorName { get; set; } = string.Empty;
+
+    [Column("text")]
+    public string Text { get; set; } = string.Empty;
+
+    [Column("media_json", TypeName = "jsonb")]
+    public string MediaJson { get; set; } = "[]";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("edited_at")]
+    public long? EditedAt { get; set; }
+
+    [Column("is_hidden")]
+    public bool IsHidden { get; set; }
+
+    [Column("hidden_at")]
+    public long? HiddenAt { get; set; }
+
+    [Column("hidden_by_user_id")]
+    public string? HiddenByUserId { get; set; }
+
+    [Column("is_deleted")]
+    public bool IsDeleted { get; set; }
+
+    [Column("deleted_at")]
+    public long? DeletedAt { get; set; }
+
+    [Column("deleted_by_user_id")]
+    public string? DeletedByUserId { get; set; }
+
+    [Column("deleted_by_role")]
+    public string? DeletedByRole { get; set; }
+}
+
 [Table("size_dictionaries")]
 public class SizeDictionary
 {
