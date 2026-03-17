@@ -12,7 +12,7 @@ using Store.Api.Services;
 namespace Store.Api.Controllers;
 
 /// <summary>
-/// РљРѕРЅС‚СЂРѕР»Р»РµСЂ РѕРїРµСЂР°С†РёР№ СЃ Р·Р°РєР°Р·Р°РјРё.
+/// Контроллер операций с заказами.
 /// </summary>
 [ApiController]
 [Route("orders")]
@@ -24,7 +24,7 @@ public class OrdersController : ControllerBase
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
-    /// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµС‚ РЅРѕРІС‹Р№ СЌРєР·РµРјРїР»СЏСЂ РєР»Р°СЃСЃР° <see cref="OrdersController"/>.
+    /// Инициализирует новый экземпляр класса <see cref="OrdersController"/>.
     /// </summary>
     public OrdersController(StoreDbContext db, AuthService auth)
     {
