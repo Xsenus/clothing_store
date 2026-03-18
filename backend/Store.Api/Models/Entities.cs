@@ -575,6 +575,12 @@ public class SizeDictionary
     [Column("show_in_catalog_filter")]
     public bool ShowInCatalogFilter { get; set; } = true;
 
+    [Column("show_color_in_catalog")]
+    public bool ShowColorInCatalog { get; set; } = true;
+
+    [Column("sort_order")]
+    public int SortOrder { get; set; }
+
     [Column("created_at")]
     public long CreatedAt { get; set; }
 }
@@ -603,6 +609,12 @@ public class MaterialDictionary
 
     [Column("show_in_catalog_filter")]
     public bool ShowInCatalogFilter { get; set; } = true;
+
+    [Column("show_color_in_catalog")]
+    public bool ShowColorInCatalog { get; set; } = true;
+
+    [Column("sort_order")]
+    public int SortOrder { get; set; }
 
     [Column("created_at")]
     public long CreatedAt { get; set; }
@@ -633,6 +645,12 @@ public class ColorDictionary
     [Column("show_in_catalog_filter")]
     public bool ShowInCatalogFilter { get; set; } = true;
 
+    [Column("show_color_in_catalog")]
+    public bool ShowColorInCatalog { get; set; } = true;
+
+    [Column("sort_order")]
+    public int SortOrder { get; set; }
+
     [Column("created_at")]
     public long CreatedAt { get; set; }
 }
@@ -661,6 +679,47 @@ public class CategoryDictionary
 
     [Column("show_in_catalog_filter")]
     public bool ShowInCatalogFilter { get; set; } = true;
+
+    [Column("show_color_in_catalog")]
+    public bool ShowColorInCatalog { get; set; } = true;
+
+    [Column("sort_order")]
+    public int SortOrder { get; set; }
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+[Table("collection_dictionaries")]
+public class CollectionDictionary
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [Column("slug")]
+    public string Slug { get; set; } = string.Empty;
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("color")]
+    public string? Color { get; set; }
+
+    [Column("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [Column("show_in_catalog_filter")]
+    public bool ShowInCatalogFilter { get; set; }
+
+    [Column("show_color_in_catalog")]
+    public bool ShowColorInCatalog { get; set; } = true;
+
+    [Column("sort_order")]
+    public int SortOrder { get; set; }
 
     [Column("created_at")]
     public long CreatedAt { get; set; }

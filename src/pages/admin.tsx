@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { 
   Dialog, 
   DialogContent, 
@@ -24,7 +25,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FLOW } from '@/lib/api-mapping';
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type DragEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
   buildProductCardBackgroundStyleFromColor,
@@ -40,6 +41,14 @@ import {
   normalizeProductDetailImageFitMode,
   normalizeProductDetailMediaSizeMode,
 } from '@/lib/product-card-background';
+import {
+  IMAGE_UPLOAD_CONTEXTS,
+  IMAGE_UPLOAD_SETTING_DEFAULTS,
+  getImageUploadSettingKey,
+  getImageUploadSettings,
+  optimizeImageFileForUpload,
+  optimizeFilesForUpload,
+} from '@/lib/image-upload-optimization';
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
@@ -256,6 +265,7 @@ interface Product {
   sizes: string[];
   category?: string;
   categories?: string[];
+  collections?: string[];
   isNew: boolean;
   isPopular: boolean;
   likesCount: number;
@@ -403,6 +413,29 @@ interface GalleryImage {
   fileSize: number;
   existsOnDisk: boolean;
   createdAt?: number;
+}
+
+interface GalleryImagesPage {
+  items: GalleryImage[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+type GalleryUploadStatus = "pending" | "uploading" | "success" | "error";
+
+interface GalleryUploadItem {
+  id: string;
+  fileName: string;
+  assignedName: string;
+  description: string;
+  fileSize: number;
+  uploadedBytes: number;
+  progressPercent: number;
+  speedBytesPerSecond: number;
+  status: GalleryUploadStatus;
+  error?: string;
 }
 
 const ORDER_STATUS_OPTIONS = [
@@ -555,13 +588,124 @@ const parseOrderHistory = (raw: any): OrderHistoryEntry[] => {
   }
 };
 
+type EmailTemplateKey =
+  | "password_reset"
+  | "order_created"
+  | "order_shipped"
+  | "order_status_changed"
+  | "email_confirmation"
+  | "telegram_connected";
 
-type DictionaryKind = "sizes" | "materials" | "colors" | "categories";
+interface EmailTemplateDefinition {
+  key: EmailTemplateKey;
+  label: string;
+  description: string;
+  placeholders: string[];
+  enabledByDefault: boolean;
+  defaultSubject: string;
+  defaultBody: string;
+}
+
+const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
+  {
+    key: "password_reset",
+    label: "Сброс пароля",
+    description: "Письмо с кодом для восстановления доступа.",
+    placeholders: ["{{site_title}}", "{{code}}", "{{ttl_minutes}}", "{{user_email}}", "{{current_date_time}}"],
+    enabledByDefault: true,
+    defaultSubject: "Сброс пароля — {{site_title}}",
+    defaultBody: "Здравствуйте!\n\nВы запросили сброс пароля на сайте {{site_title}}.\n\nКод для сброса пароля: {{code}}\nКод действует {{ttl_minutes}} минут.\n\nЕсли это были не вы, просто проигнорируйте это письмо."
+  },
+  {
+    key: "order_created",
+    label: "Создание заказа",
+    description: "Уведомление клиенту после оформления заказа.",
+    placeholders: ["{{site_title}}", "{{order_number}}", "{{customer_name}}", "{{total_amount}}", "{{payment_method_label}}", "{{shipping_address}}", "{{order_items}}"],
+    enabledByDefault: true,
+    defaultSubject: "Заказ {{order_number}} создан",
+    defaultBody: "Здравствуйте, {{customer_name}}!\n\nВаш заказ {{order_number}} успешно создан на сайте {{site_title}}.\n\nСумма: {{total_amount}}\nСпособ оплаты: {{payment_method_label}}\nАдрес доставки: {{shipping_address}}\n\nСостав заказа:\n{{order_items}}\n\nМы сообщим вам, когда статус заказа изменится."
+  },
+  {
+    key: "order_shipped",
+    label: "Отправка заказа",
+    description: "Письмо, когда заказ передан в доставку.",
+    placeholders: ["{{order_number}}", "{{customer_name}}", "{{order_status_label}}", "{{shipping_address}}", "{{manager_comment}}"],
+    enabledByDefault: true,
+    defaultSubject: "Заказ {{order_number}} передан в доставку",
+    defaultBody: "Здравствуйте, {{customer_name}}!\n\nЗаказ {{order_number}} передан в доставку.\n\nТекущий статус: {{order_status_label}}\nАдрес доставки: {{shipping_address}}\nКомментарий менеджера: {{manager_comment}}\n\nСпасибо, что выбрали {{site_title}}."
+  },
+  {
+    key: "order_status_changed",
+    label: "Смена статуса заказа",
+    description: "Общее письмо о смене статуса заказа.",
+    placeholders: ["{{order_number}}", "{{customer_name}}", "{{previous_order_status_label}}", "{{order_status_label}}", "{{manager_comment}}", "{{order_items}}"],
+    enabledByDefault: true,
+    defaultSubject: "Статус заказа {{order_number}} обновлён",
+    defaultBody: "Здравствуйте, {{customer_name}}!\n\nСтатус заказа {{order_number}} изменён.\n\nБыло: {{previous_order_status_label}}\nСтало: {{order_status_label}}\nКомментарий менеджера: {{manager_comment}}\n\nАктуальный состав заказа:\n{{order_items}}"
+  },
+  {
+    key: "email_confirmation",
+    label: "Подтверждение email",
+    description: "Письмо с кодом подтверждения email.",
+    placeholders: ["{{site_title}}", "{{code}}", "{{ttl_minutes}}", "{{user_email}}", "{{current_date_time}}"],
+    enabledByDefault: true,
+    defaultSubject: "Подтверждение email — {{site_title}}",
+    defaultBody: "Здравствуйте!\n\nКод подтверждения email для сайта {{site_title}}: {{code}}\nКод действует {{ttl_minutes}} минут.\n\nEmail: {{user_email}}"
+  },
+  {
+    key: "telegram_connected",
+    label: "Подключение Telegram",
+    description: "Уведомление о подключении Telegram-аккаунта.",
+    placeholders: ["{{user_email}}", "{{telegram_id}}", "{{telegram_username}}", "{{connected_at}}", "{{current_date_time}}"],
+    enabledByDefault: false,
+    defaultSubject: "Telegram подключён к вашему профилю",
+    defaultBody: "Здравствуйте!\n\nК вашему профилю {{user_email}} подключён Telegram-аккаунт.\n\nTelegram ID: {{telegram_id}}\nUsername: {{telegram_username}}\nДата подключения: {{connected_at}}"
+  }
+];
+
+const getEmailTemplateSettingKey = (templateKey: EmailTemplateKey, field: "enabled" | "subject" | "body") =>
+  `email_template_${templateKey}_${field}`;
+
+const EMAIL_TEMPLATE_SETTING_DEFAULTS = Object.fromEntries(
+  EMAIL_TEMPLATE_DEFINITIONS.flatMap((template) => ([
+    [getEmailTemplateSettingKey(template.key, "enabled"), template.enabledByDefault ? "true" : "false"],
+    [getEmailTemplateSettingKey(template.key, "subject"), template.defaultSubject],
+    [getEmailTemplateSettingKey(template.key, "body"), template.defaultBody],
+  ]))
+) as Record<string, string>;
+
+
+type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collections";
+
+interface DictionaryItem {
+  id: string;
+  name: string;
+  slug: string;
+  color?: string | null;
+  description?: string | null;
+  isActive?: boolean;
+  showInCatalogFilter?: boolean;
+  showColorInCatalog?: boolean;
+  sortOrder?: number;
+  createdAt?: number;
+  isUsed?: boolean;
+}
+
+interface DictionaryDraft {
+  name: string;
+  slug: string;
+  color: string;
+  description: string;
+  isActive: boolean;
+  showInCatalogFilter: boolean;
+  showColorInCatalog: boolean;
+  sortOrder: string;
+}
 
 interface DictionaryDeleteDialogState {
   open: boolean;
   kind: DictionaryKind;
-  item: any | null;
+  item: DictionaryItem | null;
   submitting: boolean;
   error: string;
 }
@@ -587,6 +731,8 @@ interface DictionaryCreateDialogState {
   slug: string;
   color: string;
   description: string;
+  showColorInCatalog: boolean;
+  sortOrder: string;
 }
 
 interface MediaDeleteDialogState {
@@ -617,6 +763,7 @@ const createEmptyProductForm = () => ({
   discountPercent: "0",
   discountedPrice: "",
   categories: [] as string[],
+  collections: [] as string[],
   images: "",
   videos: "",
   media: [{ type: "image" as const, url: "" }],
@@ -661,6 +808,8 @@ const normalizeDictionaryValues = (values?: string[] | null, fallback?: string |
 
 const getProductSizeNames = (product: Pick<Product, "sizes" | "sizeStock">) =>
   normalizeDictionaryValues([...(product.sizes || []), ...Object.keys(product.sizeStock || {})]);
+
+const normalizeDictionaryUsageKey = (value?: string | null) => value?.trim().toLowerCase() || "";
 
 const resolveCatalogImageUrl = (
   media: { type: "image" | "video"; url: string }[],
@@ -709,6 +858,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   smtp_from_email: "",
   smtp_from_name: "Fashion Demon",
   smtp_use_ssl: "true",
+  ...EMAIL_TEMPLATE_SETTING_DEFAULTS,
   metrics_yandex_metrika_enabled: "false",
   metrics_yandex_metrika_code: "",
   metrics_google_analytics_enabled: "false",
@@ -722,6 +872,17 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   catalog_filter_sizes_enabled: "true",
   catalog_filter_materials_enabled: "true",
   catalog_filter_colors_enabled: "true",
+  catalog_filter_collections_enabled: "true",
+  catalog_filter_categories_show_color: "true",
+  catalog_filter_sizes_show_color: "true",
+  catalog_filter_materials_show_color: "true",
+  catalog_filter_colors_show_color: "true",
+  catalog_filter_collections_show_color: "true",
+  catalog_filter_categories_order: "10",
+  catalog_filter_sizes_order: "20",
+  catalog_filter_materials_order: "30",
+  catalog_filter_colors_order: "40",
+  catalog_filter_collections_order: "50",
   admin_orders_row_color_processing: "#e5e7eb",
   admin_orders_row_color_created: "#e0f2fe",
   admin_orders_row_color_paid: "#dbeafe",
@@ -733,14 +894,32 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   dadata_api_key: "",
   yandex_delivery_base_cost: "350",
   yandex_delivery_cost_per_kg: "40",
-  yandex_delivery_markup_percent: "0"
+  yandex_delivery_markup_percent: "0",
+  ...IMAGE_UPLOAD_SETTING_DEFAULTS
 };
 
-const DICTIONARY_FILTER_SETTING_KEYS: Record<DictionaryKind, string> = {
+const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = {
   categories: "catalog_filter_categories_enabled",
   sizes: "catalog_filter_sizes_enabled",
   materials: "catalog_filter_materials_enabled",
-  colors: "catalog_filter_colors_enabled"
+  colors: "catalog_filter_colors_enabled",
+  collections: "catalog_filter_collections_enabled"
+};
+
+const DICTIONARY_FILTER_ORDER_SETTING_KEYS: Record<DictionaryKind, string> = {
+  categories: "catalog_filter_categories_order",
+  sizes: "catalog_filter_sizes_order",
+  materials: "catalog_filter_materials_order",
+  colors: "catalog_filter_colors_order",
+  collections: "catalog_filter_collections_order"
+};
+
+const DICTIONARY_FILTER_COLOR_SETTING_KEYS: Record<DictionaryKind, string> = {
+  categories: "catalog_filter_categories_show_color",
+  sizes: "catalog_filter_sizes_show_color",
+  materials: "catalog_filter_materials_show_color",
+  colors: "catalog_filter_colors_show_color",
+  collections: "catalog_filter_collections_show_color"
 };
 
 const PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
@@ -778,8 +957,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBots, setTelegramBots] = useState<TelegramBot[]>([]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
-  const [dictionaries, setDictionaries] = useState<any>({ sizes: [], materials: [], colors: [], categories: [] });
-  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, { name: string; slug: string; color: string; description: string; isActive: boolean; showInCatalogFilter: boolean }>>({});
+  const [smtpTestEmail, setSmtpTestEmail] = useState("");
+  const [smtpTestSending, setSmtpTestSending] = useState(false);
+  const [dictionaries, setDictionaries] = useState<Record<DictionaryKind, DictionaryItem[]>>({ sizes: [], materials: [], colors: [], categories: [], collections: [] });
+  const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, DictionaryDraft>>({});
   const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>("sizes");
   const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
   const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
@@ -797,7 +978,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     name: "",
     slug: "",
     color: "#3b82f6",
-    description: ""
+    description: "",
+    showColorInCatalog: true,
+    sortOrder: "1"
   });
   const [actionNotice, setActionNotice] = useState<ActionNoticeState>({ open: false, title: "", message: "", isError: false });
   const [productDictionarySelector, setProductDictionarySelector] = useState<ProductDictionarySelectorState>({ open: false, kind: "sizes" });
@@ -880,17 +1063,131 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [galleryName, setGalleryName] = useState("");
   const [galleryDescription, setGalleryDescription] = useState("");
   const [gallerySearch, setGallerySearch] = useState("");
+  const deferredGallerySearch = useDeferredValue(gallerySearch);
+  const [galleryPage, setGalleryPage] = useState(1);
+  const [galleryTotalPages, setGalleryTotalPages] = useState(1);
+  const [galleryTotalItems, setGalleryTotalItems] = useState(0);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryUploadQueue, setGalleryUploadQueue] = useState<GalleryUploadItem[]>([]);
+  const [isGalleryUploadPanelOpen, setIsGalleryUploadPanelOpen] = useState(false);
+  const [galleryDropActive, setGalleryDropActive] = useState(false);
   const [galleryViewMode, setGalleryViewMode] = useState<"grid" | "table">("grid");
   const [editingGalleryImageId, setEditingGalleryImageId] = useState<string | null>(null);
   const [editingGalleryName, setEditingGalleryName] = useState("");
   const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
   const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [selectedGalleryFileName, setSelectedGalleryFileName] = useState("");
   const [isMediaGalleryPickerOpen, setIsMediaGalleryPickerOpen] = useState(false);
   const [mediaGallerySlot, setMediaGallerySlot] = useState<number | null>(null);
   const [mediaGallerySearch, setMediaGallerySearch] = useState("");
+  const deferredMediaGallerySearch = useDeferredValue(mediaGallerySearch);
+  const [mediaGalleryPage, setMediaGalleryPage] = useState(1);
+  const [mediaGalleryTotalPages, setMediaGalleryTotalPages] = useState(1);
+  const [mediaGalleryTotalItems, setMediaGalleryTotalItems] = useState(0);
+  const [mediaGalleryLoading, setMediaGalleryLoading] = useState(false);
+  const [galleryPickerImages, setGalleryPickerImages] = useState<GalleryImage[]>([]);
   const mediaGalleryUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedProductEditorDictionaryTab, setSelectedProductEditorDictionaryTab] = useState<DictionaryKind>("categories");
+  const GALLERY_PAGE_SIZE = 24;
+  const MEDIA_GALLERY_PAGE_SIZE = 16;
+
+  const compareDictionaryNames = (left: string, right: string) =>
+    left.localeCompare(right, "ru", { numeric: true, sensitivity: "base" });
+
+  const getDictionaryItems = (kind: DictionaryKind): DictionaryItem[] => {
+    const items = dictionaries[kind];
+    return Array.isArray(items) ? items : [];
+  };
+
+  const compareDictionaryItems = (left: DictionaryItem, right: DictionaryItem) => {
+    const leftOrder = Number.isFinite(left.sortOrder) ? Number(left.sortOrder) : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(right.sortOrder) ? Number(right.sortOrder) : Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
+    return compareDictionaryNames(left.name || "", right.name || "");
+  };
+
+  const getSortedDictionaryItems = (kind: DictionaryKind) => [...getDictionaryItems(kind)].sort(compareDictionaryItems);
+
+  const isDictionaryItemUsed = (kind: DictionaryKind, item: DictionaryItem) => {
+    if (item.isUsed) return true;
+
+    const usedValues = usedDictionaryValues[kind];
+    return usedValues.has(normalizeDictionaryUsageKey(item.name))
+      || usedValues.has(normalizeDictionaryUsageKey(item.slug));
+  };
+
+  const parseDictionarySortOrder = (value: string, fallback?: number) => {
+    const normalizedValue = value.trim();
+    if (!normalizedValue) {
+      return fallback ?? 0;
+    }
+
+    const parsedValue = Number.parseInt(normalizedValue, 10);
+    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+      return null;
+    }
+
+    return parsedValue;
+  };
+
+  const getNextDictionarySortOrder = (kind: DictionaryKind) => {
+    const currentMaxSortOrder = getDictionaryItems(kind)
+      .map((item) => (Number.isFinite(item.sortOrder) ? Number(item.sortOrder) : 0))
+      .reduce((maxValue, currentValue) => Math.max(maxValue, currentValue), 0);
+
+    return currentMaxSortOrder + 1;
+  };
+
+  const sortProductDictionaryValues = (kind: DictionaryKind, values?: string[] | null, fallback?: string | null) => {
+    const normalizedValues = normalizeDictionaryValues(values, fallback);
+    const orderByName = new Map(
+      getDictionaryItems(kind).map((item) => [String(item.name || "").trim().toLowerCase(), Number.isFinite(item.sortOrder) ? Number(item.sortOrder) : Number.MAX_SAFE_INTEGER])
+    );
+
+    return [...normalizedValues].sort((left, right) => {
+      const leftOrder = orderByName.get(left.trim().toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = orderByName.get(right.trim().toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return compareDictionaryNames(left, right);
+    });
+  };
+
+  const areStringArraysEqual = (left: string[], right: string[]) =>
+    left.length === right.length && left.every((value, index) => value === right[index]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const nextCategories = sortProductDictionaryValues("categories", prev.categories);
+      const nextCollections = sortProductDictionaryValues("collections", prev.collections);
+      const nextSizes = sortProductDictionaryValues("sizes", prev.sizes);
+      const nextMaterials = sortProductDictionaryValues("materials", prev.materials);
+      const nextColors = sortProductDictionaryValues("colors", prev.colors);
+
+      if (
+        areStringArraysEqual(prev.categories, nextCategories)
+        && areStringArraysEqual(prev.collections, nextCollections)
+        && areStringArraysEqual(prev.sizes, nextSizes)
+        && areStringArraysEqual(prev.materials, nextMaterials)
+        && areStringArraysEqual(prev.colors, nextColors)
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        categories: nextCategories,
+        collections: nextCollections,
+        sizes: nextSizes,
+        materials: nextMaterials,
+        colors: nextColors,
+      };
+    });
+  }, [dictionaries]);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -922,11 +1219,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async (sessionUser: AdminSessionUser | null = adminUser) => {
     try {
-      const [usersRes, settingsRes, botsRes, galleryRes, dictionariesRes, stockHistoryRes] = await Promise.all([
+      const [usersRes, settingsRes, botsRes, dictionariesRes, stockHistoryRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetSettings(),
         FLOW.adminGetTelegramBots(),
-        FLOW.getAdminGalleryImages(),
         FLOW.adminGetDictionaries(),
         FLOW.adminGetStockHistory()
       ]);
@@ -940,10 +1236,75 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setOrdersPageSize(resolvedPreferences.pageSize);
       setOrdersReady(true);
       setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
-      setGalleryImages(Array.isArray(galleryRes) ? galleryRes : []);
-      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [] });
+      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [], collections: [] });
     } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
+    }
+  };
+
+  const loadGalleryImages = async ({
+    page = galleryPage,
+    search = deferredGallerySearch,
+    silent = false,
+  }: Partial<{ page: number; search: string; silent: boolean }> = {}): Promise<GalleryImagesPage | null> => {
+    if (!silent) {
+      setGalleryLoading(true);
+    }
+
+    try {
+      const response = await FLOW.getAdminGalleryImages({
+        input: {
+          page,
+          pageSize: GALLERY_PAGE_SIZE,
+          search: search?.trim() || undefined,
+        },
+      });
+
+      setGalleryImages(Array.isArray(response?.items) ? response.items : []);
+      setGalleryPage(response?.page || 1);
+      setGalleryTotalPages(response?.totalPages || 1);
+      setGalleryTotalItems(response?.totalItems || 0);
+      return response;
+    } catch (error) {
+      toast.error("Не удалось загрузить изображения галереи");
+      return null;
+    } finally {
+      if (!silent) {
+        setGalleryLoading(false);
+      }
+    }
+  };
+
+  const loadMediaGalleryImages = async ({
+    page = mediaGalleryPage,
+    search = deferredMediaGallerySearch,
+    silent = false,
+  }: Partial<{ page: number; search: string; silent: boolean }> = {}): Promise<GalleryImagesPage | null> => {
+    if (!silent) {
+      setMediaGalleryLoading(true);
+    }
+
+    try {
+      const response = await FLOW.getAdminGalleryImages({
+        input: {
+          page,
+          pageSize: MEDIA_GALLERY_PAGE_SIZE,
+          search: search?.trim() || undefined,
+        },
+      });
+
+      setGalleryPickerImages(Array.isArray(response?.items) ? response.items : []);
+      setMediaGalleryPage(response?.page || 1);
+      setMediaGalleryTotalPages(response?.totalPages || 1);
+      setMediaGalleryTotalItems(response?.totalItems || 0);
+      return response;
+    } catch (error) {
+      toast.error("Не удалось загрузить галерею для выбора изображения");
+      return null;
+    } finally {
+      if (!silent) {
+        setMediaGalleryLoading(false);
+      }
     }
   };
 
@@ -960,6 +1321,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const stockHistoryRes = await FLOW.adminGetStockHistory();
     setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
   };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void loadGalleryImages({ page: galleryPage, search: deferredGallerySearch });
+  }, [isAdmin, galleryPage, deferredGallerySearch]);
+
+  useEffect(() => {
+    if (!isAdmin || !isMediaGalleryPickerOpen) return;
+    void loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch });
+  }, [isAdmin, isMediaGalleryPickerOpen, mediaGalleryPage, deferredMediaGallerySearch]);
+
+  useEffect(() => {
+    setGalleryPage(1);
+  }, [deferredGallerySearch]);
+
+  useEffect(() => {
+    setMediaGalleryPage(1);
+  }, [deferredMediaGallerySearch]);
 
   const loadOrders = async (overrides?: Partial<{ page: number; pageSize: number; search: string; status: string; dateFrom: string; dateTo: string; userId: string }>) => {
     const requestId = ++ordersRequestIdRef.current;
@@ -1389,6 +1768,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  const sendSmtpTestEmail = async () => {
+    const recipient = smtpTestEmail.trim();
+    if (!recipient) {
+      toast.error("Укажите email для тестового письма");
+      return;
+    }
+
+    setSmtpTestSending(true);
+    try {
+      await FLOW.adminSendSmtpTestEmail({
+        input: {
+          toEmail: recipient,
+          enabled: isSettingEnabled("smtp_enabled"),
+          host: settings["smtp_host"] || "",
+          port: settings["smtp_port"] || "587",
+          username: settings["smtp_username"] || "",
+          password: settings["smtp_password"] || "",
+          fromEmail: settings["smtp_from_email"] || "",
+          fromName: settings["smtp_from_name"] || "Fashion Demon",
+          useSsl: isSettingEnabled("smtp_use_ssl", true),
+        }
+      });
+      toast.success(`Тестовое письмо отправлено на ${recipient}`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось отправить тестовое письмо"));
+    } finally {
+      setSmtpTestSending(false);
+    }
+  };
+
   const updateDictionaryFilterVisibility = async (kind: DictionaryKind, enabled: boolean) => {
     const key = DICTIONARY_FILTER_SETTING_KEYS[kind];
     if (!key) return;
@@ -1406,6 +1815,44 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const updateDictionaryFilterColorVisibility = async (kind: DictionaryKind, enabled: boolean) => {
+    const key = DICTIONARY_FILTER_COLOR_SETTING_KEYS[kind];
+    const nextValue = enabled ? "true" : "false";
+    const previousValue = settings[key] ?? DEFAULT_APP_SETTINGS[key];
+
+    updateSetting(key, nextValue);
+
+    try {
+      await FLOW.adminSaveSettings({ input: { [key]: nextValue } });
+      setCachedPublicSettings({ ...getCachedPublicSettings(), [key]: nextValue });
+    } catch (error) {
+      updateSetting(key, previousValue);
+      toast.error("Не удалось сохранить настройку отображения цвета");
+    }
+  };
+
+  const updateDictionaryFilterOrder = async (kind: DictionaryKind, rawValue: string) => {
+    const key = DICTIONARY_FILTER_ORDER_SETTING_KEYS[kind];
+    const previousValue = settings[key] ?? DEFAULT_APP_SETTINGS[key] ?? "0";
+    const parsedValue = parseDictionarySortOrder(rawValue, Number.parseInt(previousValue, 10) || 0);
+    if (parsedValue === null) {
+      updateSetting(key, previousValue);
+      toast.error("Порядок блока фильтра должен быть целым неотрицательным числом");
+      return;
+    }
+
+    const nextValue = String(parsedValue);
+    updateSetting(key, nextValue);
+
+    try {
+      await FLOW.adminSaveSettings({ input: { [key]: nextValue } });
+      setCachedPublicSettings({ ...getCachedPublicSettings(), [key]: nextValue });
+    } catch (error) {
+      updateSetting(key, previousValue);
+      toast.error("Не удалось сохранить порядок блока фильтра");
+    }
+  };
+
   const createDictionaryItem = (kind: DictionaryKind, attachToProduct = false) => {
     setSelectedProductEditorDictionaryTab(kind);
     setDictionaryCreateDialog({
@@ -1416,13 +1863,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       name: "",
       slug: "",
       color: getDictionaryDotColor(kind),
-      description: ""
+      description: "",
+      showColorInCatalog: true,
+      sortOrder: String(getNextDictionarySortOrder(kind))
     });
   };
 
   const submitCreateDictionaryItem = async () => {
     const name = dictionaryCreateDialog.name.trim();
     const slug = dictionaryCreateDialog.slug.trim().toLowerCase();
+    const sortOrder = parseDictionarySortOrder(
+      dictionaryCreateDialog.sortOrder,
+      getNextDictionarySortOrder(dictionaryCreateDialog.kind)
+    );
 
     if (!name) {
       toast.error("Название обязательно");
@@ -1431,6 +1884,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
     if (slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
       toast.error("Slug должен быть на латинице");
+      return;
+    }
+
+    if (sortOrder === null) {
+      toast.error("Порядок сортировки должен быть целым неотрицательным числом");
       return;
     }
 
@@ -1444,7 +1902,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           color: dictionaryCreateDialog.color.trim() || undefined,
           description: dictionaryCreateDialog.description.trim() || undefined,
           isActive: true,
-          showInCatalogFilter: true
+          showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
+          showColorInCatalog: dictionaryCreateDialog.showColorInCatalog,
+          sortOrder
         }
       });
       await fetchAdminData();
@@ -1461,7 +1921,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         color: "#3b82f6",
-        description: ""
+        description: "",
+        showColorInCatalog: true,
+        sortOrder: "1"
       }));
     } catch (error) {
       setDictionaryCreateDialog((prev) => ({ ...prev, submitting: false }));
@@ -1469,13 +1931,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const getDictionaryDraftDefaults = (item: any) => ({
+  const getDictionaryDraftDefaults = (item: DictionaryItem): DictionaryDraft => ({
     name: item.name || "",
     slug: item.slug || "",
     color: item.color || getDictionaryDotColor(item.name || ""),
     description: item.description || "",
     isActive: item.isActive ?? true,
-    showInCatalogFilter: item.showInCatalogFilter ?? true
+    showInCatalogFilter: item.showInCatalogFilter ?? true,
+    showColorInCatalog: item.showColorInCatalog ?? true,
+    sortOrder: String(item.sortOrder ?? 0)
   });
 
   const closeCreateDictionaryDialog = () => {
@@ -1488,17 +1952,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         color: "#3b82f6",
-        description: ""
+        description: "",
+        showColorInCatalog: true,
+        sortOrder: "1"
       };
     });
   };
 
-  const startEditDictionaryItem = (item: any) => {
+  const startEditDictionaryItem = (item: DictionaryItem) => {
     setEditingDictionaryItemId(item.id);
     setDictionaryDrafts((prev) => ({ ...prev, [item.id]: getDictionaryDraftDefaults(item) }));
   };
 
-  const cancelEditDictionaryItem = (item: any) => {
+  const cancelEditDictionaryItem = (item: DictionaryItem) => {
     setEditingDictionaryItemId(null);
     setDictionaryDrafts((prev) => {
       const copy = { ...prev };
@@ -1507,7 +1973,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const requestDeleteDictionaryItem = (kind: DictionaryKind, item: any) => {
+  const requestDeleteDictionaryItem = (kind: DictionaryKind, item: DictionaryItem) => {
+    if (isDictionaryItemUsed(kind, item)) {
+      toast.error(`Элемент «${item.name}» используется в товарах. Его можно редактировать, но нельзя удалять.`);
+      return;
+    }
+
     setDictionaryDeleteDialog({
       open: true,
       kind,
@@ -1541,16 +2012,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const updateDictionaryItem = async (kind: DictionaryKind, item: any) => {
+  const updateDictionaryItem = async (kind: DictionaryKind, item: DictionaryItem) => {
     const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
     const nextName = (draft.name ?? item.name ?? "").trim();
     const nextSlug = (draft.slug ?? item.slug ?? "").trim().toLowerCase();
+    const nextSortOrder = parseDictionarySortOrder(draft.sortOrder, item.sortOrder ?? 0);
     if (!nextName) {
       toast.error("Название обязательно");
       return;
     }
     if (!nextSlug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(nextSlug)) {
       toast.error("Slug обязателен и должен быть на латинице");
+      return;
+    }
+    if (nextSortOrder === null) {
+      toast.error("Порядок сортировки должен быть целым неотрицательным числом");
       return;
     }
     try {
@@ -1563,7 +2039,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           color: draft.color,
           description: draft.description,
           isActive: draft.isActive,
-          showInCatalogFilter: draft.showInCatalogFilter
+          showInCatalogFilter: kind !== "collections" && draft.showInCatalogFilter,
+          showColorInCatalog: draft.showColorInCatalog,
+          sortOrder: nextSortOrder
         }
       });
       await fetchAdminData();
@@ -1583,8 +2061,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!file) return;
     setFaviconUploading(true);
     try {
+      const preparedFile = file;
+
+      if (false && preparedFile.size > TELEGRAM_BOT_LIMITS.imageUploadBytes) {
+        toast.error("Файл слишком большой для безопасной загрузки в Telegram.");
+        return;
+      }
+
       const formDataUpload = new FormData();
-      formDataUpload.append("files", file);
+      formDataUpload.append("files", preparedFile);
       const res = await FLOW.adminUploadFavicon({ input: formDataUpload });
       const uploadedUrl = res?.url;
       if (!uploadedUrl) {
@@ -1610,6 +2095,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return value === "true" || value === "1" || value === "on";
   };
 
+  const getDictionaryFilterOrderSetting = (kind: DictionaryKind) => {
+    const key = DICTIONARY_FILTER_ORDER_SETTING_KEYS[kind];
+    return settings[key] ?? DEFAULT_APP_SETTINGS[key] ?? "0";
+  };
+
   const formatBytes = (value?: number) => {
     if (!value || value <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB"];
@@ -1618,39 +2108,155 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
   };
 
-  const uploadGalleryImage = async (file: File | null) => {
-    if (!file) return;
+  const buildGalleryAssignedName = (file: File, index: number, total: number) => {
+    const customName = galleryName.trim();
+    const baseFileName = file.name.replace(/\.[^.]+$/, "").trim() || file.name;
+    if (!customName) return baseFileName;
+    if (total === 1) return customName;
+    return `${customName} ${String(index + 1).padStart(2, "0")}`;
+  };
+
+  const updateGalleryUploadQueueItem = (itemId: string, updater: (item: GalleryUploadItem) => GalleryUploadItem) => {
+    setGalleryUploadQueue((prev) => prev.map((item) => (item.id === itemId ? updater(item) : item)));
+  };
+
+  const clearGalleryUploadQueue = () => {
+    if (galleryUploading) return;
+    setGalleryUploadQueue([]);
+    setIsGalleryUploadPanelOpen(false);
+  };
+
+  const uploadGalleryFiles = async (filesSource?: FileList | File[] | null) => {
+    const sourceFiles = Array.from(filesSource || []).filter((file) => file instanceof File);
+    if (sourceFiles.length === 0 || galleryUploading) return;
 
     setGalleryUploading(true);
+    setIsGalleryUploadPanelOpen(true);
+
+    const files = await optimizeFilesForUpload(sourceFiles, settings, "gallery");
+
+    const queueItems = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      fileName: file.name,
+      assignedName: buildGalleryAssignedName(file, index, files.length),
+      description: galleryDescription.trim(),
+      fileSize: file.size,
+      uploadedBytes: 0,
+      progressPercent: 0,
+      speedBytesPerSecond: 0,
+      status: "pending" as const,
+      error: "",
+    }));
+
+    setGalleryUploadQueue(queueItems);
+
+    const uploadedImages: GalleryImage[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+
     try {
-      const payload = new FormData();
-      payload.append("file", file);
-      payload.append("name", galleryName || file.name);
-      payload.append("description", galleryDescription);
-      const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
-      if (!uploaded?.url) {
-        throw new Error("Не удалось получить URL загруженного изображения");
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const queueItem = queueItems[index];
+        updateGalleryUploadQueueItem(queueItem.id, (item) => ({
+          ...item,
+          status: "uploading",
+          error: "",
+          uploadedBytes: 0,
+          progressPercent: 0,
+          speedBytesPerSecond: 0,
+        }));
+
+        try {
+          const payload = new FormData();
+          payload.append("file", file);
+          payload.append("name", queueItem.assignedName);
+          payload.append("description", queueItem.description);
+
+          const uploaded = await FLOW.uploadAdminGalleryImageWithProgress({
+            input: payload,
+            onProgress: (progress) => {
+              updateGalleryUploadQueueItem(queueItem.id, (item) => ({
+                ...item,
+                status: "uploading",
+                uploadedBytes: progress.loaded,
+                progressPercent: progress.percent,
+                speedBytesPerSecond: progress.speedBytesPerSecond,
+              }));
+            },
+          });
+
+          if (!uploaded?.url) {
+            throw new Error("Не удалось получить URL загруженного изображения");
+          }
+
+          uploadedImages.push(uploaded);
+          successCount += 1;
+          updateGalleryUploadQueueItem(queueItem.id, (item) => ({
+            ...item,
+            status: "success",
+            uploadedBytes: item.fileSize,
+            progressPercent: 100,
+            speedBytesPerSecond: 0,
+          }));
+        } catch (error) {
+          errorCount += 1;
+          updateGalleryUploadQueueItem(queueItem.id, (item) => ({
+            ...item,
+            status: "error",
+            speedBytesPerSecond: 0,
+            error: getErrorMessage(error, "Не удалось загрузить файл"),
+          }));
+        }
       }
-      setGalleryName("");
-      setGalleryDescription("");
-      setSelectedGalleryFileName("");
+
+      if (uploadedImages.length > 0) {
+        setGalleryPage(1);
+        await loadGalleryImages({ page: 1, search: deferredGallerySearch, silent: true });
+        if (isMediaGalleryPickerOpen) {
+          setMediaGalleryPage(1);
+          await loadMediaGalleryImages({ page: 1, search: deferredMediaGallerySearch, silent: true });
+        }
+        setGalleryName("");
+        setGalleryDescription("");
+      }
+
+      if (successCount > 0 && errorCount === 0) {
+        toast.success(`Загружено файлов: ${successCount}`);
+      } else if (successCount > 0) {
+        toast.success(`Загружено файлов: ${successCount}. Ошибок: ${errorCount}`);
+      } else {
+        toast.error("Не удалось загрузить файлы в галерею");
+      }
+    } finally {
+      setGalleryUploading(false);
       if (galleryFileInputRef.current) {
         galleryFileInputRef.current.value = "";
       }
-      await fetchAdminData();
-      toast.success("Изображение добавлено в галерею");
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Не удалось загрузить изображение в галерею"));
-    } finally {
-      setGalleryUploading(false);
     }
+  };
+
+  const handleGalleryFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+    await uploadGalleryFiles(event.target.files);
+    event.target.value = "";
+  };
+
+  const handleGalleryDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setGalleryDropActive(false);
+    await uploadGalleryFiles(event.dataTransfer?.files);
   };
 
   const deleteGalleryImage = async (image: GalleryImage) => {
     if (!confirm(`Удалить изображение «${image.name}»?`)) return;
     try {
       await FLOW.deleteAdminGalleryImage({ input: { id: image.id } });
-      await fetchAdminData();
+      const targetPage = galleryImages.length === 1 && galleryPage > 1 ? galleryPage - 1 : galleryPage;
+      setGalleryPage(targetPage);
+      await loadGalleryImages({ page: targetPage, search: deferredGallerySearch, silent: true });
+      if (isMediaGalleryPickerOpen) {
+        await loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch, silent: true });
+      }
       toast.success("Изображение удалено");
     } catch {
       toast.error("Не удалось удалить изображение");
@@ -1660,20 +2266,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const copyGalleryImageToDisk = async (image: GalleryImage) => {
     try {
       await FLOW.copyAdminGalleryImageToDisk({ input: { id: image.id } });
-      await fetchAdminData();
+      await loadGalleryImages({ page: galleryPage, search: deferredGallerySearch, silent: true });
       toast.success("Изображение скопировано на диск");
-    } catch {
-      toast.error("Не удалось скопировать изображение");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось скопировать изображение"));
     }
   };
 
   const restoreMissingGalleryImages = async () => {
     try {
       const result = await FLOW.restoreMissingAdminGalleryImages();
-      await fetchAdminData();
+      await loadGalleryImages({ page: galleryPage, search: deferredGallerySearch, silent: true });
+      if (isMediaGalleryPickerOpen) {
+        await loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch, silent: true });
+      }
       toast.success(`Восстановлено файлов: ${result?.restored ?? 0}`);
-    } catch {
-      toast.error("Не удалось восстановить изображения");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось восстановить изображения"));
     }
   };
 
@@ -1692,14 +2301,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const saveGalleryImageMeta = async () => {
     if (!editingGalleryImageId) return;
     try {
-      await FLOW.updateAdminGalleryImage({
+      const updatedImage = await FLOW.updateAdminGalleryImage({
         input: {
           id: editingGalleryImageId,
           name: editingGalleryName,
           description: editingGalleryDescription
         }
       });
-      await fetchAdminData();
+      setGalleryImages((prev) => prev.map((item) => (item.id === updatedImage?.id ? { ...item, ...updatedImage } : item)));
+      setGalleryPickerImages((prev) => prev.map((item) => (item.id === updatedImage?.id ? { ...item, ...updatedImage } : item)));
       toast.success("Изображение обновлено");
       cancelEditGalleryImage();
     } catch {
@@ -1707,14 +2317,41 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const filteredGalleryImages = galleryImages.filter((image) => {
-    const q = gallerySearch.trim().toLowerCase();
-    if (!q) return true;
-    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
-  });
+  const filteredGalleryImages = galleryImages;
+
+  const galleryUploadTotalBytes = galleryUploadQueue.reduce((sum, item) => sum + item.fileSize, 0);
+  const galleryUploadUploadedBytes = galleryUploadQueue.reduce((sum, item) => (
+    sum + Math.min(item.fileSize, item.status === "success" ? item.fileSize : item.uploadedBytes)
+  ), 0);
+  const galleryUploadProgress = galleryUploadTotalBytes > 0
+    ? Math.round((galleryUploadUploadedBytes / galleryUploadTotalBytes) * 100)
+    : 0;
+  const galleryUploadSpeed = galleryUploadQueue.reduce((sum, item) => (
+    item.status === "uploading" ? sum + item.speedBytesPerSecond : sum
+  ), 0);
+  const galleryUploadSuccessCount = galleryUploadQueue.filter((item) => item.status === "success").length;
+  const galleryUploadErrorCount = galleryUploadQueue.filter((item) => item.status === "error").length;
+  const hasGalleryUploadQueue = galleryUploadQueue.length > 0;
 
   const usersById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
   const productsById = useMemo(() => new Map(products.map((product) => [product._id, product])), [products]);
+  const usedDictionaryValues = useMemo(() => {
+    const sizes = new Set<string>();
+    const materials = new Set<string>();
+    const colors = new Set<string>();
+    const categories = new Set<string>();
+    const collections = new Set<string>();
+
+    products.forEach((product) => {
+      getProductSizeNames(product).forEach((value) => sizes.add(normalizeDictionaryUsageKey(value)));
+      normalizeDictionaryValues(product.materials, product.material).forEach((value) => materials.add(normalizeDictionaryUsageKey(value)));
+      normalizeDictionaryValues(product.colors, product.color).forEach((value) => colors.add(normalizeDictionaryUsageKey(value)));
+      normalizeDictionaryValues(product.categories, product.category).forEach((value) => categories.add(normalizeDictionaryUsageKey(value)));
+      normalizeDictionaryValues(product.collections).forEach((value) => collections.add(normalizeDictionaryUsageKey(value)));
+    });
+
+    return { sizes, materials, colors, categories, collections };
+  }, [products]);
 
   const USERS_PER_PAGE = 10;
   const visibleOrderColumns = useMemo(() => {
@@ -2126,20 +2763,35 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!file) return;
 
     const normalizedType = file.type.toLowerCase();
-    const isJpeg = normalizedType === "image/jpeg" || normalizedType === "image/jpg";
-    if (!isJpeg) {
+    const requiresJpegConversion = normalizedType !== "image/jpeg" && normalizedType !== "image/jpg";
+    if (!normalizedType.startsWith("image/")) {
       toast.error("Для фото профиля Telegram используйте JPG/JPEG.");
       return;
     }
 
-    if (file.size > TELEGRAM_BOT_LIMITS.imageUploadBytes) {
+    if (false && file.size > TELEGRAM_BOT_LIMITS.imageUploadBytes) {
       toast.error("Файл слишком большой для безопасной загрузки в Telegram.");
       return;
     }
 
     try {
+      const preparedFile = requiresJpegConversion
+        ? await optimizeImageFileForUpload(file, settings, "telegram_bot", {
+            forceMimeType: "image/jpeg",
+            enabled: true,
+            allowLargerResult: true,
+          })
+        : await optimizeImageFileForUpload(file, settings, "telegram_bot", {
+            forceMimeType: "image/jpeg",
+          });
+
+      if (preparedFile.size > TELEGRAM_BOT_LIMITS.imageUploadBytes) {
+        toast.error("Файл слишком большой для безопасной загрузки в Telegram.");
+        return;
+      }
+
       const formDataUpload = new FormData();
-      formDataUpload.append("files", file);
+      formDataUpload.append("files", preparedFile);
       const res = await FLOW.adminUpload({ input: formDataUpload });
       const first = Array.isArray(res?.urls) ? res.urls[0] : null;
       if (!first) {
@@ -2315,7 +2967,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { key: "sizes", label: "Размеры" },
     { key: "materials", label: "Материалы" },
     { key: "colors", label: "Цвета" },
-    { key: "categories", label: "Категории" }
+    { key: "categories", label: "Категории" },
+    { key: "collections", label: "Коллекции" }
   ] as const;
 
   const activeDictionaryGroup = dictionaryGroups.find((group) => group.key === selectedDictionaryGroup) || dictionaryGroups[0];
@@ -2374,21 +3027,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         basePrice: String(product.basePrice ?? product.price ?? ""),
         discountPercent: String(product.discountPercent ?? 0),
         discountedPrice: String(product.discountedPrice ?? product.price ?? ""),
-        categories: normalizeDictionaryValues(product.categories, product.category),
+        categories: sortProductDictionaryValues("categories", product.categories, product.category),
+        collections: sortProductDictionaryValues("collections", product.collections),
         images: product.images.join(','),
         videos: (product.videos || []).join(','),
         media: mediaList.length > 0 ? mediaList : [{ type: "image", url: "" }],
         catalogImageUrl: product.catalogImageUrl || "",
-        sizes: product.sizes,
+        sizes: sortProductDictionaryValues("sizes", getProductSizeNames(product)),
         isNew: product.isNew,
         isPopular: product.isPopular,
         reviewsEnabled: product.reviewsEnabled !== false,
         sku: product.sku || "",
-        materials: normalizeDictionaryValues(product.materials, product.material),
+        materials: sortProductDictionaryValues("materials", product.materials, product.material),
         printType: product.printType || "",
         fit: product.fit || "",
         gender: product.gender || "",
-        colors: normalizeDictionaryValues(product.colors, product.color),
+        colors: sortProductDictionaryValues("colors", product.colors, product.color),
         shipping: product.shipping || "",
         sizeStock: product.sizeStock || {}
       });
@@ -2507,6 +3161,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       discountedPrice: parseFloat(formData.discountedPrice || "0"),
       category: formData.categories[0] || "",
       categories: formData.categories,
+      collections: formData.collections,
       images: imagesFromMedia,
       catalogImageUrl,
       videos: videosFromMedia,
@@ -2648,21 +3303,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         if (prev.sizes.includes(normalizedName)) return prev;
         return {
           ...prev,
-          sizes: [...prev.sizes, normalizedName],
+          sizes: sortProductDictionaryValues("sizes", [...prev.sizes, normalizedName]),
           sizeStock: { ...prev.sizeStock, [normalizedName]: prev.sizeStock[normalizedName] ?? 0 }
         };
       }
 
       if (kind === "categories") {
-        return { ...prev, categories: normalizeDictionaryValues([...(prev.categories || []), normalizedName]) };
+        return { ...prev, categories: sortProductDictionaryValues("categories", [...(prev.categories || []), normalizedName]) };
+      }
+
+      if (kind === "collections") {
+        return { ...prev, collections: sortProductDictionaryValues("collections", [...(prev.collections || []), normalizedName]) };
       }
 
       if (kind === "materials") {
-        return { ...prev, materials: normalizeDictionaryValues([...(prev.materials || []), normalizedName]) };
+        return { ...prev, materials: sortProductDictionaryValues("materials", [...(prev.materials || []), normalizedName]) };
       }
 
       if (kind === "colors") {
-        return { ...prev, colors: normalizeDictionaryValues([...(prev.colors || []), normalizedName]) };
+        return { ...prev, colors: sortProductDictionaryValues("colors", [...(prev.colors || []), normalizedName]) };
       }
 
       return prev;
@@ -2685,6 +3344,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         return { ...prev, categories: prev.categories.filter((item) => item !== name) };
       }
 
+      if (kind === "collections" && name) {
+        return { ...prev, collections: prev.collections.filter((item) => item !== name) };
+      }
+
       if (kind === "materials" && name) {
         return { ...prev, materials: prev.materials.filter((item) => item !== name) };
       }
@@ -2700,6 +3363,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const getProductDictionarySelected = (kind: DictionaryKind, name: string) => {
     if (kind === "sizes") return formData.sizes.includes(name);
     if (kind === "categories") return formData.categories.includes(name);
+    if (kind === "collections") return formData.collections.includes(name);
     if (kind === "materials") return formData.materials.includes(name);
     return formData.colors.includes(name);
   };
@@ -2796,6 +3460,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const openMediaGalleryPicker = (slot: number) => {
     setMediaGallerySlot(slot);
     setMediaGallerySearch("");
+    setMediaGalleryPage(1);
     setIsMediaGalleryPickerOpen(true);
   };
 
@@ -2810,15 +3475,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (!file) return;
     setUploading(true);
     try {
+      const preparedFile = await optimizeImageFileForUpload(file, settings, "product_media");
       const payload = new FormData();
-      payload.append("file", file);
-      payload.append("name", file.name);
+      payload.append("file", preparedFile);
+      payload.append("name", preparedFile.name);
       const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
       if (!uploaded?.url) {
         throw new Error("Не удалось получить URL загруженного файла");
       }
-      setMediaSlot(slot, file.type.startsWith("video") ? "video" : "image", uploaded.url);
-      await fetchAdminData();
+      setMediaSlot(slot, preparedFile.type.startsWith("video") ? "video" : "image", uploaded.url);
+      setGalleryPage(1);
+      await loadGalleryImages({ page: 1, search: deferredGallerySearch, silent: true });
+      if (isMediaGalleryPickerOpen) {
+        setMediaGalleryPage(1);
+        await loadMediaGalleryImages({ page: 1, search: deferredMediaGallerySearch, silent: true });
+      }
       toast.success("Файл загружен в галерею и выбран");
     } catch (error) {
       toast.error(getErrorMessage(error, "Не удалось загрузить файл в галерею"));
@@ -2834,17 +3505,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setMediaGallerySlot(null);
   };
 
-  const filteredGalleryPickerImages = galleryImages.filter((image) => {
-    const q = mediaGallerySearch.trim().toLowerCase();
-    if (!q) return true;
-    return `${image.name} ${image.description || ""}`.toLowerCase().includes(q);
-  });
+  const filteredGalleryPickerImages = galleryPickerImages;
+  const safeGalleryTotalPages = Math.max(galleryTotalPages, 1);
+  const safeMediaGalleryTotalPages = Math.max(mediaGalleryTotalPages, 1);
+  const galleryPageStart = galleryTotalItems > 0 ? (galleryPage - 1) * GALLERY_PAGE_SIZE + 1 : 0;
+  const galleryPageEnd = galleryTotalItems > 0 ? Math.min(galleryPage * GALLERY_PAGE_SIZE, galleryTotalItems) : 0;
+  const mediaGalleryPageStart = mediaGalleryTotalItems > 0 ? (mediaGalleryPage - 1) * MEDIA_GALLERY_PAGE_SIZE + 1 : 0;
+  const mediaGalleryPageEnd = mediaGalleryTotalItems > 0 ? Math.min(mediaGalleryPage * MEDIA_GALLERY_PAGE_SIZE, mediaGalleryTotalItems) : 0;
 
   const mediaDeleteTarget = mediaDeleteDialog.slot ? formData.media[mediaDeleteDialog.slot - 1] ?? null : null;
   const resolvedCatalogImageUrl = resolveCatalogImageUrl(formData.media, formData.catalogImageUrl);
 
   const productEditorDictionaryTabs = [
     { key: "categories" as const, label: "Категории", count: formData.categories.length },
+    { key: "collections" as const, label: "Коллекции", count: formData.collections.length },
     { key: "sizes" as const, label: "Размеры", count: formData.sizes.length },
     { key: "materials" as const, label: "Материалы", count: formData.materials.length },
     { key: "colors" as const, label: "Цвета", count: formData.colors.length }
@@ -3157,15 +3831,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             <div className="space-y-4">
               <div className="border border-gray-200 p-4 space-y-3">
                 <h2 className="text-2xl font-black uppercase">Галерея изображений</h2>
-                <div className="grid md:grid-cols-4 gap-3">
+                <div className="grid gap-3 md:grid-cols-3">
                   <Input
-                    placeholder="Наименование"
+                    placeholder="Общее имя или префикс"
                     value={galleryName}
                     onChange={(e) => setGalleryName(e.target.value)}
                     className="rounded-none"
                   />
                   <Input
-                    placeholder="Описание"
+                    placeholder="Общее описание"
                     value={galleryDescription}
                     onChange={(e) => setGalleryDescription(e.target.value)}
                     className="rounded-none"
@@ -3176,33 +3850,83 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     onChange={(e) => setGallerySearch(e.target.value)}
                     className="rounded-none"
                   />
-                  <div className="flex gap-2 items-center">
-                    <input
-                      ref={galleryFileInputRef}
-                      type="file"
-                      accept="image/*,.avif,.jfif"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0] || null;
-                        setSelectedGalleryFileName(file?.name || "");
-                        uploadGalleryImage(file);
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-none"
-                      disabled={galleryUploading}
-                      onClick={() => galleryFileInputRef.current?.click()}
-                    >
-                      <ImagePlus className="w-4 h-4 mr-2" />
-                      {galleryUploading ? "Загрузка..." : (selectedGalleryFileName ? `Файл: ${selectedGalleryFileName}` : "Загрузить файл")}
-                    </Button>
-                    <Button type="button" variant="outline" className="rounded-none" onClick={restoreMissingGalleryImages}>
-                      <RefreshCcw className="w-4 h-4 mr-1" />
-                      Восстановить
-                    </Button>
+                </div>
+
+                <div
+                  className={`space-y-3 border border-dashed p-4 transition-colors ${galleryDropActive ? "border-black bg-stone-100" : "border-black/30 bg-stone-50"}`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setGalleryDropActive(true);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setGalleryDropActive(true);
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    const relatedTarget = event.relatedTarget;
+                    if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
+                      setGalleryDropActive(false);
+                    }
+                  }}
+                  onDrop={handleGalleryDrop}
+                >
+                  <input
+                    ref={galleryFileInputRef}
+                    type="file"
+                    accept="image/*,.avif,.jfif"
+                    multiple
+                    className="hidden"
+                    onChange={handleGalleryFileSelection}
+                  />
+
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <div className="text-sm font-semibold uppercase tracking-wide">Пакетная загрузка</div>
+                      <div className="text-sm text-muted-foreground">
+                        Перетащите изображения сюда или выберите сразу несколько файлов. Показываем процент, текущую скорость и статус каждого файла.
+                      </div>
+                      {galleryName.trim() && (
+                        <div className="text-xs text-muted-foreground">
+                          Общее имя будет использовано как префикс, если выбрано несколько файлов.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-none"
+                        disabled={galleryUploading}
+                        onClick={() => galleryFileInputRef.current?.click()}
+                      >
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {galleryUploading ? "Идёт загрузка..." : "Выбрать файлы"}
+                      </Button>
+                      <Button type="button" variant="outline" className="rounded-none" onClick={restoreMissingGalleryImages}>
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        Восстановить
+                      </Button>
+                      {hasGalleryUploadQueue && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-none"
+                          onClick={clearGalleryUploadQueue}
+                          disabled={galleryUploading}
+                        >
+                          Очистить список
+                        </Button>
+                      )}
+                    </div>
                   </div>
+
+                  {hasGalleryUploadQueue && (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-muted-foreground">
+                      Прогресс загрузки открыт в панели справа снизу и не мешает работе с сайтом.
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -3222,6 +3946,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     Таблица
                   </Button>
                 </div>
+              </div>
+
+              <div className="mb-4 flex flex-col gap-2 border border-gray-200 px-3 py-2 text-sm md:flex-row md:items-center md:justify-between">
+                <div>
+                  {galleryLoading
+                    ? "Загружаем изображения..."
+                    : galleryTotalItems > 0
+                      ? `Показано ${galleryPageStart}-${galleryPageEnd} из ${galleryTotalItems}`
+                      : "Изображения не найдены"}
+                </div>
+                <div className="text-muted-foreground">Страница {Math.min(galleryPage, safeGalleryTotalPages)} из {safeGalleryTotalPages}</div>
               </div>
 
               {galleryViewMode === "grid" ? (
@@ -3323,6 +4058,30 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Table>
                 </div>
               )}
+
+              <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-muted-foreground">Всего изображений: {galleryTotalItems}</div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => setGalleryPage((prev) => Math.max(1, prev - 1))}
+                    disabled={galleryLoading || galleryPage <= 1}
+                  >
+                    Назад
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => setGalleryPage((prev) => Math.min(safeGalleryTotalPages, prev + 1))}
+                    disabled={galleryLoading || galleryPage >= safeGalleryTotalPages}
+                  >
+                    Вперед
+                  </Button>
+                </div>
+              </div>
             </div>
           </TabsContent>
 
@@ -4374,78 +5133,134 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
 
                   {DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] && (
-                    <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3">
-                      <div>
-                        <p className="text-sm font-semibold">Показывать фильтр в каталоге</p>
-                        <p className="text-xs text-muted-foreground">Управляет отображением блока «{activeDictionaryGroup.label}» на странице каталога.</p>
+                    <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(620px,auto)] lg:items-end">
+                        <div>
+                          <p className="text-sm font-semibold">Фильтр каталога</p>
+                          <p className="text-xs text-muted-foreground">Управляет отображением блока «{activeDictionaryGroup.label}» на странице каталога и его местом в списке фильтров.</p>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)] lg:justify-end">
+                          <div className="flex min-w-0 flex-col gap-1">
+                            <Label htmlFor={`catalog-filter-order-${selectedDictionaryGroup}`} className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Порядок блока
+                            </Label>
+                            <Input
+                              id={`catalog-filter-order-${selectedDictionaryGroup}`}
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={getDictionaryFilterOrderSetting(selectedDictionaryGroup)}
+                              onChange={(event) => updateSetting(DICTIONARY_FILTER_ORDER_SETTING_KEYS[selectedDictionaryGroup], event.target.value)}
+                              onBlur={(event) => updateDictionaryFilterOrder(selectedDictionaryGroup, event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  updateDictionaryFilterOrder(selectedDictionaryGroup, event.currentTarget.value);
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              className="h-11 rounded-none border-slate-300"
+                            />
+                          </div>
+                          <div className="flex min-w-0 flex-col gap-1">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Отображение блока
+                            </span>
+                            <label className="flex h-11 cursor-pointer items-center justify-between gap-3 rounded-none border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700">
+                              <span className="min-w-0 truncate">Показывать в каталоге</span>
+                              <Checkbox
+                                checked={isSettingEnabled(DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] as string, true)}
+                                onCheckedChange={(checked) => updateDictionaryFilterVisibility(selectedDictionaryGroup, !!checked)}
+                              />
+                            </label>
+                          </div>
+                          <div className="flex min-w-0 flex-col gap-1">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Отображение цвета
+                            </span>
+                            <label className="flex h-11 cursor-pointer items-center justify-between gap-3 rounded-none border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700">
+                              <span className="min-w-0 truncate">Показывать цвет в каталоге</span>
+                              <Checkbox
+                                checked={isSettingEnabled(DICTIONARY_FILTER_COLOR_SETTING_KEYS[selectedDictionaryGroup], true)}
+                                onCheckedChange={(checked) => updateDictionaryFilterColorVisibility(selectedDictionaryGroup, !!checked)}
+                              />
+                            </label>
+                          </div>
+                        </div>
                       </div>
-                      <Checkbox
-                        checked={isSettingEnabled(DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] as string, true)}
-                        onCheckedChange={(checked) => updateDictionaryFilterVisibility(selectedDictionaryGroup, !!checked)}
-                      />
                     </div>
                   )}
 
                   <div className="space-y-3">
-                    {(dictionaries[selectedDictionaryGroup] || []).map((item: any) => {
+                    {getSortedDictionaryItems(selectedDictionaryGroup).map((item) => {
                       const isEditing = editingDictionaryItemId === item.id;
                       const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
+                      const itemUsed = isDictionaryItemUsed(selectedDictionaryGroup, item);
                       return (
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
-                            <div className="space-y-3">
-                              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.85fr)_auto] xl:items-end">
-                                <div className="space-y-1">
-                                  <Label className="mb-1 block text-xs">Название *</Label>
+                            <div className="space-y-4">
+                              {itemUsed && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                  Элемент уже используется в товарах. Редактирование доступно, удаление отключено.
+                                </div>
+                              )}
+                              <div className="grid items-end gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_160px_minmax(0,0.95fr)_180px]">
+                                <div className="flex h-full flex-col gap-1">
+                                  <Label className="block text-xs">Название *</Label>
                                   <Input
                                     value={draft.name}
                                     onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, name: e.target.value } }))}
-                                    className="rounded-md border-slate-300"
+                                    className="h-11 rounded-none border-slate-300"
                                   />
                                 </div>
-                                <div className="space-y-1">
-                                  <Label className="mb-1 block text-xs">Slug *</Label>
+                                <div className="flex h-full flex-col gap-1">
+                                  <Label className="block text-xs">Slug *</Label>
                                   <Input
                                     value={draft.slug}
                                     onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, slug: e.target.value.toLowerCase() } }))}
-                                    className="rounded-md border-slate-300"
+                                    className="h-11 rounded-none border-slate-300"
                                     placeholder="latin-slug"
                                   />
                                 </div>
-                                <div className="space-y-1">
-                                  <Label className="mb-1 block text-xs">Цвет</Label>
-                                  <div className="grid grid-cols-[minmax(0,1fr)_42px] gap-2">
+                                <div className="flex h-full flex-col gap-1">
+                                  <Label className="block text-xs">Порядок</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={draft.sortOrder}
+                                    onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, sortOrder: e.target.value } }))}
+                                    className="h-11 rounded-none border-slate-300"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                <div className="flex h-full flex-col gap-1">
+                                  <Label className="block text-xs">Цвет</Label>
+                                  <div className="grid items-stretch grid-cols-[minmax(0,1fr)_48px] gap-2">
                                     <Input
                                       value={draft.color}
                                       onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
-                                      className="rounded-md border-slate-300"
+                                      className="h-11 rounded-none border-slate-300"
                                       placeholder="#3b82f6"
                                     />
                                     <input
                                       type="color"
                                       value={draft.color || "#3b82f6"}
                                       onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
-                                      className="h-10 w-10 cursor-pointer rounded border border-slate-300 bg-white p-1"
+                                      className="h-11 w-12 cursor-pointer rounded-none border border-slate-300 bg-white p-1"
                                     />
                                   </div>
                                 </div>
-                                <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
-                                  <div className="mr-2 flex items-center gap-4">
-                                    <div className="flex items-center gap-2">
-                                      <Checkbox
-                                        id={`dict-active-${item.id}`}
-                                        checked={draft.isActive}
-                                        onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
-                                      />
-                                      <Label htmlFor={`dict-active-${item.id}`} className="text-sm">Активно</Label>
-                                    </div>
-                                  </div>
-                                  <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
-                                    <X className="mr-2 h-4 w-4" /> Сброс
-                                  </Button>
-                                  <Button type="button" className="min-w-[130px] rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
-                                    <Check className="mr-2 h-4 w-4" /> Сохранить
-                                  </Button>
+                                <div className="flex h-full flex-col gap-1">
+                                  <Label htmlFor={`dict-active-${item.id}`} className="block text-xs">Статус</Label>
+                                  <label htmlFor={`dict-active-${item.id}`} className="flex h-11 cursor-pointer items-center gap-3 rounded-none border border-slate-300 bg-white px-3">
+                                    <Checkbox
+                                      id={`dict-active-${item.id}`}
+                                      checked={draft.isActive}
+                                      onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, isActive: !!checked } }))}
+                                    />
+                                    <span className="text-sm">Активно</span>
+                                  </label>
                                 </div>
                               </div>
                               <div className="space-y-1">
@@ -4457,7 +5272,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   placeholder="Описание словарного значения"
                                 />
                               </div>
-                              <div className="text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                              <div className="flex flex-wrap gap-3">
+                                <label className="flex cursor-pointer items-center gap-3 rounded-none border border-slate-300 bg-white px-3 py-2 text-sm">
+                                  <Checkbox
+                                    checked={draft.showColorInCatalog}
+                                    onCheckedChange={(checked) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, showColorInCatalog: !!checked } }))}
+                                  />
+                                  <span>Показывать цвет в каталоге</span>
+                                </label>
+                              </div>
+                              <div className="flex flex-col gap-3 border-t border-slate-200 pt-3 md:flex-row md:items-center md:justify-between">
+                                <div className="space-y-1 text-xs text-muted-foreground">
+                                  <div>Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
+                                  {itemUsed && <div>Удаление недоступно, пока значение используется в товарах.</div>}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                                  <Button type="button" variant="outline" className="min-w-[110px] rounded-none" onClick={() => cancelEditDictionaryItem(item)}>
+                                    <X className="mr-2 h-4 w-4" /> Сброс
+                                  </Button>
+                                  <Button type="button" className="min-w-[130px] rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => updateDictionaryItem(selectedDictionaryGroup, item)}>
+                                    <Check className="mr-2 h-4 w-4" /> Сохранить
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
                           ) : (
                             <div className="flex items-start justify-between gap-3">
@@ -4469,17 +5306,32 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${item.isActive === false ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
                                     {item.isActive === false ? "неактивно" : "активно"}
                                   </span>
+                                  {itemUsed && (
+                                    <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
+                                      используется
+                                    </span>
+                                  )}
                                 </div>
                                 {item.description && (
                                   <div className="mt-1 text-sm text-slate-600">{item.description}</div>
                                 )}
+                                <div className="mt-1 text-xs text-muted-foreground">Порядок: {item.sortOrder ?? 0}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">Цвет в каталоге: {item.showColorInCatalog === false ? "скрыт" : "показан"}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                               </div>
                               <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                                 <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none" onClick={() => startEditDictionaryItem(item)}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none text-red-500" onClick={() => requestDeleteDictionaryItem(selectedDictionaryGroup, item)}>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className={`h-8 w-8 rounded-none ${itemUsed ? "cursor-not-allowed text-slate-300 hover:bg-transparent hover:text-slate-300" : "text-red-500"}`}
+                                  onClick={() => requestDeleteDictionaryItem(selectedDictionaryGroup, item)}
+                                  disabled={itemUsed}
+                                  title={itemUsed ? "Элемент используется в товарах и не может быть удален" : "Удалить элемент"}
+                                >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -4640,7 +5492,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                   {selectedSettingsGroup === "smtp" && (
                     <div className="space-y-4 border p-3">
-                      <h3 className="font-semibold">Почта (SMTP)</h3>
+                      <div className="space-y-1">
+                        <h3 className="font-semibold">Почта (SMTP)</h3>
+                        <p className="text-sm text-muted-foreground">
+                          SMTP уже используется для системных писем. Здесь можно проверить соединение тестовым письмом и настроить шаблоны уведомлений.
+                        </p>
+                      </div>
                       <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-enabled"
@@ -4682,6 +5539,166 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           onCheckedChange={(checked) => updateSetting("smtp_use_ssl", checked ? "true" : "false")}
                         />
                         <Label htmlFor="smtp-use-ssl">Использовать SSL/TLS</Label>
+                      </div>
+
+                      <div className="rounded-xl border border-dashed border-gray-300 p-4 space-y-3">
+                        <div>
+                          <div className="font-medium">Проверка отправки</div>
+                          <div className="text-xs text-muted-foreground">
+                            Тест использует текущие значения SMTP из формы, поэтому можно проверить подключение без отдельного сохранения.
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-3 md:flex-row">
+                          <div className="flex-1 space-y-1">
+                            <Label htmlFor="smtp-test-email">Email для теста</Label>
+                            <Input
+                              id="smtp-test-email"
+                              type="email"
+                              value={smtpTestEmail}
+                              onChange={(e) => setSmtpTestEmail(e.target.value)}
+                              placeholder="test@example.com"
+                              className="h-11 rounded-none"
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <Button
+                              type="button"
+                              className="h-11 rounded-none font-bold uppercase tracking-wide"
+                              onClick={sendSmtpTestEmail}
+                              disabled={smtpTestSending}
+                            >
+                              {smtpTestSending ? "Отправка..." : "Отправить тест"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <h4 className="font-semibold">Шаблоны писем</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Каждый шаблон можно отдельно включать и выключать. Плейсхолдеры используются в формате{" "}
+                            <span className="font-mono">{'{{name}}'}</span>.
+                          </p>
+                        </div>
+
+                        <Tabs defaultValue={EMAIL_TEMPLATE_DEFINITIONS[0]?.key} className="space-y-4">
+                          <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-2 xl:grid-cols-3">
+                            {EMAIL_TEMPLATE_DEFINITIONS.map((template) => {
+                              const enabledKey = getEmailTemplateSettingKey(template.key, "enabled");
+                              const isEnabled = isSettingEnabled(enabledKey, template.enabledByDefault);
+
+                              return (
+                                <TabsTrigger
+                                  key={template.key}
+                                  value={template.key}
+                                  className="flex min-h-[72px] flex-col items-start justify-center gap-1 rounded-none border border-black px-4 py-3 text-left data-[state=active]:bg-black data-[state=active]:text-white"
+                                >
+                                  <span className="font-semibold leading-tight">{template.label}</span>
+                                  <span className="text-xs uppercase tracking-wide opacity-70">
+                                    {isEnabled ? "Включен" : "Выключен"}
+                                  </span>
+                                </TabsTrigger>
+                              );
+                            })}
+                          </TabsList>
+
+                          {EMAIL_TEMPLATE_DEFINITIONS.map((template) => {
+                            const enabledKey = getEmailTemplateSettingKey(template.key, "enabled");
+                            const subjectKey = getEmailTemplateSettingKey(template.key, "subject");
+                            const bodyKey = getEmailTemplateSettingKey(template.key, "body");
+
+                            return (
+                              <TabsContent key={template.key} value={template.key} className="mt-0">
+                                <div className="space-y-4 rounded-xl border border-gray-200 p-4">
+                                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="space-y-1">
+                                      <div className="font-medium">{template.label}</div>
+                                      <p className="text-sm text-muted-foreground">{template.description}</p>
+                                      <div className="text-xs text-muted-foreground">
+                                        Плейсхолдеры: {template.placeholders.join(", ")}
+                                      </div>
+                                    </div>
+                                    <label className="flex items-center gap-2 text-sm font-medium">
+                                      <Checkbox
+                                        checked={isSettingEnabled(enabledKey, template.enabledByDefault)}
+                                        onCheckedChange={(checked) => updateSetting(enabledKey, checked ? "true" : "false")}
+                                      />
+                                      <span>Шаблон включен</span>
+                                    </label>
+                                  </div>
+
+                                  <div className="grid gap-3">
+                                    <div className="space-y-1">
+                                      <Label htmlFor={`${template.key}-subject-tab`}>Тема письма</Label>
+                                      <Input
+                                        id={`${template.key}-subject-tab`}
+                                        value={settings[subjectKey] ?? template.defaultSubject}
+                                        onChange={(e) => updateSetting(subjectKey, e.target.value)}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label htmlFor={`${template.key}-body-tab`}>Текст письма</Label>
+                                      <Textarea
+                                        id={`${template.key}-body-tab`}
+                                        value={settings[bodyKey] ?? template.defaultBody}
+                                        onChange={(e) => updateSetting(bodyKey, e.target.value)}
+                                        className="min-h-[220px]"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </TabsContent>
+                            );
+                          })}
+                        </Tabs>
+
+                        {false && EMAIL_TEMPLATE_DEFINITIONS.map((template) => {
+                          const enabledKey = getEmailTemplateSettingKey(template.key, "enabled");
+                          const subjectKey = getEmailTemplateSettingKey(template.key, "subject");
+                          const bodyKey = getEmailTemplateSettingKey(template.key, "body");
+
+                          return (
+                            <div key={template.key} className="space-y-3 rounded-xl border border-gray-200 p-4">
+                              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                <div className="space-y-1">
+                                  <div className="font-medium">{template.label}</div>
+                                  <p className="text-sm text-muted-foreground">{template.description}</p>
+                                  <div className="text-xs text-muted-foreground">
+                                    Плейсхолдеры: {template.placeholders.join(", ")}
+                                  </div>
+                                </div>
+                                <label className="flex items-center gap-2 text-sm font-medium">
+                                  <Checkbox
+                                    checked={isSettingEnabled(enabledKey, template.enabledByDefault)}
+                                    onCheckedChange={(checked) => updateSetting(enabledKey, checked ? "true" : "false")}
+                                  />
+                                  <span>Шаблон включен</span>
+                                </label>
+                              </div>
+
+                              <div className="grid gap-3">
+                                <div className="space-y-1">
+                                  <Label htmlFor={`${template.key}-subject`}>Тема письма</Label>
+                                  <Input
+                                    id={`${template.key}-subject`}
+                                    value={settings[subjectKey] ?? template.defaultSubject}
+                                    onChange={(e) => updateSetting(subjectKey, e.target.value)}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`${template.key}-body`}>Текст письма</Label>
+                                  <Textarea
+                                    id={`${template.key}-body`}
+                                    value={settings[bodyKey] ?? template.defaultBody}
+                                    onChange={(e) => updateSetting(bodyKey, e.target.value)}
+                                    className="min-h-[180px]"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -4886,7 +5903,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         подкаталогами и не пролистывать весь раздел целиком.
                       </p>
                       <Tabs value={selectedGeneralSettingsCatalog} onValueChange={setSelectedGeneralSettingsCatalog} className="space-y-4">
-                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-3">
+                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-4">
                           <TabsTrigger value="branding" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Брендинг
                           </TabsTrigger>
@@ -4895,6 +5912,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </TabsTrigger>
                           <TabsTrigger value="product-page" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Страница товара
+                          </TabsTrigger>
+                          <TabsTrigger value="upload-media" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Загрузка медиа
                           </TabsTrigger>
                         </TabsList>
                         <TabsContent value="branding" className="mt-0 space-y-3">
@@ -5181,6 +6201,89 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </p>
                       </div>
                         </TabsContent>
+                        <TabsContent value="upload-media" className="mt-0">
+                          <div className="space-y-4 border border-gray-200 p-3">
+                            <div className="space-y-1">
+                              <h4 className="font-semibold">Оптимизация изображений перед загрузкой</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Эти настройки применяются на клиенте до отправки файла на сервер. Видео не пережимаются, а GIF, SVG и ICO остаются без изменений.
+                              </p>
+                            </div>
+
+                            <div className="grid gap-3 xl:grid-cols-2">
+                              {IMAGE_UPLOAD_CONTEXTS.map((context) => {
+                                const uploadOptions = getImageUploadSettings(settings, context.key);
+                                const enabledKey = getImageUploadSettingKey(context.key, "enabled");
+                                const widthKey = getImageUploadSettingKey(context.key, "max_width");
+                                const heightKey = getImageUploadSettingKey(context.key, "max_height");
+                                const qualityKey = getImageUploadSettingKey(context.key, "quality");
+                                const enabledId = `${context.key}-upload-enabled`;
+
+                                return (
+                                  <div key={context.key} className="space-y-3 border border-gray-200 p-3">
+                                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                      <div className="space-y-1">
+                                        <div className="font-semibold">{context.label}</div>
+                                        <p className="text-sm text-muted-foreground">{context.description}</p>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Checkbox
+                                          id={enabledId}
+                                          checked={uploadOptions.enabled}
+                                          onCheckedChange={(checked) => updateSetting(enabledKey, checked ? "true" : "false")}
+                                        />
+                                        <Label htmlFor={enabledId}>Оптимизировать</Label>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid gap-3 md:grid-cols-3">
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`${context.key}-max-width`}>Макс. ширина</Label>
+                                        <Input
+                                          id={`${context.key}-max-width`}
+                                          type="number"
+                                          min={320}
+                                          max={6000}
+                                          value={settings[widthKey] || ""}
+                                          onChange={(e) => updateSetting(widthKey, e.target.value)}
+                                          className="rounded-none"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`${context.key}-max-height`}>Макс. высота</Label>
+                                        <Input
+                                          id={`${context.key}-max-height`}
+                                          type="number"
+                                          min={320}
+                                          max={6000}
+                                          value={settings[heightKey] || ""}
+                                          onChange={(e) => updateSetting(heightKey, e.target.value)}
+                                          className="rounded-none"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`${context.key}-quality`}>Качество JPEG/WebP</Label>
+                                        <Input
+                                          id={`${context.key}-quality`}
+                                          type="number"
+                                          min={60}
+                                          max={100}
+                                          value={settings[qualityKey] || ""}
+                                          onChange={(e) => updateSetting(qualityKey, e.target.value)}
+                                          className="rounded-none"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <p className="text-xs text-muted-foreground">
+                                      Текущий режим: до {uploadOptions.maxWidth}x{uploadOptions.maxHeight}px, качество {uploadOptions.quality}%.
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </TabsContent>
                       </Tabs>
                     </div>
                   )}
@@ -5263,7 +6366,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <input
                       ref={telegramBotImageInputRef}
                       type="file"
-                      accept=".jpg,.jpeg,image/jpeg"
+                      accept="image/*,.avif,.jfif"
                       className="hidden"
                       onChange={(e) => uploadTelegramBotImage(e.target.files?.[0])}
                     />
@@ -5887,7 +6990,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     onValueChange={(value) => setSelectedProductEditorDictionaryTab(value as DictionaryKind)}
                     className="w-full"
                   >
-                    <TabsList className="grid h-auto grid-cols-2 gap-2 rounded-none bg-transparent p-0 lg:grid-cols-4">
+                    <TabsList className="grid h-auto grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-5">
                       {productEditorDictionaryTabs.map((tab) => (
                         <TabsTrigger
                           key={tab.key}
@@ -5932,6 +7035,39 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">Категория пока не выбрана.</p>
+                      )}
+                    </TabsContent>
+
+<TabsContent value="collections" className="mt-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => openProductDictionarySelector("collections")}>
+                          Словарь
+                        </Button>
+                        <Button type="button" variant="outline" className="rounded-none border-black" onClick={() => createDictionaryItem("collections", true)}>
+                          +
+                        </Button>
+                      </div>
+
+                      {formData.collections.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {formData.collections.map((collection) => (
+                            <div key={collection} className="flex items-center gap-2 border border-black bg-stone-50 px-3 py-2">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getDictionaryDotColor(collection) }} />
+                              <span className="font-medium">{collection}</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-auto rounded-none px-1 text-xs"
+                                onClick={() => removeDictionaryValueFromProduct("collections", collection)}
+                              >
+                                Удалить
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Коллекции пока не выбраны.</p>
                       )}
                     </TabsContent>
 
@@ -6343,7 +7479,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_64px]">
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_64px_160px]">
                   <div className="space-y-2">
                     <Label htmlFor="create-dictionary-color">Цвет метки</Label>
                     <Input
@@ -6364,7 +7500,28 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       className="h-11 w-full cursor-pointer rounded-none border border-black bg-white p-1"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-dictionary-sort-order">Порядок</Label>
+                    <Input
+                      id="create-dictionary-sort-order"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={dictionaryCreateDialog.sortOrder}
+                      onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, sortOrder: e.target.value }))}
+                      className="h-11 rounded-none border-black"
+                      placeholder="0"
+                    />
+                  </div>
                 </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-none border border-black bg-white px-3 py-3 text-sm">
+                  <Checkbox
+                    checked={dictionaryCreateDialog.showColorInCatalog}
+                    onCheckedChange={(checked) => setDictionaryCreateDialog((prev) => ({ ...prev, showColorInCatalog: !!checked }))}
+                  />
+                  <span>Показывать цвет в каталоге</span>
+                </label>
 
                 <div className="space-y-2">
                   <Label htmlFor="create-dictionary-description">Описание</Label>
@@ -6398,7 +7555,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </DialogHeader>
 
               <div className="space-y-3">
-                {(dictionaries[productDictionarySelector.kind] || []).map((item: any) => {
+                {getSortedDictionaryItems(productDictionarySelector.kind).map((item) => {
                   const selected = getProductDictionarySelected(productDictionarySelector.kind, item.name);
                   return (
                     <div key={`${productDictionarySelector.kind}-${item.id}`} className="flex items-center justify-between border border-gray-200 px-4 py-3">
@@ -6407,6 +7564,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                           <span>{item.name}</span>
                         </div>
+                        <p className="mt-1 text-xs text-muted-foreground">Порядок: {item.sortOrder ?? 0}</p>
                         {item.description && <p className="text-xs text-muted-foreground mt-1">{item.description}</p>}
                       </div>
                       <Button
@@ -6509,6 +7667,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </div>
 
+                <div className="flex flex-col gap-2 border border-gray-200 px-3 py-2 text-sm md:flex-row md:items-center md:justify-between">
+                  <div>
+                    {mediaGalleryLoading
+                      ? "Загружаем галерею..."
+                      : mediaGalleryTotalItems > 0
+                        ? `Показано ${mediaGalleryPageStart}-${mediaGalleryPageEnd} из ${mediaGalleryTotalItems}`
+                        : "Изображения не найдены"}
+                  </div>
+                  <div className="text-muted-foreground">Страница {Math.min(mediaGalleryPage, safeMediaGalleryTotalPages)} из {safeMediaGalleryTotalPages}</div>
+                </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {filteredGalleryPickerImages.map((image) => (
                     <button
@@ -6525,10 +7694,144 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </button>
                   ))}
                 </div>
+
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm text-muted-foreground">Всего изображений: {mediaGalleryTotalItems}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-none"
+                      onClick={() => setMediaGalleryPage((prev) => Math.max(1, prev - 1))}
+                      disabled={mediaGalleryLoading || mediaGalleryPage <= 1}
+                    >
+                      Назад
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-none"
+                      onClick={() => setMediaGalleryPage((prev) => Math.min(safeMediaGalleryTotalPages, prev + 1))}
+                      disabled={mediaGalleryLoading || mediaGalleryPage >= safeMediaGalleryTotalPages}
+                    >
+                      Вперед
+                    </Button>
+                  </div>
+                </div>
               </div>
             </DialogContent>
           </Dialog>
         </main>
+        {hasGalleryUploadQueue && (
+          <div className="pointer-events-none fixed bottom-4 right-4 z-[80] flex max-w-[calc(100vw-2rem)] justify-end">
+            {isGalleryUploadPanelOpen ? (
+              <div className="pointer-events-auto w-[min(420px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white shadow-2xl shadow-black/15">
+                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-900">
+                      <Upload className="h-4 w-4" />
+                      Загрузка в галерею
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Файлов: {galleryUploadQueue.length} · Успешно: {galleryUploadSuccessCount} · Ошибок: {galleryUploadErrorCount}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 rounded-none"
+                    onClick={() => setIsGalleryUploadPanelOpen(false)}
+                    aria-label="Закрыть окно загрузки"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="space-y-3 px-4 py-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs text-muted-foreground">
+                      {formatBytes(galleryUploadUploadedBytes)} / {formatBytes(galleryUploadTotalBytes)}
+                      {galleryUploadSpeed > 0 ? ` · ${formatBytes(galleryUploadSpeed)}/с` : ""}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!galleryUploading && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-none"
+                          onClick={clearGalleryUploadQueue}
+                        >
+                          Очистить
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <Progress value={galleryUploadProgress} className="h-2 rounded-none" />
+
+                  <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+                    {galleryUploadQueue.map((item) => (
+                      <div key={item.id} className="border border-black/10 bg-stone-50 p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{item.fileName}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              В галерее: {item.assignedName} · {formatBytes(item.fileSize)}
+                            </div>
+                          </div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                            {item.status === "success"
+                              ? "Готово"
+                              : item.status === "error"
+                                ? "Ошибка"
+                                : item.status === "uploading"
+                                  ? "Загрузка"
+                                  : "Ожидание"}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          <Progress value={item.progressPercent} className="h-2 rounded-none" />
+                          <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                            <span>{Math.round(item.progressPercent)}%</span>
+                            <span>
+                              {formatBytes(item.uploadedBytes)} / {formatBytes(item.fileSize)}
+                              {item.speedBytesPerSecond > 0 ? ` · ${formatBytes(item.speedBytesPerSecond)}/с` : ""}
+                            </span>
+                          </div>
+                          {item.error && (
+                            <div className="text-xs text-red-600">{item.error}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="pointer-events-auto h-auto rounded-none border-black bg-white px-4 py-3 text-left shadow-lg hover:bg-stone-50"
+                onClick={() => setIsGalleryUploadPanelOpen(true)}
+              >
+                <div className="flex items-center gap-3">
+                  <Upload className="h-4 w-4" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">Загрузки галереи</div>
+                    <div className="text-xs text-muted-foreground">
+                      {galleryUploading
+                        ? `Идёт загрузка · ${galleryUploadProgress}%`
+                        : `Готово: ${galleryUploadSuccessCount} · Ошибок: ${galleryUploadErrorCount}`}
+                    </div>
+                  </div>
+                </div>
+              </Button>
+            )}
+          </div>
+        )}
         {!embedded && <Footer />}
       </div>
   );

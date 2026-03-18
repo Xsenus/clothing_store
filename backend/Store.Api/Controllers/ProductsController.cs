@@ -13,6 +13,13 @@ namespace Store.Api.Controllers;
 [Route("products")]
 public class ProductsController : ControllerBase
 {
+    private sealed record DictionaryOrderMaps(
+        IReadOnlyDictionary<string, int> Categories,
+        IReadOnlyDictionary<string, int> Sizes,
+        IReadOnlyDictionary<string, int> Materials,
+        IReadOnlyDictionary<string, int> Colors,
+        IReadOnlyDictionary<string, int> Collections);
+
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
 
@@ -26,7 +33,12 @@ public class ProductsController : ControllerBase
     public async Task<IResult> List()
     {
         var products = await _db.Products.ToListAsync();
-        var sizeMap = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
+        var sizeDictionaries = await _db.SizeDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Id, x.Name, x.SortOrder })
+            .ToListAsync();
+        var sizeMap = sizeDictionaries.ToDictionary(x => x.Id, x => x.Name);
+        var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
         var stock = await _db.ProductSizeStocks.ToListAsync();
         var stockByProduct = stock.GroupBy(x => x.ProductId).ToDictionary(
             g => g.Key,
@@ -45,15 +57,16 @@ public class ProductsController : ControllerBase
                 json["sizeStock"] = stockObject;
             }
 
+            ApplyDictionaryOrdering(json, dictionaryOrderMaps);
             return json;
         }));
     }
 
     [HttpGet("new")]
-    public async Task<IResult> ListNew() => Results.Json((await _db.Products.Where(p => p.IsNew).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
+    public async Task<IResult> ListNew() => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.IsNew)));
 
     [HttpGet("popular")]
-    public async Task<IResult> ListPopular() => Results.Json((await _db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
+    public async Task<IResult> ListPopular() => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount)));
 
     [HttpGet("filters")]
     public async Task<IResult> GetCatalogFilters()
@@ -69,6 +82,9 @@ public class ProductsController : ControllerBase
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var usedSizes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedMaterials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedColors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedCollections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var productDataList = await _db.Products
             .Select(p => p.Data)
             .ToListAsync();
@@ -77,28 +93,29 @@ public class ProductsController : ControllerBase
             try
             {
                 var json = JsonNode.Parse(data)?.AsObject();
-                var category = json?["category"]?.ToString()?.Trim();
-                if (!string.IsNullOrWhiteSpace(category))
-                    usedCategories.Add(category);
-
-                var categoryValues = json?["categories"] as JsonArray;
-                if (categoryValues is not null)
+                foreach (var category in NormalizeLookupValues(json?["categories"] as JsonArray, json?["category"]?.ToString()))
                 {
-                    foreach (var item in categoryValues)
-                    {
-                        var name = item?.ToString()?.Trim();
-                        if (!string.IsNullOrWhiteSpace(name))
-                            usedCategories.Add(name);
-                    }
+                    usedCategories.Add(category);
                 }
 
-                var sizes = json?["sizes"] as JsonArray;
-                if (sizes is null) continue;
-                foreach (var size in sizes)
+                foreach (var size in NormalizeLookupValues(json?["sizes"] as JsonArray))
                 {
-                    var name = size?.ToString()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(name))
-                        usedSizes.Add(name);
+                    usedSizes.Add(size);
+                }
+
+                foreach (var material in NormalizeLookupValues(json?["materials"] as JsonArray, json?["material"]?.ToString()))
+                {
+                    usedMaterials.Add(material);
+                }
+
+                foreach (var color in NormalizeLookupValues(json?["colors"] as JsonArray, json?["color"]?.ToString()))
+                {
+                    usedColors.Add(color);
+                }
+
+                foreach (var collection in NormalizeLookupValues(json?["collections"] as JsonArray, json?["collection"]?.ToString()))
+                {
+                    usedCollections.Add(collection);
                 }
             }
             catch
@@ -122,40 +139,206 @@ public class ProductsController : ControllerBase
         var categoryDictionaryItems = await _db.CategoryDictionaries
             .Where(x => x.IsActive)
             .ToListAsync();
-        var categories = categoryDictionaryItems
-            .Where(x => usedCategories.Contains(x.Name))
-            .OrderBy(x => ResolveCategoryLabel(x.Name, x.Description))
-            .Select(x => new { value = x.Name, label = ResolveCategoryLabel(x.Name, x.Description) })
-            .ToList();
-
-        var sizesList = await _db.SizeDictionaries
-            .Where(x => x.IsActive && usedSizes.Contains(x.Name))
-            .OrderBy(x => x.Name)
-            .Select(x => x.Name)
+        var materialDictionaryItems = await _db.MaterialDictionaries
+            .Where(x => x.IsActive)
+            .ToListAsync();
+        var colorDictionaryItems = await _db.ColorDictionaries
+            .Where(x => x.IsActive)
+            .ToListAsync();
+        var collectionDictionaryItems = await _db.CollectionDictionaries
+            .Where(x => x.IsActive)
             .ToListAsync();
 
+        var settingKeys = new[]
+        {
+            "catalog_filter_categories_enabled",
+            "catalog_filter_sizes_enabled",
+            "catalog_filter_materials_enabled",
+            "catalog_filter_colors_enabled",
+            "catalog_filter_collections_enabled",
+            "catalog_filter_categories_show_color",
+            "catalog_filter_sizes_show_color",
+            "catalog_filter_materials_show_color",
+            "catalog_filter_colors_show_color",
+            "catalog_filter_collections_show_color",
+            "catalog_filter_categories_order",
+            "catalog_filter_sizes_order",
+            "catalog_filter_materials_order",
+            "catalog_filter_colors_order",
+            "catalog_filter_collections_order"
+        };
         var settingsRows = await _db.AppSettings
-            .Where(x => x.Key == "catalog_filter_categories_enabled" || x.Key == "catalog_filter_sizes_enabled")
+            .Where(x => settingKeys.Contains(x.Key))
             .ToListAsync();
         var settings = settingsRows.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        var showCategoryColors = ParseBooleanSetting(settings, "catalog_filter_categories_show_color", true);
+        var showSizeColors = ParseBooleanSetting(settings, "catalog_filter_sizes_show_color", true);
+        var showMaterialColors = ParseBooleanSetting(settings, "catalog_filter_materials_show_color", true);
+        var showCatalogColors = ParseBooleanSetting(settings, "catalog_filter_colors_show_color", true);
+        var showCollectionColors = ParseBooleanSetting(settings, "catalog_filter_collections_show_color", true);
+
+        var categories = categoryDictionaryItems
+            .Where(x => usedCategories.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = ResolveCategoryLabel(x.Name, x.Description),
+                color = showCategoryColors && x.ShowColorInCatalog ? x.Color : null,
+                showColorInCatalog = showCategoryColors && x.ShowColorInCatalog
+            })
+            .ToList();
+
+        var sizeDictionaryItems = await _db.SizeDictionaries
+            .Where(x => x.IsActive)
+            .ToListAsync();
+        var sizes = sizeDictionaryItems
+            .Where(x => usedSizes.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = x.Name,
+                color = showSizeColors && x.ShowColorInCatalog ? x.Color : null,
+                showColorInCatalog = showSizeColors && x.ShowColorInCatalog
+            })
+            .ToList();
+
+        var materials = materialDictionaryItems
+            .Where(x => usedMaterials.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = x.Name,
+                color = showMaterialColors && x.ShowColorInCatalog ? x.Color : null,
+                showColorInCatalog = showMaterialColors && x.ShowColorInCatalog
+            })
+            .ToList();
+
+        var colors = colorDictionaryItems
+            .Where(x => usedColors.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = x.Name,
+                color = showCatalogColors && x.ShowColorInCatalog ? x.Color : null,
+                showColorInCatalog = showCatalogColors && x.ShowColorInCatalog
+            })
+            .ToList();
+
+        var collections = collectionDictionaryItems
+            .Where(x => usedCollections.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = x.Name,
+                color = showCollectionColors && x.ShowColorInCatalog ? x.Color : null,
+                showColorInCatalog = showCollectionColors && x.ShowColorInCatalog
+            })
+            .ToList();
 
         return Results.Ok(new
         {
             categories,
-            sizes = sizesList,
+            sizes,
+            materials,
+            colors,
+            collections,
             visibility = new
             {
                 categories = ParseBooleanSetting(settings, "catalog_filter_categories_enabled", true),
-                sizes = ParseBooleanSetting(settings, "catalog_filter_sizes_enabled", true)
+                sizes = ParseBooleanSetting(settings, "catalog_filter_sizes_enabled", true),
+                materials = ParseBooleanSetting(settings, "catalog_filter_materials_enabled", true),
+                colors = ParseBooleanSetting(settings, "catalog_filter_colors_enabled", true),
+                collections = ParseBooleanSetting(settings, "catalog_filter_collections_enabled", true)
+            },
+            order = new
+            {
+                categories = ParseIntegerSetting(settings, "catalog_filter_categories_order", 10),
+                sizes = ParseIntegerSetting(settings, "catalog_filter_sizes_order", 20),
+                materials = ParseIntegerSetting(settings, "catalog_filter_materials_order", 30),
+                colors = ParseIntegerSetting(settings, "catalog_filter_colors_order", 40),
+                collections = ParseIntegerSetting(settings, "catalog_filter_collections_order", 50)
             }
         });
     }
 
     [HttpGet("category/{category}/new")]
-    public async Task<IResult> CategoryNew(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsNew).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
+    public async Task<IResult> CategoryNew(string category) => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.Category == category && p.IsNew)));
 
     [HttpGet("category/{category}/popular")]
-    public async Task<IResult> CategoryPopular(string category) => Results.Json((await _db.Products.Where(p => p.Category == category && p.IsPopular).OrderByDescending(p => p.LikesCount).Select(p => p.Data).ToListAsync()).Select(data => JsonNode.Parse(data)));
+    public async Task<IResult> CategoryPopular(string category) => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.Category == category && p.IsPopular).OrderByDescending(p => p.LikesCount)));
+
+    [HttpGet("{slug}/collections")]
+    public async Task<IResult> GetCollectionGroups(string slug)
+    {
+        var product = await _db.Products
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Slug == slug);
+        if (product is null)
+            return Results.NotFound(new { detail = "Product not found" });
+
+        var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
+        var productJson = ProductJsonService.Parse(product);
+        ApplyDictionaryOrdering(productJson, dictionaryOrderMaps);
+
+        var collectionNames = NormalizeLookupValues(
+            productJson["collections"] as JsonArray,
+            productJson["collection"]?.ToString());
+        if (collectionNames.Count == 0)
+            return Results.Ok(Array.Empty<object>());
+
+        var collectionMetadata = await _db.CollectionDictionaries
+            .AsNoTracking()
+            .ToListAsync();
+        var collectionMetadataByName = collectionMetadata.ToDictionary(
+            x => x.Name.Trim().ToLowerInvariant(),
+            x => x,
+            StringComparer.OrdinalIgnoreCase);
+
+        var relatedProducts = await BuildOrderedProductPayloadsAsync(
+            _db.Products
+                .Where(x => x.Id != product.Id)
+                .OrderByDescending(x => x.CreationTime));
+        var groups = collectionNames
+            .Select(collectionName =>
+            {
+                var normalizedCollectionName = collectionName.Trim().ToLowerInvariant();
+                var collectionInfo = collectionMetadataByName.GetValueOrDefault(normalizedCollectionName);
+                var products = relatedProducts
+                    .Where(candidate =>
+                    {
+                        var candidateCollections = NormalizeLookupValues(
+                            candidate["collections"] as JsonArray,
+                            candidate["collection"]?.ToString());
+                        return candidateCollections.Any(value =>
+                            string.Equals(value, collectionName, StringComparison.OrdinalIgnoreCase));
+                    })
+                    .Take(8)
+                    .ToList();
+
+                return new
+                {
+                    name = collectionInfo?.Name ?? collectionName,
+                    slug = collectionInfo?.Slug,
+                    description = collectionInfo?.Description,
+                    color = collectionInfo?.Color,
+                    products
+                };
+            })
+            .Where(group => group.products.Count > 0)
+            .ToList();
+
+        return Results.Ok(groups);
+    }
 
     [HttpGet("{slug}")]
     public async Task<IResult> GetBySlug(string slug)
@@ -165,7 +348,12 @@ public class ProductsController : ControllerBase
             return Results.NotFound(new { detail = "Product not found" });
 
         var json = ProductJsonService.Parse(p);
-        var sizeMap = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
+        var sizeDictionaries = await _db.SizeDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Id, x.Name, x.SortOrder })
+            .ToListAsync();
+        var sizeMap = sizeDictionaries.ToDictionary(x => x.Id, x => x.Name);
+        var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
         var stock = await _db.ProductSizeStocks.Where(x => x.ProductId == p.Id).ToListAsync();
         if (stock.Count > 0)
         {
@@ -182,6 +370,7 @@ public class ProductsController : ControllerBase
             json["sizeStock"] = stockObject;
         }
 
+        ApplyDictionaryOrdering(json, dictionaryOrderMaps);
         return Results.Json(json);
     }
 
@@ -202,6 +391,16 @@ public class ProductsController : ControllerBase
             "no" => false,
             _ => fallback
         };
+    }
+
+    private static int ParseIntegerSetting(IDictionary<string, string> settings, string key, int fallback)
+    {
+        if (!settings.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        return int.TryParse(value.Trim(), out var parsedValue) && parsedValue >= 0
+            ? parsedValue
+            : fallback;
     }
 
     private static string ResolveCategoryLabel(string value, string? description)
@@ -240,6 +439,7 @@ public class ProductsController : ControllerBase
         payload["id"] = id;
         EnsureProductDefaults(payload);
         NormalizePriceFields(payload);
+        ApplyDictionaryOrdering(payload, await LoadDictionaryOrderMapsAsync());
 
         var product = new Product
         {
@@ -270,6 +470,7 @@ public class ProductsController : ControllerBase
         var json = ProductJsonService.Merge(before.DeepClone().AsObject(), payload);
         EnsureProductDefaults(json);
         NormalizePriceFields(json);
+        ApplyDictionaryOrdering(json, await LoadDictionaryOrderMapsAsync());
 
         product.Slug = json["slug"]?.ToString() ?? product.Slug;
         product.Category = json["category"]?.ToString() ?? (json["categories"] as JsonArray)?[0]?.ToString();
@@ -627,6 +828,7 @@ public class ProductsController : ControllerBase
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var nextSortOrder = Math.Max(0, dictionaries.Values.Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1;
 
         var requested = new Dictionary<string, int>();
         if (sizeStock is not null)
@@ -663,6 +865,7 @@ public class ProductsController : ControllerBase
                     Name = sizeName,
                     Slug = DictionarySlugService.EnsureUnique(sizeName, occupiedSlugs),
                     ShowInCatalogFilter = true,
+                    SortOrder = nextSortOrder++,
                     CreatedAt = now
                 };
                 _db.SizeDictionaries.Add(dictionary);
@@ -743,6 +946,162 @@ public class ProductsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private async Task<DictionaryOrderMaps> LoadDictionaryOrderMapsAsync()
+    {
+        var categories = await _db.CategoryDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+        var sizes = await _db.SizeDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+        var materials = await _db.MaterialDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+        var colors = await _db.ColorDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+        var collections = await _db.CollectionDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+
+        return new DictionaryOrderMaps(
+            categories.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase),
+            sizes.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase),
+            materials.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase),
+            colors.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase),
+            collections.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private async Task<List<JsonObject>> BuildOrderedProductPayloadsAsync(IQueryable<Product> query)
+    {
+        var products = await query.ToListAsync();
+        var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
+
+        return products.Select(product =>
+        {
+            var json = ProductJsonService.Parse(product);
+            ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+            return json;
+        }).ToList();
+    }
+
+    private static void ApplyDictionaryOrdering(JsonObject json, DictionaryOrderMaps maps)
+    {
+        SortProductLookupValues(json, "categories", "category", maps.Categories);
+        SortProductLookupValues(json, "materials", "material", maps.Materials);
+        SortProductLookupValues(json, "colors", "color", maps.Colors);
+        SortProductLookupValues(json, "collections", null, maps.Collections);
+        SortProductSizeValues(json, maps.Sizes);
+    }
+
+    private static void SortProductLookupValues(
+        JsonObject json,
+        string arrayField,
+        string? singularField,
+        IReadOnlyDictionary<string, int> orderMap)
+    {
+        var fallbackValue = string.IsNullOrWhiteSpace(singularField)
+            ? null
+            : json[singularField]?.ToString();
+        var values = NormalizeLookupValues(json[arrayField] as JsonArray, fallbackValue);
+        if (values.Count == 0)
+            return;
+
+        var orderedValues = values
+            .OrderBy(value => ResolveDictionarySortOrder(orderMap, value))
+            .ThenBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        json[arrayField] = new JsonArray(orderedValues.Select(value => JsonValue.Create(value)).ToArray());
+        if (!string.IsNullOrWhiteSpace(singularField))
+        {
+            json[singularField] = orderedValues[0];
+        }
+    }
+
+    private static void SortProductSizeValues(JsonObject json, IReadOnlyDictionary<string, int> orderMap)
+    {
+        var sizeStock = json["sizeStock"] as JsonObject;
+        var values = NormalizeLookupValues(json["sizes"] as JsonArray);
+        if (sizeStock is not null)
+        {
+            foreach (var entry in sizeStock)
+            {
+                var sizeName = entry.Key.Trim();
+                if (string.IsNullOrWhiteSpace(sizeName))
+                    continue;
+
+                if (values.All(existing => !string.Equals(existing, sizeName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    values.Add(sizeName);
+                }
+            }
+        }
+
+        if (values.Count == 0)
+            return;
+
+        var orderedValues = values
+            .OrderBy(value => ResolveDictionarySortOrder(orderMap, value))
+            .ThenBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        json["sizes"] = new JsonArray(orderedValues.Select(value => JsonValue.Create(value)).ToArray());
+
+        if (sizeStock is null)
+            return;
+
+        var orderedStock = new JsonObject();
+        foreach (var sizeName in orderedValues)
+        {
+            if (sizeStock.TryGetPropertyValue(sizeName, out var stockValue))
+            {
+                orderedStock[sizeName] = stockValue?.DeepClone();
+            }
+        }
+
+        json["sizeStock"] = orderedStock;
+    }
+
+    private static List<string> NormalizeLookupValues(JsonArray? values, string? fallbackValue = null)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (values is not null)
+        {
+            foreach (var value in values)
+            {
+                var normalizedValue = value?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedValue) || !seen.Add(normalizedValue))
+                    continue;
+
+                result.Add(normalizedValue);
+            }
+        }
+
+        var normalizedFallbackValue = fallbackValue?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedFallbackValue) && seen.Add(normalizedFallbackValue))
+        {
+            result.Add(normalizedFallbackValue);
+        }
+
+        return result;
+    }
+
+    private static int ResolveDictionarySortOrder(IReadOnlyDictionary<string, int> orderMap, string value)
+    {
+        if (orderMap.TryGetValue(value.Trim().ToLowerInvariant(), out var sortOrder))
+            return sortOrder;
+
+        return int.MaxValue;
     }
 
     private async Task SavePriceHistoryAsync(string productId, JsonObject before, JsonObject after, string changedByUserId)

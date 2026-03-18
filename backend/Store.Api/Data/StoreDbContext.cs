@@ -49,6 +49,7 @@ public class StoreDbContext : DbContext
     public DbSet<MaterialDictionary> MaterialDictionaries => Set<MaterialDictionary>();
     public DbSet<ColorDictionary> ColorDictionaries => Set<ColorDictionary>();
     public DbSet<CategoryDictionary> CategoryDictionaries => Set<CategoryDictionary>();
+    public DbSet<CollectionDictionary> CollectionDictionaries => Set<CollectionDictionary>();
     public DbSet<ProductSizeStock> ProductSizeStocks => Set<ProductSizeStock>();
     public DbSet<StockChangeHistory> StockChangeHistories => Set<StockChangeHistory>();
     public DbSet<PriceChangeHistory> PriceChangeHistories => Set<PriceChangeHistory>();
@@ -92,6 +93,8 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<ColorDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CategoryDictionary>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<CategoryDictionary>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<CollectionDictionary>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<CollectionDictionary>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<ProductSizeStock>().HasIndex(x => new { x.ProductId, x.SizeId }).IsUnique();
         modelBuilder.Entity<StockChangeHistory>().HasIndex(x => x.ChangedAt);
         modelBuilder.Entity<PriceChangeHistory>().HasIndex(x => x.ChangedAt);

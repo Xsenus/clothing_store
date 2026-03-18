@@ -30,9 +30,11 @@ interface Product {
   price: number;
   images: string[];
   catalogImageUrl?: string;
-  sizes: string[];
+  sizes: DictionaryOption[];
   category?: string;
   categories?: string[];
+  collection?: string;
+  collections?: string[];
   material?: string;
   materials?: string[];
   color?: string;
@@ -46,19 +48,33 @@ interface DictionaryOption {
   value: string;
   label: string;
   color?: string | null;
+  showColorInCatalog?: boolean;
 }
+
+type CatalogFilterGroupKey = 'categories' | 'sizes' | 'materials' | 'colors' | 'collections';
+
+type CatalogFilterOrder = Record<CatalogFilterGroupKey, number>;
+
+const DEFAULT_CATALOG_FILTER_ORDER: CatalogFilterOrder = {
+  categories: 10,
+  sizes: 20,
+  materials: 30,
+  colors: 40,
+  collections: 50,
+};
 
 interface FilterContentProps {
   sortOptions: { value: string; label: string }[];
   sortBy: string;
   onSortChange: (value: string) => void;
+  filterGroupOrder: CatalogFilterOrder;
   showCategoryFilter: boolean;
   categories: DictionaryOption[];
   selectedCategories: string[];
   onToggleCategory: (value: string) => void;
   onClearCategories: () => void;
   showSizeFilter: boolean;
-  sizes: string[];
+  sizes: DictionaryOption[];
   selectedSizes: string[];
   onToggleSize: (value: string) => void;
   onClearSizes: () => void;
@@ -72,6 +88,11 @@ interface FilterContentProps {
   selectedColors: string[];
   onToggleColor: (value: string) => void;
   onClearColors: () => void;
+  showCollectionFilter: boolean;
+  collections: DictionaryOption[];
+  selectedCollections: string[];
+  onToggleCollection: (value: string) => void;
+  onClearCollections: () => void;
   minPriceInput: string;
   maxPriceInput: string;
   onMinPriceInputChange: (value: string) => void;
@@ -84,6 +105,7 @@ function FilterContent({
   sortOptions,
   sortBy,
   onSortChange,
+  filterGroupOrder,
   showCategoryFilter,
   categories,
   selectedCategories,
@@ -104,6 +126,11 @@ function FilterContent({
   selectedColors,
   onToggleColor,
   onClearColors,
+  showCollectionFilter,
+  collections,
+  selectedCollections,
+  onToggleCollection,
+  onClearCollections,
   minPriceInput,
   maxPriceInput,
   onMinPriceInputChange,
@@ -111,6 +138,87 @@ function FilterContent({
   onApplyPrice,
   onResetFilters,
 }: FilterContentProps) {
+  const filterSections = [
+    {
+      key: 'categories' as const,
+      title: 'КАТЕГОРИИ',
+      visible: showCategoryFilter,
+      sortOrder: filterGroupOrder.categories,
+      items: categories.map((item) => ({
+        value: item.value,
+        label: item.label,
+        color: item.showColorInCatalog ? item.color ?? null : null,
+      })),
+      selectedValues: selectedCategories,
+      onToggle: onToggleCategory,
+      onClear: onClearCategories,
+    },
+    {
+      key: 'sizes' as const,
+      title: 'РАЗМЕРЫ',
+      visible: showSizeFilter,
+      sortOrder: filterGroupOrder.sizes,
+      items: sizes.map((size) => ({
+        value: size.value,
+        label: size.label,
+        color: size.showColorInCatalog ? size.color ?? null : null,
+      })),
+      selectedValues: selectedSizes,
+      onToggle: onToggleSize,
+      onClear: onClearSizes,
+    },
+    {
+      key: 'materials' as const,
+      title: 'МАТЕРИАЛЫ',
+      visible: showMaterialFilter,
+      sortOrder: filterGroupOrder.materials,
+      items: materials.map((item) => ({
+        value: item.value,
+        label: item.label,
+        color: item.showColorInCatalog ? item.color ?? null : null,
+      })),
+      selectedValues: selectedMaterials,
+      onToggle: onToggleMaterial,
+      onClear: onClearMaterials,
+    },
+    {
+      key: 'colors' as const,
+      title: 'ЦВЕТА',
+      visible: showColorFilter,
+      sortOrder: filterGroupOrder.colors,
+      items: colors.map((item) => ({
+        value: item.value,
+        label: item.label,
+        color: item.showColorInCatalog ? item.color ?? null : null,
+      })),
+      selectedValues: selectedColors,
+      onToggle: onToggleColor,
+      onClear: onClearColors,
+    },
+    {
+      key: 'collections' as const,
+      title: 'КОЛЛЕКЦИИ',
+      visible: showCollectionFilter,
+      sortOrder: filterGroupOrder.collections,
+      items: collections.map((item) => ({
+        value: item.value,
+        label: item.label,
+        color: item.showColorInCatalog ? item.color ?? null : null,
+      })),
+      selectedValues: selectedCollections,
+      onToggle: onToggleCollection,
+      onClear: onClearCollections,
+    },
+  ]
+    .filter((section) => section.visible && section.items.length > 0)
+    .sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      return left.title.localeCompare(right.title, 'ru', { sensitivity: 'base' });
+    });
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -136,113 +244,35 @@ function FilterContent({
         </div>
       </div>
 
-      {showCategoryFilter && (
-      <div>
-        <h3 className="text-lg font-bold mb-4 uppercase">КАТЕГОРИЯ</h3>
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="ghost"
-            className="justify-start uppercase font-bold tracking-widest"
-            onClick={onClearCategories}
-          >
-            ВЫБРАТЬ ВСЁ
-          </Button>
-          {categories.map((category) => (
-            <div key={category.value} className="flex items-center space-x-2">
-              <Checkbox
-                id={`category-${category.value}`}
-                checked={selectedCategories.includes(category.value)}
-                onCheckedChange={() => onToggleCategory(category.value)}
-              />
-              <Label htmlFor={`category-${category.value}`} className="cursor-pointer font-medium">
-                {category.label}
-              </Label>
-            </div>
-          ))}
+      {filterSections.map((section) => (
+        <div key={section.key}>
+          <h3 className="text-lg font-bold mb-4 uppercase">{section.title}</h3>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="ghost"
+              className="justify-start uppercase font-bold tracking-widest"
+              onClick={section.onClear}
+            >
+              ВЫБРАТЬ ВСЁ
+            </Button>
+            {section.items.map((item) => (
+              <div key={`${section.key}-${item.value}`} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`${section.key}-${item.value}`}
+                  checked={section.selectedValues.includes(item.value)}
+                  onCheckedChange={() => section.onToggle(item.value)}
+                />
+                <Label htmlFor={`${section.key}-${item.value}`} className="flex cursor-pointer items-center gap-2 font-medium">
+                  {item.color && (
+                    <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: item.color }} />
+                  )}
+                  <span>{item.label}</span>
+                </Label>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-      )}
-
-      {showSizeFilter && (
-      <div>
-        <h3 className="text-lg font-bold mb-4 uppercase">РАЗМЕРЫ</h3>
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="ghost"
-            className="justify-start uppercase font-bold tracking-widest"
-            onClick={onClearSizes}
-          >
-            ВЫБРАТЬ ВСЁ
-          </Button>
-          {sizes.map((size) => (
-            <div key={size} className="flex items-center space-x-2">
-              <Checkbox
-                id={`size-${size}`}
-                checked={selectedSizes.includes(size)}
-                onCheckedChange={() => onToggleSize(size)}
-              />
-              <Label htmlFor={`size-${size}`} className="cursor-pointer font-medium">
-                {size}
-              </Label>
-            </div>
-          ))}
-        </div>
-      </div>
-      )}
-
-      {showMaterialFilter && (
-      <div>
-        <h3 className="text-lg font-bold mb-4 uppercase">МАТЕРИАЛ</h3>
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="ghost"
-            className="justify-start uppercase font-bold tracking-widest"
-            onClick={onClearMaterials}
-          >
-            ВЫБРАТЬ ВСЁ
-          </Button>
-          {materials.map((material) => (
-            <div key={material.value} className="flex items-center space-x-2">
-              <Checkbox
-                id={`material-${material.value}`}
-                checked={selectedMaterials.includes(material.value)}
-                onCheckedChange={() => onToggleMaterial(material.value)}
-              />
-              <Label htmlFor={`material-${material.value}`} className="cursor-pointer font-medium">
-                {material.label}
-              </Label>
-            </div>
-          ))}
-        </div>
-      </div>
-      )}
-
-      {showColorFilter && (
-      <div>
-        <h3 className="text-lg font-bold mb-4 uppercase">ЦВЕТ</h3>
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="ghost"
-            className="justify-start uppercase font-bold tracking-widest"
-            onClick={onClearColors}
-          >
-            ВЫБРАТЬ ВСЁ
-          </Button>
-          {colors.map((color) => (
-            <div key={color.value} className="flex items-center space-x-2">
-              <Checkbox
-                id={`color-${color.value}`}
-                checked={selectedColors.includes(color.value)}
-                onCheckedChange={() => onToggleColor(color.value)}
-              />
-              <Label htmlFor={`color-${color.value}`} className="cursor-pointer font-medium">
-                {color.label}
-              </Label>
-            </div>
-          ))}
-        </div>
-      </div>
-      )}
+      ))}
 
       <div>
         <h3 className="text-lg font-bold mb-4 uppercase">ЦЕНА</h3>
@@ -299,16 +329,20 @@ export default function CatalogPage() {
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [selectedMaterials, setSelectedMaterials] = useState<string[]>([]);
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("0");
   const [maxPriceInput, setMaxPriceInput] = useState("999999");
   const [categories, setCategories] = useState<DictionaryOption[]>([]);
-  const [sizes, setSizes] = useState<string[]>([]);
+  const [sizes, setSizes] = useState<DictionaryOption[]>([]);
   const [materials, setMaterials] = useState<DictionaryOption[]>([]);
   const [colors, setColors] = useState<DictionaryOption[]>([]);
+  const [collections, setCollections] = useState<DictionaryOption[]>([]);
   const [showCategoryFilter, setShowCategoryFilter] = useState(true);
   const [showSizeFilter, setShowSizeFilter] = useState(true);
   const [showMaterialFilter, setShowMaterialFilter] = useState(true);
   const [showColorFilter, setShowColorFilter] = useState(true);
+  const [showCollectionFilter, setShowCollectionFilter] = useState(true);
+  const [filterGroupOrder, setFilterGroupOrder] = useState<CatalogFilterOrder>(DEFAULT_CATALOG_FILTER_ORDER);
 
   const sortOptions = [
     { value: 'popular', label: 'Популярные' },
@@ -343,30 +377,71 @@ export default function CatalogPage() {
         const nextCategories = Array.isArray(response?.categories)
           ? response.categories
               .filter((item: any) => item?.value && item?.label)
-              .map((item: any) => ({ value: item.value, label: item.label }))
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                color: item.color ?? null,
+                showColorInCatalog: item.showColorInCatalog !== false,
+              }))
           : [];
         const nextSizes = Array.isArray(response?.sizes)
-          ? response.sizes.filter((value: any) => typeof value === 'string')
+          ? response.sizes
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                color: item.color ?? null,
+                showColorInCatalog: item.showColorInCatalog !== false,
+              }))
           : [];
         const nextMaterials = Array.isArray(response?.materials)
           ? response.materials
               .filter((item: any) => item?.value && item?.label)
-              .map((item: any) => ({ value: item.value, label: item.label }))
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                color: item.color ?? null,
+                showColorInCatalog: item.showColorInCatalog !== false,
+              }))
           : [];
         const nextColors = Array.isArray(response?.colors)
           ? response.colors
               .filter((item: any) => item?.value && item?.label)
-              .map((item: any) => ({ value: item.value, label: item.label, color: item.color ?? null }))
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                color: item.color ?? null,
+                showColorInCatalog: item.showColorInCatalog !== false,
+              }))
+          : [];
+        const nextCollections = Array.isArray(response?.collections)
+          ? response.collections
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                color: item.color ?? null,
+                showColorInCatalog: item.showColorInCatalog !== false,
+              }))
           : [];
 
         setCategories(nextCategories);
         setSizes(nextSizes);
         setMaterials(nextMaterials);
         setColors(nextColors);
+        setCollections(nextCollections);
         setShowCategoryFilter(response?.visibility?.categories !== false);
         setShowSizeFilter(response?.visibility?.sizes !== false);
         setShowMaterialFilter(response?.visibility?.materials !== false);
         setShowColorFilter(response?.visibility?.colors !== false);
+        setShowCollectionFilter(response?.visibility?.collections !== false);
+        setFilterGroupOrder({
+          categories: Number.isFinite(Number(response?.order?.categories)) ? Number(response.order.categories) : DEFAULT_CATALOG_FILTER_ORDER.categories,
+          sizes: Number.isFinite(Number(response?.order?.sizes)) ? Number(response.order.sizes) : DEFAULT_CATALOG_FILTER_ORDER.sizes,
+          materials: Number.isFinite(Number(response?.order?.materials)) ? Number(response.order.materials) : DEFAULT_CATALOG_FILTER_ORDER.materials,
+          colors: Number.isFinite(Number(response?.order?.colors)) ? Number(response.order.colors) : DEFAULT_CATALOG_FILTER_ORDER.colors,
+          collections: Number.isFinite(Number(response?.order?.collections)) ? Number(response.order.collections) : DEFAULT_CATALOG_FILTER_ORDER.collections,
+        });
       } catch (error) {
         console.error('Failed to fetch catalog filters:', error);
       }
@@ -391,7 +466,7 @@ export default function CatalogPage() {
       return;
     }
 
-    const available = new Set(sizes);
+    const available = new Set(sizes.map((item) => item.value));
     setSelectedSizes((prev) => prev.filter((value) => available.has(value)));
   }, [sizes, showSizeFilter]);
 
@@ -416,6 +491,16 @@ export default function CatalogPage() {
   }, [colors, showColorFilter]);
 
   useEffect(() => {
+    if (!showCollectionFilter) {
+      setSelectedCollections([]);
+      return;
+    }
+
+    const available = new Set(collections.map((item) => item.value));
+    setSelectedCollections((prev) => prev.filter((value) => available.has(value)));
+  }, [collections, showCollectionFilter]);
+
+  useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
       try {
@@ -435,7 +520,7 @@ export default function CatalogPage() {
 
   useEffect(() => {
     applyFilters(products);
-  }, [priceRange, selectedCategories, selectedSizes, selectedMaterials, selectedColors]);
+  }, [priceRange, selectedCategories, selectedSizes, selectedMaterials, selectedColors, selectedCollections]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -505,6 +590,15 @@ export default function CatalogPage() {
       });
     }
 
+    if (selectedCollections.length > 0) {
+      result = result.filter((product) => {
+        const productCollections = Array.isArray(product.collections) && product.collections.length > 0
+          ? product.collections
+          : (product.collection ? [product.collection] : []);
+        return matchesDictionaryOption(productCollections, selectedCollections, collections);
+      });
+    }
+
     setFilteredProducts(result);
   };
 
@@ -532,12 +626,19 @@ export default function CatalogPage() {
     );
   };
 
+  const toggleCollection = (collection: string) => {
+    setSelectedCollections((prev) =>
+      prev.includes(collection) ? prev.filter((value) => value !== collection) : [...prev, collection]
+    );
+  };
+
   const resetFilters = () => {
     setSortBy('popular');
     setSelectedCategories([]);
     setSelectedSizes([]);
     setSelectedMaterials([]);
     setSelectedColors([]);
+    setSelectedCollections([]);
     setPriceRange({ min: 0, max: 999999 });
     setMinPriceInput("0");
     setMaxPriceInput("999999");
@@ -594,6 +695,7 @@ export default function CatalogPage() {
                   sortOptions={sortOptions}
                   sortBy={sortBy}
                   onSortChange={setSortBy}
+                  filterGroupOrder={filterGroupOrder}
                   showCategoryFilter={showCategoryFilter}
                   categories={categories}
                   selectedCategories={selectedCategories}
@@ -614,6 +716,11 @@ export default function CatalogPage() {
                   selectedColors={selectedColors}
                   onToggleColor={toggleColor}
                   onClearColors={() => setSelectedColors([])}
+                  showCollectionFilter={showCollectionFilter}
+                  collections={collections}
+                  selectedCollections={selectedCollections}
+                  onToggleCollection={toggleCollection}
+                  onClearCollections={() => setSelectedCollections([])}
                   minPriceInput={minPriceInput}
                   maxPriceInput={maxPriceInput}
                   onMinPriceInputChange={handleMinPriceInputChange}
@@ -634,6 +741,7 @@ export default function CatalogPage() {
                 sortOptions={sortOptions}
                 sortBy={sortBy}
                 onSortChange={setSortBy}
+                filterGroupOrder={filterGroupOrder}
                 showCategoryFilter={showCategoryFilter}
                 categories={categories}
                 selectedCategories={selectedCategories}
@@ -654,6 +762,11 @@ export default function CatalogPage() {
                 selectedColors={selectedColors}
                 onToggleColor={toggleColor}
                 onClearColors={() => setSelectedColors([])}
+                showCollectionFilter={showCollectionFilter}
+                collections={collections}
+                selectedCollections={selectedCollections}
+                onToggleCollection={toggleCollection}
+                onClearCollections={() => setSelectedCollections([])}
                 minPriceInput={minPriceInput}
                 maxPriceInput={maxPriceInput}
                 onMinPriceInputChange={handleMinPriceInputChange}
@@ -686,6 +799,7 @@ export default function CatalogPage() {
                     setSelectedCategories([]);
                     setSelectedMaterials([]);
                     setSelectedColors([]);
+                    setSelectedCollections([]);
                     setMinPriceInput("0");
                     setMaxPriceInput("999999");
                   }}

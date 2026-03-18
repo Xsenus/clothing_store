@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Net.Mail;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
@@ -24,19 +25,21 @@ public class AdminController : ControllerBase
     private readonly AuthService _auth;
     private readonly AdminDataSeeder _adminDataSeeder;
     private readonly ITelegramBotManager _telegramBotManager;
+    private readonly TransactionalEmailService _emailService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
     /// </summary>
-    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder, ITelegramBotManager telegramBotManager)
+    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder, ITelegramBotManager telegramBotManager, TransactionalEmailService emailService)
     {
         _configuration = configuration;
         _db = db;
         _auth = auth;
         _adminDataSeeder = adminDataSeeder;
         _telegramBotManager = telegramBotManager;
+        _emailService = emailService;
     }
 
     /// <summary>
@@ -327,6 +330,9 @@ public class AdminController : ControllerBase
 
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
+
+        if (!string.Equals(currentStatus, nextStatus, StringComparison.Ordinal))
+            await _emailService.TrySendOrderStatusChangedEmailAsync(order, currentStatus, payload.ManagerComment);
 
         return Results.Ok(new { ok = true });
     }
@@ -642,6 +648,18 @@ public class AdminController : ControllerBase
         return Results.Ok(new { ok = true });
     }
 
+    [HttpPost("settings/smtp/test-email")]
+    public async Task<IResult> SendSmtpTestEmail([FromBody] SmtpTestEmailPayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        var result = await _emailService.SendTestEmailAsync(payload);
+        if (!result.Success)
+            return Results.BadRequest(new { detail = result.Detail });
+
+        return Results.Ok(new { ok = true, detail = result.Detail });
+    }
+
 
 
     [HttpGet("dictionaries")]
@@ -650,10 +668,11 @@ public class AdminController : ControllerBase
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
         return Results.Ok(new
         {
-            sizes = await _db.SizeDictionaries.OrderBy(x => x.Name).ToListAsync(),
-            materials = await _db.MaterialDictionaries.OrderBy(x => x.Name).ToListAsync(),
-            colors = await _db.ColorDictionaries.OrderBy(x => x.Name).ToListAsync(),
-            categories = await _db.CategoryDictionaries.OrderBy(x => x.Name).ToListAsync()
+            sizes = await GetOrderedDictionaryItemsAsync(_db.SizeDictionaries),
+            materials = await GetOrderedDictionaryItemsAsync(_db.MaterialDictionaries),
+            colors = await GetOrderedDictionaryItemsAsync(_db.ColorDictionaries),
+            categories = await GetOrderedDictionaryItemsAsync(_db.CategoryDictionaries),
+            collections = await GetOrderedDictionaryItemsAsync(_db.CollectionDictionaries)
         });
     }
 
@@ -670,6 +689,7 @@ public class AdminController : ControllerBase
         var color = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
+        var showColorInCatalog = payload.ShowColorInCatalog ?? true;
         object createdItem;
         string duplicateNameMessage;
         const string duplicateSlugMessage = "Slug уже существует";
@@ -685,7 +705,18 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.SizeDictionaries, sizeSlug))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                var size = new SizeDictionary { Name = name, Slug = sizeSlug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
+                var size = new SizeDictionary
+                {
+                    Name = name,
+                    Slug = sizeSlug,
+                    Description = description,
+                    Color = color,
+                    IsActive = isActive,
+                    ShowInCatalogFilter = showInCatalogFilter,
+                    ShowColorInCatalog = showColorInCatalog,
+                    SortOrder = NormalizeSortOrder(payload.SortOrder, await GetNextDictionarySortOrderAsync(_db.SizeDictionaries)),
+                    CreatedAt = now
+                };
                 _db.SizeDictionaries.Add(size);
                 createdItem = size;
                 break;
@@ -698,7 +729,18 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.MaterialDictionaries, materialSlug))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                var material = new MaterialDictionary { Name = name, Slug = materialSlug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
+                var material = new MaterialDictionary
+                {
+                    Name = name,
+                    Slug = materialSlug,
+                    Description = description,
+                    Color = color,
+                    IsActive = isActive,
+                    ShowInCatalogFilter = showInCatalogFilter,
+                    ShowColorInCatalog = showColorInCatalog,
+                    SortOrder = NormalizeSortOrder(payload.SortOrder, await GetNextDictionarySortOrderAsync(_db.MaterialDictionaries)),
+                    CreatedAt = now
+                };
                 _db.MaterialDictionaries.Add(material);
                 createdItem = material;
                 break;
@@ -711,7 +753,18 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.ColorDictionaries, colorSlug))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                var colorDictionary = new ColorDictionary { Name = name, Slug = colorSlug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
+                var colorDictionary = new ColorDictionary
+                {
+                    Name = name,
+                    Slug = colorSlug,
+                    Description = description,
+                    Color = color,
+                    IsActive = isActive,
+                    ShowInCatalogFilter = showInCatalogFilter,
+                    ShowColorInCatalog = showColorInCatalog,
+                    SortOrder = NormalizeSortOrder(payload.SortOrder, await GetNextDictionarySortOrderAsync(_db.ColorDictionaries)),
+                    CreatedAt = now
+                };
                 _db.ColorDictionaries.Add(colorDictionary);
                 createdItem = colorDictionary;
                 break;
@@ -724,9 +777,44 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.CategoryDictionaries, categorySlug))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                var category = new CategoryDictionary { Name = name, Slug = categorySlug, Description = description, Color = color, IsActive = isActive, ShowInCatalogFilter = showInCatalogFilter, CreatedAt = now };
+                var category = new CategoryDictionary
+                {
+                    Name = name,
+                    Slug = categorySlug,
+                    Description = description,
+                    Color = color,
+                    IsActive = isActive,
+                    ShowInCatalogFilter = showInCatalogFilter,
+                    ShowColorInCatalog = showColorInCatalog,
+                    SortOrder = NormalizeSortOrder(payload.SortOrder, await GetNextDictionarySortOrderAsync(_db.CategoryDictionaries)),
+                    CreatedAt = now
+                };
                 _db.CategoryDictionaries.Add(category);
                 createdItem = category;
+                break;
+            case "collections":
+                duplicateNameMessage = "Коллекция уже существует";
+                var collectionSlug = await ResolveDictionarySlugAsync(_db.CollectionDictionaries, payload.Slug, name);
+                if (string.IsNullOrWhiteSpace(collectionSlug))
+                    return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
+                if (await DictionaryNameExistsAsync(_db.CollectionDictionaries, name))
+                    return Results.BadRequest(new { detail = duplicateNameMessage });
+                if (await DictionarySlugExistsAsync(_db.CollectionDictionaries, collectionSlug))
+                    return Results.BadRequest(new { detail = duplicateSlugMessage });
+                var collection = new CollectionDictionary
+                {
+                    Name = name,
+                    Slug = collectionSlug,
+                    Description = description,
+                    Color = color,
+                    IsActive = isActive,
+                    ShowInCatalogFilter = false,
+                    ShowColorInCatalog = showColorInCatalog,
+                    SortOrder = NormalizeSortOrder(payload.SortOrder, await GetNextDictionarySortOrderAsync(_db.CollectionDictionaries)),
+                    CreatedAt = now
+                };
+                _db.CollectionDictionaries.Add(collection);
+                createdItem = collection;
                 break;
             default:
                 return Results.BadRequest(new { detail = "Неизвестный словарь" });
@@ -753,6 +841,7 @@ public class AdminController : ControllerBase
         var colorValue = NormalizeOptionalColor(payload.Color);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
+        var showColorInCatalog = payload.ShowColorInCatalog ?? true;
         string duplicateNameMessage;
         const string duplicateSlugMessage = "Slug уже существует";
 
@@ -762,6 +851,8 @@ public class AdminController : ControllerBase
                 duplicateNameMessage = "Размер уже существует";
                 var size = await _db.SizeDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (size is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                var previousSizeName = size.Name;
+                var previousSizeSlug = size.Slug;
                 var resolvedSizeSlug = await ResolveDictionarySlugAsync(_db.SizeDictionaries, payload.Slug ?? size.Slug, name, id);
                 if (string.IsNullOrWhiteSpace(resolvedSizeSlug))
                     return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
@@ -769,19 +860,25 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.SizeDictionaries, resolvedSizeSlug, id))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                if (await _db.ProductSizeStocks.AnyAsync(x => x.SizeId == id))
-                    return Results.BadRequest(new { detail = "Размер используется в товарах, редактирование запрещено" });
                 size.Name = name;
                 size.Slug = resolvedSizeSlug;
                 size.Description = description;
                 size.Color = colorValue;
                 size.IsActive = isActive;
                 size.ShowInCatalogFilter = showInCatalogFilter;
+                size.ShowColorInCatalog = showColorInCatalog;
+                size.SortOrder = NormalizeSortOrder(payload.SortOrder, size.SortOrder);
+                if (ReferenceValueChanged(previousSizeName, size.Name, previousSizeSlug, size.Slug))
+                {
+                    await UpdateProductSizeReferencesAsync(size.Name, previousSizeName, previousSizeSlug);
+                }
                 break;
             case "materials":
                 duplicateNameMessage = "Материал уже существует";
                 var material = await _db.MaterialDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (material is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                var previousMaterialName = material.Name;
+                var previousMaterialSlug = material.Slug;
                 var resolvedMaterialSlug = await ResolveDictionarySlugAsync(_db.MaterialDictionaries, payload.Slug ?? material.Slug, name, id);
                 if (string.IsNullOrWhiteSpace(resolvedMaterialSlug))
                     return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
@@ -789,19 +886,25 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.MaterialDictionaries, resolvedMaterialSlug, id))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                if (await IsProductDataValueInUseAsync("material", material.Name, material.Slug))
-                    return Results.BadRequest(new { detail = "Материал используется в товарах, редактирование запрещено" });
                 material.Name = name;
                 material.Slug = resolvedMaterialSlug;
                 material.Description = description;
                 material.Color = colorValue;
                 material.IsActive = isActive;
                 material.ShowInCatalogFilter = showInCatalogFilter;
+                material.ShowColorInCatalog = showColorInCatalog;
+                material.SortOrder = NormalizeSortOrder(payload.SortOrder, material.SortOrder);
+                if (ReferenceValueChanged(previousMaterialName, material.Name, previousMaterialSlug, material.Slug))
+                {
+                    await UpdateProductLookupReferencesAsync("material", material.Name, previousMaterialName, previousMaterialSlug);
+                }
                 break;
             case "colors":
                 duplicateNameMessage = "Цвет уже существует";
                 var color = await _db.ColorDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (color is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                var previousColorName = color.Name;
+                var previousColorSlug = color.Slug;
                 var resolvedColorSlug = await ResolveDictionarySlugAsync(_db.ColorDictionaries, payload.Slug ?? color.Slug, name, id);
                 if (string.IsNullOrWhiteSpace(resolvedColorSlug))
                     return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
@@ -809,19 +912,25 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.ColorDictionaries, resolvedColorSlug, id))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                if (await IsProductDataValueInUseAsync("color", color.Name, color.Slug))
-                    return Results.BadRequest(new { detail = "Цвет используется в товарах, редактирование запрещено" });
                 color.Name = name;
                 color.Slug = resolvedColorSlug;
                 color.Description = description;
                 color.Color = colorValue;
                 color.IsActive = isActive;
                 color.ShowInCatalogFilter = showInCatalogFilter;
+                color.ShowColorInCatalog = showColorInCatalog;
+                color.SortOrder = NormalizeSortOrder(payload.SortOrder, color.SortOrder);
+                if (ReferenceValueChanged(previousColorName, color.Name, previousColorSlug, color.Slug))
+                {
+                    await UpdateProductLookupReferencesAsync("color", color.Name, previousColorName, previousColorSlug);
+                }
                 break;
             case "categories":
                 duplicateNameMessage = "Категория уже существует";
                 var category = await _db.CategoryDictionaries.FirstOrDefaultAsync(x => x.Id == id);
                 if (category is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                var previousCategoryName = category.Name;
+                var previousCategorySlug = category.Slug;
                 var resolvedCategorySlug = await ResolveDictionarySlugAsync(_db.CategoryDictionaries, payload.Slug ?? category.Slug, name, id);
                 if (string.IsNullOrWhiteSpace(resolvedCategorySlug))
                     return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
@@ -829,14 +938,44 @@ public class AdminController : ControllerBase
                     return Results.BadRequest(new { detail = duplicateNameMessage });
                 if (await DictionarySlugExistsAsync(_db.CategoryDictionaries, resolvedCategorySlug, id))
                     return Results.BadRequest(new { detail = duplicateSlugMessage });
-                if (await IsProductCategoryInUseAsync(category.Name, category.Slug))
-                    return Results.BadRequest(new { detail = "Категория используется в товарах, редактирование запрещено" });
                 category.Name = name;
                 category.Slug = resolvedCategorySlug;
                 category.Description = description;
                 category.Color = colorValue;
                 category.IsActive = isActive;
                 category.ShowInCatalogFilter = showInCatalogFilter;
+                category.ShowColorInCatalog = showColorInCatalog;
+                category.SortOrder = NormalizeSortOrder(payload.SortOrder, category.SortOrder);
+                if (ReferenceValueChanged(previousCategoryName, category.Name, previousCategorySlug, category.Slug))
+                {
+                    await UpdateProductLookupReferencesAsync("category", category.Name, previousCategoryName, previousCategorySlug);
+                }
+                break;
+            case "collections":
+                duplicateNameMessage = "Коллекция уже существует";
+                var collection = await _db.CollectionDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (collection is null) return Results.NotFound(new { detail = "Элемент словаря не найден" });
+                var previousCollectionName = collection.Name;
+                var previousCollectionSlug = collection.Slug;
+                var resolvedCollectionSlug = await ResolveDictionarySlugAsync(_db.CollectionDictionaries, payload.Slug ?? collection.Slug, name, id);
+                if (string.IsNullOrWhiteSpace(resolvedCollectionSlug))
+                    return Results.BadRequest(new { detail = "Slug должен быть латиницей" });
+                if (await DictionaryNameExistsAsync(_db.CollectionDictionaries, name, id))
+                    return Results.BadRequest(new { detail = duplicateNameMessage });
+                if (await DictionarySlugExistsAsync(_db.CollectionDictionaries, resolvedCollectionSlug, id))
+                    return Results.BadRequest(new { detail = duplicateSlugMessage });
+                collection.Name = name;
+                collection.Slug = resolvedCollectionSlug;
+                collection.Description = description;
+                collection.Color = colorValue;
+                collection.IsActive = isActive;
+                collection.ShowInCatalogFilter = false;
+                collection.ShowColorInCatalog = showColorInCatalog;
+                collection.SortOrder = NormalizeSortOrder(payload.SortOrder, collection.SortOrder);
+                if (ReferenceValueChanged(previousCollectionName, collection.Name, previousCollectionSlug, collection.Slug))
+                {
+                    await UpdateProductLookupReferencesAsync("collection", collection.Name, previousCollectionName, previousCollectionSlug);
+                }
                 break;
             default:
                 return Results.BadRequest(new { detail = "Неизвестный словарь" });
@@ -886,6 +1025,15 @@ public class AdminController : ControllerBase
                     var used = await IsProductCategoryInUseAsync(category.Name, category.Slug);
                     if (used) return Results.BadRequest(new { detail = "Категория используется в товарах, удаление запрещено" });
                     _db.CategoryDictionaries.Remove(category);
+                }
+                break;
+            case "collections":
+                var collection = await _db.CollectionDictionaries.FirstOrDefaultAsync(x => x.Id == id);
+                if (collection is not null)
+                {
+                    var used = await IsProductCollectionInUseAsync(collection.Name, collection.Slug);
+                    if (used) return Results.BadRequest(new { detail = "Коллекция используется в товарах, удаление запрещено" });
+                    _db.CollectionDictionaries.Remove(collection);
                 }
                 break;
             default:
@@ -993,6 +1141,210 @@ public class AdminController : ControllerBase
             || ProductDataContainsValue(product.Data, GetProductDataAliases("category"), normalizedCategories));
     }
 
+    private Task<bool> IsProductCollectionInUseAsync(params string?[] collectionValues)
+        => IsProductDataValueInUseAsync("collection", collectionValues);
+
+    private async Task UpdateProductLookupReferencesAsync(string field, string nextValue, params string?[] previousValues)
+    {
+        var normalizedPreviousValues = previousValues
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => NormalizeLookupValue(x!))
+            .ToHashSet();
+
+        if (normalizedPreviousValues.Count == 0 || string.IsNullOrWhiteSpace(nextValue))
+            return;
+
+        var products = await _db.Products.ToListAsync();
+        foreach (var product in products)
+        {
+            if (string.Equals(field, "category", StringComparison.OrdinalIgnoreCase))
+            {
+                var currentCategory = product.Category?.Trim();
+                if (!string.IsNullOrWhiteSpace(currentCategory) &&
+                    normalizedPreviousValues.Contains(NormalizeLookupValue(currentCategory)))
+                {
+                    product.Category = nextValue;
+                }
+            }
+
+            JsonObject? json;
+            try
+            {
+                json = JsonNode.Parse(product.Data)?.AsObject();
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (json is null)
+                continue;
+
+            if (ReplaceLookupReferencesInJson(json, GetProductDataAliases(field), normalizedPreviousValues, nextValue))
+            {
+                product.Data = json.ToJsonString();
+            }
+        }
+    }
+
+    private async Task UpdateProductSizeReferencesAsync(string nextValue, params string?[] previousValues)
+    {
+        var normalizedPreviousValues = previousValues
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => NormalizeLookupValue(x!))
+            .ToHashSet();
+
+        if (normalizedPreviousValues.Count == 0 || string.IsNullOrWhiteSpace(nextValue))
+            return;
+
+        var products = await _db.Products.ToListAsync();
+        foreach (var product in products)
+        {
+            JsonObject? json;
+            try
+            {
+                json = JsonNode.Parse(product.Data)?.AsObject();
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (json is null)
+                continue;
+
+            var updatedSizes = ReplaceLookupReferencesInJson(json, ["sizes"], normalizedPreviousValues, nextValue);
+            var updatedSizeStock = ReplaceSizeStockReferences(json, normalizedPreviousValues, nextValue);
+            if (updatedSizes || updatedSizeStock)
+            {
+                product.Data = json.ToJsonString();
+            }
+        }
+    }
+
+    private static bool ReplaceLookupReferencesInJson(
+        JsonObject json,
+        IReadOnlyList<string> fields,
+        ISet<string> normalizedPreviousValues,
+        string nextValue)
+    {
+        var changed = false;
+
+        foreach (var field in fields)
+        {
+            if (!json.TryGetPropertyValue(field, out var property) || property is null)
+                continue;
+
+            if (property is JsonArray array)
+            {
+                var nextValues = ReplaceLookupArrayValues(array, normalizedPreviousValues, nextValue, out var arrayChanged);
+                if (arrayChanged)
+                {
+                    json[field] = new JsonArray(nextValues.Select(value => JsonValue.Create(value)).ToArray());
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            var currentValue = property.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(currentValue) ||
+                !normalizedPreviousValues.Contains(NormalizeLookupValue(currentValue)))
+            {
+                continue;
+            }
+
+            json[field] = nextValue;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static List<string> ReplaceLookupArrayValues(
+        JsonArray array,
+        ISet<string> normalizedPreviousValues,
+        string nextValue,
+        out bool changed)
+    {
+        changed = false;
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in array)
+        {
+            var currentValue = item?.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(currentValue))
+            {
+                changed = true;
+                continue;
+            }
+
+            var replacementValue = normalizedPreviousValues.Contains(NormalizeLookupValue(currentValue))
+                ? nextValue
+                : currentValue;
+            if (!string.Equals(currentValue, replacementValue, StringComparison.Ordinal))
+            {
+                changed = true;
+            }
+
+            if (!seen.Add(replacementValue))
+            {
+                changed = true;
+                continue;
+            }
+
+            result.Add(replacementValue);
+        }
+
+        return result;
+    }
+
+    private static bool ReplaceSizeStockReferences(JsonObject json, ISet<string> normalizedPreviousValues, string nextValue)
+    {
+        if (json["sizeStock"] is not JsonObject sizeStock)
+            return false;
+
+        var changed = false;
+        var rewritten = new JsonObject();
+        foreach (var item in sizeStock)
+        {
+            var currentKey = item.Key?.Trim();
+            if (string.IsNullOrWhiteSpace(currentKey))
+            {
+                changed = true;
+                continue;
+            }
+
+            var rewrittenKey = normalizedPreviousValues.Contains(NormalizeLookupValue(currentKey))
+                ? nextValue
+                : currentKey;
+            if (!string.Equals(currentKey, rewrittenKey, StringComparison.Ordinal))
+            {
+                changed = true;
+            }
+
+            if (!rewritten.TryGetPropertyValue(rewrittenKey, out _))
+            {
+                rewritten[rewrittenKey] = item.Value?.DeepClone();
+            }
+            else
+            {
+                changed = true;
+            }
+        }
+
+        if (!changed)
+            return false;
+
+        json["sizeStock"] = rewritten;
+        return true;
+    }
+
+    private static bool ReferenceValueChanged(string previousName, string nextName, string? previousSlug, string? nextSlug)
+        => !string.Equals(previousName?.Trim(), nextName?.Trim(), StringComparison.Ordinal)
+           || !string.Equals(previousSlug?.Trim(), nextSlug?.Trim(), StringComparison.Ordinal);
+
     private async Task<bool> DictionaryNameExistsAsync<T>(DbSet<T> set, string name, string? excludeId = null) where T : class
     {
         var normalizedName = NormalizeLookupValue(name);
@@ -1017,6 +1369,25 @@ public class AdminController : ControllerBase
         }
 
         return await query.AnyAsync(x => EF.Property<string>(x, "Slug").Trim().ToLower() == normalizedSlug);
+    }
+
+    private async Task<List<T>> GetOrderedDictionaryItemsAsync<T>(DbSet<T> set) where T : class
+    {
+        return await set
+            .AsNoTracking()
+            .OrderBy(x => EF.Property<int>(x, "SortOrder"))
+            .ThenBy(x => EF.Property<string>(x, "Name"))
+            .ToListAsync();
+    }
+
+    private async Task<int> GetNextDictionarySortOrderAsync<T>(DbSet<T> set) where T : class
+    {
+        var currentMaxSortOrder = await set
+            .AsNoTracking()
+            .Select(x => (int?)EF.Property<int>(x, "SortOrder"))
+            .MaxAsync();
+
+        return Math.Max(0, currentMaxSortOrder ?? 0) + 1;
     }
 
     private async Task<string> ResolveDictionarySlugAsync<T>(DbSet<T> set, string? slugSource, string name, string? excludeId = null) where T : class
@@ -1260,7 +1631,8 @@ public class AdminController : ControllerBase
             ConstraintName: "IX_size_dictionaries_name" or
                             "IX_material_dictionaries_name" or
                             "IX_color_dictionaries_name" or
-                            "IX_category_dictionaries_name"
+                            "IX_category_dictionaries_name" or
+                            "IX_collection_dictionaries_name"
         };
 
     private static bool IsUniqueDictionarySlugViolation(DbUpdateException ex)
@@ -1270,12 +1642,14 @@ public class AdminController : ControllerBase
             ConstraintName: "IX_size_dictionaries_slug" or
                             "IX_material_dictionaries_slug" or
                             "IX_color_dictionaries_slug" or
-                            "IX_category_dictionaries_slug"
+                            "IX_category_dictionaries_slug" or
+                            "IX_collection_dictionaries_slug"
         };
 
     private static IReadOnlyList<string> GetProductDataAliases(string field) => field.ToLowerInvariant() switch
     {
         "category" => ["category", "categories"],
+        "collection" => ["collection", "collections"],
         "material" => ["material", "materials"],
         "color" => ["color", "colors"],
         _ => [field]
@@ -1363,6 +1737,12 @@ public class AdminController : ControllerBase
             return trimmed.ToLowerInvariant();
 
         return null;
+    }
+
+    private static int NormalizeSortOrder(int? value, int fallback)
+    {
+        var normalizedValue = value ?? fallback;
+        return normalizedValue < 0 ? 0 : normalizedValue;
     }
 
     private static bool IsValidEmail(string email)

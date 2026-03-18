@@ -63,6 +63,43 @@ const clearAuthTokens = () => {
   localStorage.removeItem("refreshToken");
 };
 
+const buildRequestUrl = (path) => `${API_URL}${path}`;
+
+const applyRequestAuthHeaders = (target) => {
+  const token = getToken();
+  if (token) {
+    target.setRequestHeader("Authorization", `Bearer ${token}`);
+  }
+
+  const adminToken = getAdminToken();
+  if (adminToken) {
+    target.setRequestHeader("X-Admin-Token", adminToken);
+  }
+};
+
+const parseErrorPayload = (status, text) => {
+  let payload = null;
+  let message = text || `Request failed: ${status}`;
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+      if (typeof payload?.detail === "string" && payload.detail.trim()) {
+        message = payload.detail;
+      } else if (typeof payload?.message === "string" && payload.message.trim()) {
+        message = payload.message;
+      }
+    } catch {
+      payload = null;
+    }
+  }
+
+  const error = new Error(message);
+  error.status = status;
+  error.payload = payload;
+  return error;
+};
+
 const shouldSkipRefresh = (path) => {
   return path.startsWith("/auth/login")
     || path.startsWith("/auth/signup")
@@ -110,7 +147,7 @@ const request = async (path, options = {}, retry = true) => {
     headers["X-Admin-Token"] = adminToken;
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(buildRequestUrl(path), {
     ...options,
     headers,
   });
@@ -129,26 +166,7 @@ const request = async (path, options = {}, retry = true) => {
 
   if (!res.ok) {
     const text = await res.text();
-    let payload = null;
-    let message = text || `Request failed: ${res.status}`;
-
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-        if (typeof payload?.detail === "string" && payload.detail.trim()) {
-          message = payload.detail;
-        } else if (typeof payload?.message === "string" && payload.message.trim()) {
-          message = payload.message;
-        }
-      } catch {
-        payload = null;
-      }
-    }
-
-    const error = new Error(message);
-    error.status = res.status;
-    error.payload = payload;
-    throw error;
+    throw parseErrorPayload(res.status, text);
   }
 
   if (res.status === 204) {
@@ -199,6 +217,22 @@ const normalizeProduct = (product) => {
 const normalizeProducts = (products) =>
   Array.isArray(products) ? products.map(normalizeProduct) : [];
 
+const normalizeGalleryImage = (image) => {
+  if (!image) return image;
+  return {
+    ...image,
+    url: toAbsoluteMediaUrl(image?.url),
+  };
+};
+
+const normalizeGalleryImagesPage = (payload) => ({
+  items: Array.isArray(payload?.items) ? payload.items.map(normalizeGalleryImage) : [],
+  page: Number.isFinite(Number(payload?.page)) ? Number(payload.page) : 1,
+  pageSize: Number.isFinite(Number(payload?.pageSize)) ? Number(payload.pageSize) : 24,
+  totalItems: Number.isFinite(Number(payload?.totalItems)) ? Number(payload.totalItems) : 0,
+  totalPages: Number.isFinite(Number(payload?.totalPages)) ? Number(payload.totalPages) : 1,
+});
+
 const normalizeProductReview = (review) => {
   if (!review) return review;
   return {
@@ -211,6 +245,67 @@ const normalizeProductReviewsPage = (payload) => ({
   ...payload,
   items: Array.isArray(payload?.items) ? payload.items.map(normalizeProductReview) : [],
   myReview: normalizeProductReview(payload?.myReview),
+});
+
+const normalizeProductCollectionGroups = (payload) =>
+  Array.isArray(payload)
+    ? payload.map((group) => ({
+      ...group,
+      products: normalizeProducts(group?.products),
+    }))
+    : [];
+
+const uploadWithProgress = ({ path, body, onProgress, headers = {} }) => new Promise((resolve, reject) => {
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", buildRequestUrl(path), true);
+
+  Object.entries(headers).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      xhr.setRequestHeader(key, value);
+    }
+  });
+  applyRequestAuthHeaders(xhr);
+
+  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  xhr.upload.onprogress = (event) => {
+    if (!event.lengthComputable || typeof onProgress !== "function") return;
+
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsedSeconds = Math.max((now - startedAt) / 1000, 0.001);
+    const speedBytesPerSecond = event.loaded / elapsedSeconds;
+
+    onProgress({
+      loaded: event.loaded,
+      total: event.total,
+      percent: event.total > 0 ? Math.min(100, (event.loaded / event.total) * 100) : 0,
+      speedBytesPerSecond,
+    });
+  };
+
+  xhr.onerror = () => {
+    reject(new Error("Network request failed"));
+  };
+
+  xhr.onload = () => {
+    const responseText = xhr.responseText || "";
+    if (xhr.status < 200 || xhr.status >= 300) {
+      reject(parseErrorPayload(xhr.status, responseText));
+      return;
+    }
+
+    if (!responseText) {
+      resolve(null);
+      return;
+    }
+
+    try {
+      resolve(JSON.parse(responseText));
+    } catch {
+      reject(new Error("Invalid server response"));
+    }
+  };
+
+  xhr.send(body);
 });
 
 export const FLOW = {
@@ -228,6 +323,8 @@ export const FLOW = {
   },
 
   getSingleProduct: async ({ input }) => normalizeProduct(await request(`/products/${input.slug}`)),
+
+  getProductCollectionGroups: async ({ input }) => normalizeProductCollectionGroups(await request(`/products/${input.slug}/collections`)),
 
   getSimilarProducts: async ({ input }) => {
     const products = normalizeProducts(await request("/products"));
@@ -406,20 +503,32 @@ export const FLOW = {
     return { urls: urls.map(toAbsoluteMediaUrl) };
   },
 
-  getAdminGalleryImages: async () => {
-    const images = await request("/admin/gallery");
-    return Array.isArray(images)
-      ? images.map((item) => ({
-        ...item,
-        url: toAbsoluteMediaUrl(item.url),
-      }))
-      : [];
+  getAdminGalleryImages: async ({ input } = {}) => {
+    const params = new URLSearchParams();
+    if (input?.page) params.set("page", String(input.page));
+    if (input?.pageSize) params.set("pageSize", String(input.pageSize));
+    if (input?.search) params.set("search", input.search);
+    const query = params.toString();
+    return normalizeGalleryImagesPage(await request(query ? `/admin/gallery?${query}` : "/admin/gallery"));
   },
 
   uploadAdminGalleryImage: async ({ input }) => {
     const image = await request("/admin/gallery", {
       method: "POST",
       body: input,
+    });
+
+    return {
+      ...image,
+      url: toAbsoluteMediaUrl(image?.url),
+    };
+  },
+
+  uploadAdminGalleryImageWithProgress: async ({ input, onProgress }) => {
+    const image = await uploadWithProgress({
+      path: "/admin/gallery",
+      body: input,
+      onProgress,
     });
 
     return {
@@ -443,6 +552,14 @@ export const FLOW = {
 
   deleteAdminGalleryImage: async ({ input }) => request(`/admin/gallery/${input.id}`, {
     method: "DELETE",
+  }),
+
+  copyAdminGalleryImageToDisk: async ({ input }) => normalizeGalleryImage(await request(`/admin/gallery/${input.id}/copy-to-disk`, {
+    method: "POST",
+  })),
+
+  restoreMissingAdminGalleryImages: async () => request("/admin/gallery/restore-missing", {
+    method: "POST",
   }),
 
 
@@ -660,6 +777,8 @@ export const FLOW = {
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
+      showColorInCatalog: input.showColorInCatalog,
+      sortOrder: input.sortOrder,
     }),
   }),
 
@@ -677,6 +796,8 @@ export const FLOW = {
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
+      showColorInCatalog: input.showColorInCatalog,
+      sortOrder: input.sortOrder,
     }),
   }),
 
@@ -687,6 +808,12 @@ export const FLOW = {
   adminGetSettings: async () => request("/admin/settings"),
 
   adminSaveSettings: async ({ input }) => request("/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminSendSmtpTestEmail: async ({ input }) => request("/admin/settings/smtp/test-email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

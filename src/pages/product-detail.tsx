@@ -29,6 +29,8 @@ import PageSeo from '@/components/PageSeo';
 import { resolveUrl, truncateText } from '@/lib/seo';
 import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
 import { getProductDetailImageDisplayClasses, getProductDetailMediaPageLayoutClasses } from '@/lib/product-card-background';
+import { optimizeFilesForUpload } from '@/lib/image-upload-optimization';
+import { fetchPublicSettings, getCachedPublicSettings } from '@/lib/site-settings';
 
 interface ProductReview {
   id: string;
@@ -57,6 +59,14 @@ interface ProductReviewsPayload {
   myReview?: ProductReview | null;
 }
 
+interface ProductCollectionGroup {
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  color?: string | null;
+  products: Product[];
+}
+
 interface Product {
   _id: string;
   name: string;
@@ -70,6 +80,7 @@ interface Product {
   sizes: string[];
   category?: string;
   categories?: string[];
+  collections?: string[];
   isNew?: boolean;
   likesCount?: number;
   sku?: string;
@@ -160,6 +171,7 @@ export default function ProductDetailPage() {
   const { slug } = useParams();
   const [product, setProduct] = useState<Product | null>(null);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
+  const [collectionGroups, setCollectionGroups] = useState<ProductCollectionGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSize, setSelectedSize] = useState('');
   const [quantity, setQuantity] = useState(0);
@@ -186,6 +198,7 @@ export default function ProductDetailPage() {
     ? truncateText(product.description || `${product.name} от fashiondemon`, 160)
     : "Страница товара fashiondemon.";
   const productCategories = product ? normalizeProductValues(product.categories, product.category) : [];
+  const productCollections = product ? normalizeProductValues(product.collections) : [];
   const productMaterials = product ? normalizeProductValues(product.materials, product.material) : [];
   const productColors = product ? normalizeProductValues(product.colors, product.color) : [];
   const productCharacteristics = product
@@ -249,6 +262,8 @@ export default function ProductDetailPage() {
           setMediaIndex(0);
           setReviewsPage(1);
           setReviewsData(null);
+          setCollectionGroups([]);
+          setSimilarProducts([]);
           setReviewDialogOpen(false);
           setReviewDeleteDialogOpen(false);
           setReviewText("");
@@ -258,14 +273,23 @@ export default function ProductDetailPage() {
           setQuantity(0);
           setImgError(false);
 
-          // Fetch similar
-          if (productRes.category) {
-            const similarRes = await FLOW.getSimilarProducts({ 
-              input: { category: productRes.category, productId: productRes._id } 
-            });
-            if (Array.isArray(similarRes)) {
-              setSimilarProducts(similarRes);
-            }
+          const [collectionGroupsRes, similarRes] = await Promise.all([
+            Array.isArray(productRes.collections) && productRes.collections.length > 0
+              ? FLOW.getProductCollectionGroups({ input: { slug } })
+              : Promise.resolve([]),
+            productRes.category
+              ? FLOW.getSimilarProducts({
+                input: { category: productRes.category, productId: productRes._id }
+              })
+              : Promise.resolve([]),
+          ]);
+
+          if (Array.isArray(collectionGroupsRes)) {
+            setCollectionGroups(collectionGroupsRes);
+          }
+
+          if (Array.isArray(similarRes)) {
+            setSimilarProducts(similarRes);
           }
         }
       } catch (error) {
@@ -494,8 +518,13 @@ export default function ProductDetailPage() {
 
     setReviewUploading(true);
     try {
+      const cachedUploadSettings = getCachedPublicSettings();
+      const uploadSettings = Object.keys(cachedUploadSettings).length > 0
+        ? cachedUploadSettings
+        : await fetchPublicSettings();
+      const preparedFiles = await optimizeFilesForUpload(Array.from(files), uploadSettings, "review_media");
       const formDataUpload = new FormData();
-      Array.from(files).forEach((file) => formDataUpload.append("files", file));
+      preparedFiles.forEach((file) => formDataUpload.append("files", file));
       const result = await FLOW.uploadMedia({ input: formDataUpload });
       const uploadedUrls = Array.isArray(result?.urls) ? result.urls : [];
       if (uploadedUrls.length === 0) {
@@ -816,6 +845,19 @@ export default function ProductDetailPage() {
               </div>
             )}
             
+            {productCollections.length > 0 && (
+              <div className="space-y-3 pt-4">
+                <h3 className="text-lg font-bold uppercase tracking-widest">Коллекции</h3>
+                <div className="flex flex-wrap gap-2">
+                  {productCollections.map((collection) => (
+                    <Badge key={collection} variant="outline" className="rounded-none border-black px-3 py-2 text-xs font-bold uppercase tracking-widest">
+                      {collection}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 pt-8 border-t">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h3 className="text-lg font-bold uppercase tracking-widest">Отзывы</h3>
@@ -1091,13 +1133,47 @@ export default function ProductDetailPage() {
           </div>
         </div>
 
+        {collectionGroups.length > 0 && (
+          <div className="space-y-10 border-t pt-12">
+            <div className="space-y-2">
+              <h2 className="text-3xl font-black uppercase tracking-tighter">Коллекции</h2>
+              <p className="text-sm text-gray-500">Другие товары, объединённые с этой моделью в одну коллекцию.</p>
+            </div>
+
+            <div className="space-y-10">
+              {collectionGroups.map((group) => (
+                <section key={group.slug || group.name} className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="mt-1 h-3 w-3 shrink-0 border border-black"
+                      style={{ backgroundColor: group.color || "#111111" }}
+                    />
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-bold uppercase tracking-widest">{group.name}</h3>
+                      {group.description && (
+                        <p className="text-sm text-gray-500">{group.description}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                    {group.products.map((groupProduct) => (
+                      <ProductCard key={`${group.name}-${groupProduct._id}`} product={groupProduct} allowQuickAdd={false} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Similar Products */}
         {similarProducts.length > 0 && (
           <div className="space-y-8">
             <h2 className="text-3xl font-black uppercase tracking-tighter">ВАМ МОЖЕТ ПОНРАВИТЬСЯ</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
               {similarProducts.map((p) => (
-                <ProductCard key={p._id} product={p} />
+                <ProductCard key={p._id} product={p} allowQuickAdd={false} />
               ))}
             </div>
           </div>

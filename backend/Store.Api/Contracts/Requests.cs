@@ -92,6 +92,17 @@ public record ContactChangeStartPayload(string Value);
 
 public record ContactChangeConfirmPayload(string Value, string Code);
 
+public record SmtpTestEmailPayload(
+    string ToEmail,
+    bool Enabled,
+    string? Host,
+    string? Port,
+    string? Username,
+    string? Password,
+    string? FromEmail,
+    string? FromName,
+    bool UseSsl);
+
 /// <summary>
 /// Параметры поиска адреса через DaData.
 /// </summary>
@@ -142,6 +153,6 @@ public record TelegramBotPatchPayload(
 
 public record TelegramBotValidatePayload(string Token);
 
-public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter);
+public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
 
-public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter);
+public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);

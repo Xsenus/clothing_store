@@ -12,6 +12,8 @@ public class AdminGalleryController : ControllerBase
 {
     private const long DefaultMaxGalleryFileSizeBytes = 20 * 1024 * 1024;
     private const long GalleryRequestLimitBytes = 25_000_000;
+    private const int DefaultGalleryPageSize = 24;
+    private const int MaxGalleryPageSize = 120;
 
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
@@ -27,15 +29,40 @@ public class AdminGalleryController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IResult> GetAll()
+    public async Task<IResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultGalleryPageSize, [FromQuery] string? search = null)
     {
         if (!await _auth.RequireAdminAsync(Request)) return Results.Unauthorized();
 
-        var images = await _db.GalleryImages
+        var normalizedSearch = search?.Trim();
+        var safePageSize = Math.Clamp(pageSize, 1, MaxGalleryPageSize);
+        var query = _db.GalleryImages.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            var pattern = $"%{normalizedSearch}%";
+            query = query.Where(x =>
+                EF.Functions.ILike(x.Name, pattern)
+                || (x.Description != null && EF.Functions.ILike(x.Description, pattern)));
+        }
+
+        var totalItems = await query.CountAsync();
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)safePageSize));
+        var safePage = Math.Clamp(page, 1, totalPages);
+
+        var images = await query
             .OrderByDescending(x => x.CreatedAt)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
             .ToListAsync();
 
-        return Results.Ok(images.Select(image => MapGalleryImage(image, Request.PathBase)));
+        return Results.Ok(new
+        {
+            items = images.Select(image => MapGalleryImage(image, Request.PathBase)),
+            page = safePage,
+            pageSize = safePageSize,
+            totalItems,
+            totalPages
+        });
     }
 
     [HttpPost]

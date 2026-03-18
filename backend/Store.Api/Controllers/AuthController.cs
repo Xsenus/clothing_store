@@ -21,15 +21,17 @@ public class AuthController : ControllerBase
     private readonly StoreDbContext _db;
     private readonly AuthService _authService;
     private readonly IConfiguration _configuration;
+    private readonly TransactionalEmailService _emailService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AuthController"/>.
     /// </summary>
-    public AuthController(StoreDbContext db, AuthService authService, IConfiguration configuration)
+    public AuthController(StoreDbContext db, AuthService authService, IConfiguration configuration, TransactionalEmailService emailService)
     {
         _db = db;
         _authService = authService;
         _configuration = configuration;
+        _emailService = emailService;
     }
 
     /// <summary>
@@ -148,6 +150,7 @@ public class AuthController : ControllerBase
 
         var email = $"telegram_{payload.Id}@telegram.local";
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+        var isNewTelegramUser = user is null;
 
         if (user is null)
         {
@@ -176,6 +179,9 @@ public class AuthController : ControllerBase
 
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
         await _db.SaveChangesAsync();
+
+        if (isNewTelegramUser)
+            await _emailService.TrySendTelegramConnectedEmailAsync(user.Id, payload.Id, payload.Username);
 
         return Results.Ok(new
         {
@@ -523,7 +529,13 @@ public class AuthController : ControllerBase
         entity.Code = Random.Shared.Next(100000, 999999).ToString();
         entity.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15).ToUnixTimeMilliseconds();
 
-        await TrySendCodeEmailAsync(email, entity.Code, kind);
+        if (string.Equals(kind, "reset", StringComparison.OrdinalIgnoreCase))
+        {
+            await _emailService.TrySendPasswordResetEmailAsync(email, entity.Code, 15);
+            return;
+        }
+
+        await _emailService.TrySendEmailConfirmationEmailAsync(email, entity.Code, 15);
     }
 
     private async Task<bool> IsStrictPasswordPolicyEnabledAsync()

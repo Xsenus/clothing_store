@@ -23,15 +23,17 @@ public class ProfileController : ControllerBase
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
     private readonly IConfiguration _configuration;
+    private readonly TransactionalEmailService _emailService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="ProfileController"/>.
     /// </summary>
-    public ProfileController(StoreDbContext db, AuthService auth, IConfiguration configuration)
+    public ProfileController(StoreDbContext db, AuthService auth, IConfiguration configuration, TransactionalEmailService emailService)
     {
         _db = db;
         _auth = auth;
         _configuration = configuration;
+        _emailService = emailService;
     }
 
     /// <summary>
@@ -130,7 +132,7 @@ public class ProfileController : ControllerBase
         if (activeRequest is null)
             _db.ContactChangeRequests.Add(request);
 
-        await TrySendVerificationEmailAsync(nextEmail, request.Code);
+        await _emailService.TrySendEmailConfirmationEmailAsync(nextEmail, request.Code, VerificationCodeTtlMinutes);
         await _db.SaveChangesAsync();
 
         return Results.Ok(new

@@ -48,6 +48,7 @@ builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminDataSeeder>();
+builder.Services.AddScoped<TransactionalEmailService>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddSingleton<GalleryStorageService>();

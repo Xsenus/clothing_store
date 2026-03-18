@@ -20,16 +20,18 @@ public class OrdersController : ControllerBase
 {
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
+    private readonly TransactionalEmailService _emailService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="OrdersController"/>.
     /// </summary>
-    public OrdersController(StoreDbContext db, AuthService auth)
+    public OrdersController(StoreDbContext db, AuthService auth, TransactionalEmailService emailService)
     {
         _db = db;
         _auth = auth;
+        _emailService = emailService;
     }
 
     /// <summary>
@@ -186,6 +188,7 @@ public class OrdersController : ControllerBase
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
+            await _emailService.TrySendOrderCreatedEmailAsync(order);
             return Results.Ok(new { id = order.Id });
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)

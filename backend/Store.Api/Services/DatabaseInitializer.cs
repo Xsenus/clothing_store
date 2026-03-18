@@ -194,6 +194,7 @@ public class DatabaseInitializer
 
         await SeedCategoriesFromProductsAsync(db, now);
         await SeedSizesFromProductsAsync(db, now);
+        await SeedCollectionsFromProductsAsync(db, now);
 
         await db.SaveChangesAsync();
     }
@@ -201,11 +202,12 @@ public class DatabaseInitializer
     private static async Task SeedCategoriesFromProductsAsync(StoreDbContext db, long createdAt)
     {
         var existingCategories = await db.CategoryDictionaries
-            .Select(x => x.Name)
+            .Select(x => new { x.Name, x.SortOrder })
             .ToListAsync();
         var normalizedExisting = existingCategories
-            .Select(x => x.Trim().ToLowerInvariant())
+            .Select(x => x.Name.Trim().ToLowerInvariant())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextSortOrder = Math.Max(0, existingCategories.Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1;
         var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(db.CategoryDictionaries);
 
         var products = await db.Products
@@ -224,6 +226,7 @@ public class DatabaseInitializer
                 Slug = DictionarySlugService.EnsureUnique(category, occupiedSlugs),
                 IsActive = true,
                 ShowInCatalogFilter = true,
+                SortOrder = nextSortOrder++,
                 CreatedAt = createdAt
             });
             normalizedExisting.Add(normalized);
@@ -233,11 +236,12 @@ public class DatabaseInitializer
     private static async Task SeedSizesFromProductsAsync(StoreDbContext db, long createdAt)
     {
         var existingSizes = await db.SizeDictionaries
-            .Select(x => x.Name)
+            .Select(x => new { x.Name, x.SortOrder })
             .ToListAsync();
         var normalizedExisting = existingSizes
-            .Select(x => x.Trim().ToLowerInvariant())
+            .Select(x => x.Name.Trim().ToLowerInvariant())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextSortOrder = Math.Max(0, existingSizes.Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1;
         var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(db.SizeDictionaries);
 
         var products = await db.Products
@@ -275,6 +279,61 @@ public class DatabaseInitializer
                     Slug = DictionarySlugService.EnsureUnique(sizeName, occupiedSlugs),
                     IsActive = true,
                     ShowInCatalogFilter = true,
+                    SortOrder = nextSortOrder++,
+                    CreatedAt = createdAt
+                });
+                normalizedExisting.Add(normalized);
+            }
+        }
+    }
+
+    private static async Task SeedCollectionsFromProductsAsync(StoreDbContext db, long createdAt)
+    {
+        var existingCollections = await db.CollectionDictionaries
+            .Select(x => new { x.Name, x.SortOrder })
+            .ToListAsync();
+        var normalizedExisting = existingCollections
+            .Select(x => x.Name.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextSortOrder = Math.Max(0, existingCollections.Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1;
+        var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(db.CollectionDictionaries);
+
+        var products = await db.Products
+            .Select(x => x.Data)
+            .ToListAsync();
+
+        foreach (var data in products)
+        {
+            JsonArray? collections;
+            try
+            {
+                collections = JsonNode.Parse(data)?["collections"] as JsonArray;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (collections is null)
+                continue;
+
+            foreach (var collectionNode in collections)
+            {
+                var collectionName = collectionNode?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(collectionName))
+                    continue;
+
+                var normalized = collectionName.ToLowerInvariant();
+                if (normalizedExisting.Contains(normalized))
+                    continue;
+
+                db.CollectionDictionaries.Add(new CollectionDictionary
+                {
+                    Name = collectionName,
+                    Slug = DictionarySlugService.EnsureUnique(collectionName, occupiedSlugs),
+                    IsActive = true,
+                    ShowInCatalogFilter = false,
+                    SortOrder = nextSortOrder++,
                     CreatedAt = createdAt
                 });
                 normalizedExisting.Add(normalized);
@@ -318,8 +377,15 @@ public class DatabaseInitializer
 
     private static async Task SeedDictionaryAsync<T>(DbSet<T> set, IEnumerable<string> values, long createdAt) where T : class
     {
-        var existing = await set.AsQueryable().Select(x => EF.Property<string>(x, "Name")).ToListAsync();
-        var normalized = existing.Select(x => x.Trim().ToLowerInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existing = await set.AsQueryable()
+            .Select(x => new
+            {
+                Name = EF.Property<string>(x, "Name"),
+                SortOrder = EF.Property<int>(x, "SortOrder")
+            })
+            .ToListAsync();
+        var normalized = existing.Select(x => x.Name.Trim().ToLowerInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextSortOrder = Math.Max(0, existing.Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1;
         var occupiedSlugs = await LoadOccupiedDictionarySlugsAsync(set);
         foreach (var value in values)
         {
@@ -336,6 +402,7 @@ public class DatabaseInitializer
             typeof(T).GetProperty("Name")?.SetValue(item, name);
             typeof(T).GetProperty("Slug")?.SetValue(item, DictionarySlugService.EnsureUnique(name, occupiedSlugs));
             typeof(T).GetProperty("ShowInCatalogFilter")?.SetValue(item, true);
+            typeof(T).GetProperty("SortOrder")?.SetValue(item, nextSortOrder++);
             typeof(T).GetProperty("CreatedAt")?.SetValue(item, createdAt);
             set.Add(item);
             normalized.Add(name.ToLowerInvariant());
@@ -593,6 +660,47 @@ public class DatabaseInitializer
 
         await EnsureAppSettingExistsAsync(db, "catalog_filter_categories_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "catalog_filter_sizes_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_materials_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_colors_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_collections_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_categories_show_color", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_sizes_show_color", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_materials_show_color", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_colors_show_color", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_collections_show_color", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_categories_order", "10");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_sizes_order", "20");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_materials_order", "30");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_colors_order", "40");
+        await EnsureAppSettingExistsAsync(db, "catalog_filter_collections_order", "50");
+        await EnsureAppSettingExistsAsync(db, "smtp_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "smtp_host", "");
+        await EnsureAppSettingExistsAsync(db, "smtp_port", "587");
+        await EnsureAppSettingExistsAsync(db, "smtp_username", "");
+        await EnsureAppSettingExistsAsync(db, "smtp_password", "");
+        await EnsureAppSettingExistsAsync(db, "smtp_from_email", "");
+        await EnsureAppSettingExistsAsync(db, "smtp_from_name", "Fashion Demon");
+        await EnsureAppSettingExistsAsync(db, "smtp_use_ssl", "true");
+        foreach (var (key, value) in EmailTemplateCatalog.BuildDefaultSettings())
+        {
+            await EnsureAppSettingExistsAsync(db, key, value);
+        }
+        await EnsureAppSettingExistsAsync(db, "image_upload_gallery_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "image_upload_gallery_max_width", "2560");
+        await EnsureAppSettingExistsAsync(db, "image_upload_gallery_max_height", "2560");
+        await EnsureAppSettingExistsAsync(db, "image_upload_gallery_quality", "92");
+        await EnsureAppSettingExistsAsync(db, "image_upload_product_media_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "image_upload_product_media_max_width", "2560");
+        await EnsureAppSettingExistsAsync(db, "image_upload_product_media_max_height", "2560");
+        await EnsureAppSettingExistsAsync(db, "image_upload_product_media_quality", "92");
+        await EnsureAppSettingExistsAsync(db, "image_upload_review_media_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "image_upload_review_media_max_width", "2000");
+        await EnsureAppSettingExistsAsync(db, "image_upload_review_media_max_height", "2000");
+        await EnsureAppSettingExistsAsync(db, "image_upload_review_media_quality", "90");
+        await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_width", "1600");
+        await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_height", "1600");
+        await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_quality", "92");
 
         await db.SaveChangesAsync();
     }

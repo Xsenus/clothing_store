@@ -30,7 +30,23 @@ public class PublicSettingsController : ControllerBase
         "product_detail_background_mode",
         "product_detail_background_color",
         "product_detail_image_fit_mode",
-        "product_detail_media_size_mode"
+        "product_detail_media_size_mode",
+        "image_upload_gallery_enabled",
+        "image_upload_gallery_max_width",
+        "image_upload_gallery_max_height",
+        "image_upload_gallery_quality",
+        "image_upload_product_media_enabled",
+        "image_upload_product_media_max_width",
+        "image_upload_product_media_max_height",
+        "image_upload_product_media_quality",
+        "image_upload_review_media_enabled",
+        "image_upload_review_media_max_width",
+        "image_upload_review_media_max_height",
+        "image_upload_review_media_quality",
+        "image_upload_telegram_bot_enabled",
+        "image_upload_telegram_bot_max_width",
+        "image_upload_telegram_bot_max_height",
+        "image_upload_telegram_bot_quality"
     ];
 
     private readonly StoreDbContext _db;
