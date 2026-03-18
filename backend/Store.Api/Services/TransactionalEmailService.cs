@@ -3,10 +3,13 @@ using System.Net;
 using System.Net.Mail;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using MailKit.Security;
 using Microsoft.EntityFrameworkCore;
+using MimeKit;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
+using MailKitSmtpClient = MailKit.Net.Smtp.SmtpClient;
 
 namespace Store.Api.Services;
 
@@ -106,6 +109,10 @@ public static class EmailTemplateCatalog
 public class TransactionalEmailService
 {
     private static readonly Regex TemplateVariableRegex = new(@"\{\{\s*(?<key>[a-zA-Z0-9_]+)\s*\}\}", RegexOptions.Compiled);
+    private const string SmtpSecurityModeAuto = "auto";
+    private const string SmtpSecurityModeNone = "none";
+    private const string SmtpSecurityModeStartTls = "starttls";
+    private const string SmtpSecurityModeSslOnConnect = "ssl_on_connect";
 
     private static readonly IReadOnlyDictionary<string, string> OrderStatusLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -150,6 +157,7 @@ public class TransactionalEmailService
         string FromEmail,
         string FromName,
         bool UseSsl,
+        string SecurityMode,
         string SiteTitle);
 
     private sealed record ParsedOrderItem(string ProductId, string Size, int Quantity);
@@ -359,6 +367,7 @@ public class TransactionalEmailService
             "smtp_password",
             "smtp_from_email",
             "smtp_from_name",
+            "smtp_security_mode",
             "smtp_use_ssl",
             "site_title"
         };
@@ -377,6 +386,10 @@ public class TransactionalEmailService
         var fromEmail = NormalizeEmail(map.GetValueOrDefault("smtp_from_email") ?? _configuration["Email:FromEmail"]);
         var fromName = (map.GetValueOrDefault("smtp_from_name") ?? _configuration["Email:FromName"] ?? "Fashion Demon").Trim();
         var useSsl = ParseBoolean(map.GetValueOrDefault("smtp_use_ssl") ?? _configuration["Email:SmtpUseSsl"], true);
+        var securityMode = NormalizeSmtpSecurityMode(
+            map.GetValueOrDefault("smtp_security_mode") ?? _configuration["Email:SmtpSecurityMode"],
+            portRaw,
+            useSsl);
         var siteTitle = (map.GetValueOrDefault("site_title") ?? "fashiondemon").Trim();
         var port = int.TryParse(portRaw, out var parsedPort) && parsedPort > 0 ? parsedPort : 587;
 
@@ -389,6 +402,7 @@ public class TransactionalEmailService
             fromEmail,
             string.IsNullOrWhiteSpace(fromName) ? "Fashion Demon" : fromName,
             useSsl,
+            securityMode,
             string.IsNullOrWhiteSpace(siteTitle) ? "fashiondemon" : siteTitle);
     }
 
@@ -407,6 +421,7 @@ public class TransactionalEmailService
             fromEmail,
             string.IsNullOrWhiteSpace(fromName) ? "Fashion Demon" : fromName,
             payload.UseSsl,
+            NormalizeSmtpSecurityMode(payload.SecurityMode, payload.Port, payload.UseSsl),
             "fashiondemon");
     }
 
@@ -519,6 +534,25 @@ public class TransactionalEmailService
 
         try
         {
+            var mailMessage = new MimeMessage();
+            mailMessage.From.Add(new MailboxAddress(smtp.FromName, smtp.FromEmail));
+            mailMessage.To.Add(MailboxAddress.Parse(recipientEmail));
+            mailMessage.Subject = string.IsNullOrWhiteSpace(subject) ? "Уведомление" : subject.Trim();
+            mailMessage.Body = new TextPart("plain")
+            {
+                Text = string.IsNullOrWhiteSpace(body) ? "Письмо без текста." : body
+            };
+
+            using var mailClient = new MailKitSmtpClient();
+            await mailClient.ConnectAsync(smtp.Host, smtp.Port, MapSecureSocketOptions(smtp.SecurityMode), cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(smtp.Username))
+                await mailClient.AuthenticateAsync(smtp.Username, smtp.Password, cancellationToken);
+
+            await mailClient.SendAsync(mailMessage, cancellationToken);
+            await mailClient.DisconnectAsync(true, cancellationToken);
+            return new EmailSendResult(true, "Email sent");
+#if false
             using var message = new MailMessage
             {
                 From = new MailAddress(smtp.FromEmail, smtp.FromName),
@@ -540,14 +574,16 @@ public class TransactionalEmailService
 
             await client.SendMailAsync(message, cancellationToken);
             return new EmailSendResult(true, "Email sent");
+#endif
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SMTP send failed for {Recipient}", recipientEmail);
+            var detail = BuildSmtpFailureMessage(ex, smtp);
             if (!swallowFailures)
-                return new EmailSendResult(false, ex.Message);
+                return new EmailSendResult(false, detail);
 
-            return new EmailSendResult(false, ex.Message);
+            return new EmailSendResult(false, detail);
         }
     }
 
@@ -654,6 +690,65 @@ public class TransactionalEmailService
             "false" or "0" or "off" or "no" => false,
             _ => fallback
         };
+    }
+
+    private static string NormalizeSmtpSecurityMode(string? rawValue, string? rawPort, bool useSslFallback)
+    {
+        var normalized = NormalizeKey(rawValue);
+        if (normalized is SmtpSecurityModeAuto or SmtpSecurityModeNone or SmtpSecurityModeStartTls or SmtpSecurityModeSslOnConnect)
+            return normalized;
+
+        if (!useSslFallback)
+            return SmtpSecurityModeNone;
+
+        var port = int.TryParse(rawPort?.Trim(), out var parsedPort) ? parsedPort : 0;
+        return port == 465 ? SmtpSecurityModeSslOnConnect : SmtpSecurityModeStartTls;
+    }
+
+    private static SecureSocketOptions MapSecureSocketOptions(string securityMode)
+        => NormalizeKey(securityMode) switch
+        {
+            SmtpSecurityModeNone => SecureSocketOptions.None,
+            SmtpSecurityModeStartTls => SecureSocketOptions.StartTls,
+            SmtpSecurityModeSslOnConnect => SecureSocketOptions.SslOnConnect,
+            _ => SecureSocketOptions.Auto
+        };
+
+    private static string DescribeSecurityMode(string securityMode)
+        => NormalizeKey(securityMode) switch
+        {
+            SmtpSecurityModeNone => "без шифрования",
+            SmtpSecurityModeStartTls => "STARTTLS",
+            SmtpSecurityModeSslOnConnect => "SSL/TLS при подключении",
+            _ => "авто"
+        };
+
+    private static string BuildSmtpFailureMessage(Exception exception, SmtpConfiguration smtp)
+    {
+        var baseMessage = exception.Message?.Trim();
+        var selectedMode = DescribeSecurityMode(smtp.SecurityMode);
+
+        if (exception is MailKit.Net.Smtp.SmtpCommandException
+            or MailKit.ProtocolException
+            or SslHandshakeException
+            || (!string.IsNullOrWhiteSpace(baseMessage)
+                && baseMessage.Contains("command unrecognized", StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"Не удалось установить SMTP-соединение. Похоже, не подходит режим защиты для {smtp.Host}:{smtp.Port}. " +
+                   $"Сейчас выбрано: {selectedMode}. Для 587 обычно нужен STARTTLS, для 465 - SSL/TLS при подключении.";
+        }
+
+        if (exception is System.Security.Authentication.AuthenticationException
+            || (!string.IsNullOrWhiteSpace(baseMessage)
+            && (baseMessage.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+                || baseMessage.Contains("auth", StringComparison.OrdinalIgnoreCase))))
+        {
+            return $"SMTP ответил ошибкой авторизации. Проверьте логин, пароль и режим защиты для {smtp.Host}:{smtp.Port}.";
+        }
+
+        return string.IsNullOrWhiteSpace(baseMessage)
+            ? "Не удалось отправить письмо через SMTP."
+            : baseMessage;
     }
 
     private static string NormalizeEmail(string? email)

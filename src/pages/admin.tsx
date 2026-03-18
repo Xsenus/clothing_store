@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
 import { type ChangeEvent, type DragEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -606,6 +607,31 @@ interface EmailTemplateDefinition {
   defaultBody: string;
 }
 
+type SmtpSecurityMode = "auto" | "none" | "starttls" | "ssl_on_connect";
+
+const SMTP_SECURITY_MODE_OPTIONS: Array<{ value: SmtpSecurityMode; label: string; description: string }> = [
+  { value: "auto", label: "Авто", description: "Пробует подобрать режим по порту и ответу сервера." },
+  { value: "starttls", label: "STARTTLS", description: "Обычно используется на порту 587." },
+  { value: "ssl_on_connect", label: "SSL/TLS при подключении", description: "Обычно используется на порту 465." },
+  { value: "none", label: "Без шифрования", description: "Только если ваш SMTP-сервер принимает обычное соединение." },
+];
+
+const normalizeSmtpSecurityMode = (value: string | undefined, port: string | undefined, useSslFallback: boolean): SmtpSecurityMode => {
+  switch ((value || "").trim().toLowerCase()) {
+    case "auto":
+    case "none":
+    case "starttls":
+    case "ssl_on_connect":
+      return (value || "").trim().toLowerCase() as SmtpSecurityMode;
+    default:
+      if (!useSslFallback) {
+        return "none";
+      }
+
+      return (port || "").trim() === "465" ? "ssl_on_connect" : "starttls";
+  }
+};
+
 const EMAIL_TEMPLATE_DEFINITIONS: EmailTemplateDefinition[] = [
   {
     key: "password_reset",
@@ -857,6 +883,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   smtp_password: "",
   smtp_from_email: "",
   smtp_from_name: "Fashion Demon",
+  smtp_security_mode: "auto",
   smtp_use_ssl: "true",
   ...EMAIL_TEMPLATE_SETTING_DEFAULTS,
   metrics_yandex_metrika_enabled: "false",
@@ -1768,6 +1795,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  const getSmtpSecurityMode = (): SmtpSecurityMode => (
+    normalizeSmtpSecurityMode(
+      settings["smtp_security_mode"],
+      settings["smtp_port"],
+      isSettingEnabled("smtp_use_ssl", true))
+  );
+
+  const updateSmtpSecurityMode = (mode: SmtpSecurityMode) => {
+    updateSetting("smtp_security_mode", mode);
+    updateSetting("smtp_use_ssl", mode === "none" ? "false" : "true");
+  };
+
   const sendSmtpTestEmail = async () => {
     const recipient = smtpTestEmail.trim();
     if (!recipient) {
@@ -1777,6 +1816,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
     setSmtpTestSending(true);
     try {
+      const securityMode = getSmtpSecurityMode();
+
       await FLOW.adminSendSmtpTestEmail({
         input: {
           toEmail: recipient,
@@ -1787,7 +1828,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           password: settings["smtp_password"] || "",
           fromEmail: settings["smtp_from_email"] || "",
           fromName: settings["smtp_from_name"] || "Fashion Demon",
-          useSsl: isSettingEnabled("smtp_use_ssl", true),
+          useSsl: securityMode !== "none",
+          securityMode,
         }
       });
       toast.success(`Тестовое письмо отправлено на ${recipient}`);
@@ -5498,6 +5540,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           SMTP уже используется для системных писем. Здесь можно проверить соединение тестовым письмом и настроить шаблоны уведомлений.
                         </p>
                       </div>
+                      <div className="grid gap-2 md:max-w-xl">
+                        <Label htmlFor="smtp-security-mode">Режим защиты SMTP</Label>
+                        <Select value={getSmtpSecurityMode()} onValueChange={(value) => updateSmtpSecurityMode(value as SmtpSecurityMode)}>
+                          <SelectTrigger id="smtp-security-mode" className="h-11 rounded-none">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SMTP_SECURITY_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Для `587` обычно подходит `STARTTLS`, для `465` - `SSL/TLS при подключении`.
+                        </p>
+                      </div>
                       <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-enabled"
@@ -5532,7 +5592,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input id="smtp-from-name" value={settings["smtp_from_name"] || "Fashion Demon"} onChange={(e) => updateSetting("smtp_from_name", e.target.value)} />
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                      <div className="hidden flex flex-wrap items-center justify-start gap-2 xl:justify-end">
                         <Checkbox
                           id="smtp-use-ssl"
                           checked={isSettingEnabled("smtp_use_ssl", true)}

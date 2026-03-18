@@ -680,6 +680,7 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "smtp_password", "");
         await EnsureAppSettingExistsAsync(db, "smtp_from_email", "");
         await EnsureAppSettingExistsAsync(db, "smtp_from_name", "Fashion Demon");
+        await EnsureAppSettingExistsAsync(db, "smtp_security_mode", "auto");
         await EnsureAppSettingExistsAsync(db, "smtp_use_ssl", "true");
         foreach (var (key, value) in EmailTemplateCatalog.BuildDefaultSettings())
         {

@@ -101,7 +101,8 @@ public record SmtpTestEmailPayload(
     string? Password,
     string? FromEmail,
     string? FromName,
-    bool UseSsl);
+    bool UseSsl,
+    string? SecurityMode);
 
 /// <summary>
 /// Параметры поиска адреса через DaData.
