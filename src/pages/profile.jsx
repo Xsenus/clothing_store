@@ -11,8 +11,9 @@ import { Authenticated, useAuthActions } from "@/context/AuthContext";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { toast } from "sonner";
 import AdminPage from "./admin";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
+import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
 
 const normalizePhone = (value) => {
   const clean = String(value || "").trim();
@@ -21,6 +22,70 @@ const normalizePhone = (value) => {
   let normalized = chars.join("");
   if (normalized && !normalized.startsWith("+")) normalized = `+${normalized}`;
   return normalized;
+};
+
+const createProfileAddressId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `addr_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const normalizeDraftProfileAddresses = (addresses) => {
+  const draftAddresses = Array.isArray(addresses)
+    ? addresses.map((address) => ({
+        id: String(address?.id || createProfileAddressId()),
+        value: String(address?.value || ""),
+        isDefault: !!address?.isDefault,
+      }))
+    : [];
+
+  if (draftAddresses.length === 0) {
+    return [];
+  }
+
+  let defaultIndex = draftAddresses.findIndex((address) => address.isDefault);
+  if (defaultIndex < 0) {
+    defaultIndex = 0;
+  }
+
+  return draftAddresses.map((address, index) => ({
+    ...address,
+    isDefault: index === defaultIndex,
+  }));
+};
+
+const sanitizeProfileAddresses = (addresses, fallbackAddress = "") => {
+  const sanitized = normalizeDraftProfileAddresses(addresses)
+    .map((address) => ({
+      ...address,
+      value: String(address.value || "").trim(),
+    }))
+    .filter((address) => address.value);
+
+  if (sanitized.length === 0) {
+    const fallback = String(fallbackAddress || "").trim();
+    if (fallback) {
+      return [{ id: createProfileAddressId(), value: fallback, isDefault: true }];
+    }
+    return [];
+  }
+
+  let defaultIndex = sanitized.findIndex((address) => address.isDefault);
+  if (defaultIndex < 0) {
+    defaultIndex = 0;
+  }
+
+  return sanitized.map((address, index) => ({
+    ...address,
+    isDefault: index === defaultIndex,
+  }));
+};
+
+const getDefaultProfileAddressValue = (addresses, fallbackAddress = "") => {
+  const sanitized = sanitizeProfileAddresses(addresses, fallbackAddress);
+  return sanitized.find((address) => address.isDefault)?.value || sanitized[0]?.value || "";
 };
 
 const ORDER_STATUS_LABELS = {
@@ -57,11 +122,47 @@ const formatOrderDate = (raw) => {
   return new Date(normalized).toLocaleDateString();
 };
 
+const formatRubles = (raw) => {
+  const value = Number(raw || 0);
+  if (!Number.isFinite(value)) return "вЂ”";
+  return `${new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)} ₽`;
+};
+
+const formatOrderDisplayNumber = (order) => {
+  const explicitDisplayNumber = String(order?.displayOrderNumber || "").trim();
+  if (explicitDisplayNumber) return explicitDisplayNumber;
+
+  const numericOrderNumber = Number(order?.orderNumber || 0);
+  if (Number.isFinite(numericOrderNumber) && numericOrderNumber > 0) {
+    return String(Math.trunc(numericOrderNumber)).padStart(7, "0");
+  }
+
+  return order?.id || "вЂ”";
+};
+
+const normalizeProfileTab = (value, allowAdmin = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "wishlist" || normalized === "settings" || normalized === "orders") {
+    return normalized;
+  }
+
+  if (allowAdmin && normalized === "admin") {
+    return "admin";
+  }
+
+  return "orders";
+};
+
 export default function ProfilePage() {
-  const [activeTab, setActiveTab] = useState("orders");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => normalizeProfileTab(searchParams.get("tab")));
   const [loading, setLoading] = useState(true);
   const { signOut } = useAuthActions();
   const navigate = useNavigate();
+  const confirmAction = useConfirmDialog();
 
   const [orders, setOrders] = useState([]);
   const [likedProductIds, setLikedProductIds] = useState([]);
@@ -75,6 +176,13 @@ export default function ProfilePage() {
   const [emailCodeRequested, setEmailCodeRequested] = useState(false);
   const [phoneVerifyState, setPhoneVerifyState] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    const nextTab = normalizeProfileTab(searchParams.get("tab"), isAdmin);
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, isAdmin, searchParams]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -98,7 +206,12 @@ export default function ProfilePage() {
         if (Array.isArray(likesRes)) setLikedProductIds(likesRes.map((like) => like.productId));
         if (Array.isArray(productsRes)) setProducts(productsRes);
         if (profileRes) {
-          setProfile(profileRes);
+          const shippingAddresses = sanitizeProfileAddresses(profileRes.shippingAddresses, profileRes.shippingAddress);
+          setProfile({
+            ...profileRes,
+            shippingAddresses,
+            shippingAddress: getDefaultProfileAddressValue(shippingAddresses, profileRes.shippingAddress),
+          });
           setEmailDraft(profileRes.email || "");
           setPhoneDraft(profileRes.phone || "");
           setIsAdmin(!!profileRes.isAdmin);
@@ -178,12 +291,16 @@ export default function ProfilePage() {
       return;
     }
 
+    const normalizedShippingAddresses = sanitizeProfileAddresses(profile.shippingAddresses, profile.shippingAddress);
+    const defaultShippingAddress = getDefaultProfileAddressValue(normalizedShippingAddresses, profile.shippingAddress);
+
     try {
       await FLOW.updateProfile({
         input: {
           name: profile.name,
           phone: normalizePhone(phoneDraft),
-          shippingAddress: profile.shippingAddress,
+          shippingAddress: defaultShippingAddress,
+          shippingAddresses: normalizedShippingAddresses,
           nickname: profile.nickname,
           email: String(emailDraft || "").trim(),
         },
@@ -193,6 +310,8 @@ export default function ProfilePage() {
         ...(prev || {}),
         email: String(emailDraft || "").trim(),
         phone: normalizePhone(phoneDraft),
+        shippingAddress: defaultShippingAddress,
+        shippingAddresses: normalizedShippingAddresses,
       }));
       toast.success("Профиль обновлен");
     } catch (error) {
@@ -262,9 +381,97 @@ export default function ProfilePage() {
     }
   };
 
+  const updateProfileShippingAddresses = (updater) => {
+    setProfile((prev) => {
+      if (!prev) return prev;
+
+      const nextAddresses = normalizeDraftProfileAddresses(
+        typeof updater === "function" ? updater(prev.shippingAddresses || []) : updater
+      );
+
+      return {
+        ...prev,
+        shippingAddresses: nextAddresses,
+        shippingAddress: getDefaultProfileAddressValue(nextAddresses, prev.shippingAddress),
+      };
+    });
+  };
+
+  const handleAddShippingAddress = () => {
+    updateProfileShippingAddresses((currentAddresses) => ([
+      ...currentAddresses,
+      {
+        id: createProfileAddressId(),
+        value: "",
+        isDefault: currentAddresses.length === 0,
+      },
+    ]));
+  };
+
+  const handleShippingAddressChange = (addressId, value) => {
+    updateProfileShippingAddresses((currentAddresses) => currentAddresses.map((address) => (
+      address.id === addressId ? { ...address, value } : address
+    )));
+  };
+
+  const handleSetDefaultShippingAddress = async (addressId) => {
+    const address = (profile?.shippingAddresses || []).find((item) => item.id === addressId);
+    if (!address || address.isDefault) return;
+
+    const confirmed = await confirmAction({
+      title: "Сделать адрес основным?",
+      description: "Этот адрес будет подставляться по умолчанию при оформлении заказа.",
+      confirmText: "Сделать основным",
+    });
+    if (!confirmed) return;
+
+    updateProfileShippingAddresses((currentAddresses) => currentAddresses.map((item) => ({
+      ...item,
+      isDefault: item.id === addressId,
+    })));
+  };
+
+  const handleRemoveShippingAddress = async (addressId) => {
+    const addresses = profile?.shippingAddresses || [];
+    const address = addresses.find((item) => item.id === addressId);
+    if (!address) return;
+
+    const confirmed = await confirmAction({
+      title: "Удалить адрес?",
+      description: address.isDefault
+        ? "Адрес будет удалён. Другой сохранённый адрес станет адресом по умолчанию."
+        : "Адрес будет удалён из вашего профиля.",
+      confirmText: "Удалить",
+    });
+    if (!confirmed) return;
+
+    updateProfileShippingAddresses((currentAddresses) => currentAddresses.filter((item) => item.id !== addressId));
+  };
+
   const handleLogout = async () => {
+    const confirmed = await confirmAction({
+      title: "Выйти из аккаунта?",
+      description: "Текущая сессия будет завершена на этом устройстве.",
+      confirmText: "Выйти",
+    });
+    if (!confirmed) return;
+
     await signOut();
-    window.location.href = "/";
+    navigate("/", { replace: true });
+  };
+
+  const handleTabChange = (nextTab) => {
+    const normalized = normalizeProfileTab(nextTab, isAdmin);
+    setActiveTab(normalized);
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (normalized === "orders") {
+        params.delete("tab");
+      } else {
+        params.set("tab", normalized);
+      }
+      return params;
+    }, { replace: true });
   };
 
   const likedProducts = products.filter((product) => likedProductIds.includes(product._id));
@@ -295,7 +502,7 @@ export default function ProfilePage() {
         <main className="flex-1 container mx-auto px-4 py-12">
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter mb-8">МОЙ АККАУНТ</h1>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
               <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="wishlist" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">ИЗБРАННОЕ</TabsTrigger>
@@ -310,33 +517,94 @@ export default function ProfilePage() {
                   <p className="text-gray-500">Начните покупки, чтобы увидеть свои заказы.</p>
                 </div>
               ) : (
-                <div className="space-y-6">
-                  {orders.map((order) => (
-                    <div key={order.id} className="border border-gray-200 p-6 bg-white hover:shadow-lg transition-shadow">
-                      <div className="flex justify-between items-start mb-4">
-                        <div><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">НОМЕР ЗАКАЗА</p><p className="font-mono font-bold text-sm">{order.id}</p></div>
-                        <div className="text-right"><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">ДАТА</p><p className="font-bold text-sm">{formatOrderDate(order.createdAt)}</p></div>
+                <div className="space-y-4">
+                  {orders.map((order) => {
+                    const orderItems = parseJsonArray(order.items);
+
+                    return (
+                      <div key={order.id} className="border border-gray-200 bg-white px-5 py-4 transition-shadow hover:shadow-md">
+                        <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_260px] xl:items-start">
+                          <div className="space-y-4 xl:border-r xl:border-gray-100 xl:pr-5">
+                            <div className="grid grid-cols-2 gap-4 xl:grid-cols-1">
+                              <div>
+                                <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Номер заказа</p>
+                                <p className="font-mono text-lg font-bold leading-none">{formatOrderDisplayNumber(order)}</p>
+                              </div>
+                              <div className="text-right xl:text-left">
+                                <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Дата</p>
+                                <p className="text-sm font-bold">{formatOrderDate(order.createdAt)}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex rounded-full bg-black px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-white">
+                                {ORDER_STATUS_LABELS[order.status] || order.status || "В обработке"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-400">Товары</p>
+                            </div>
+
+                            {orderItems.length === 0 ? (
+                              <div className="border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
+                                Состав заказа недоступен.
+                              </div>
+                            ) : (
+                              <div className="flex gap-3 overflow-x-auto overscroll-x-contain pb-1 pr-1">
+                                {orderItems.map((item, idx) => {
+                                  const quantity = Math.max(1, Number(item.quantity || 1));
+                                  const unitPrice = Number(item.unitPrice || 0);
+                                  const lineTotal = Number(item.lineTotal || unitPrice * quantity);
+
+                                  return (
+                                    <div key={`${order.id}-${idx}`} className="flex min-w-[250px] max-w-[280px] items-center gap-3 border border-gray-200 p-3">
+                                      <div className="h-20 w-20 shrink-0 overflow-hidden bg-gray-100">
+                                        {item.productImageUrl ? (
+                                          <img src={item.productImageUrl} alt={item.productName || "Товар"} className="h-full w-full object-cover" />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center bg-gray-900 px-2 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
+                                            Fashion
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate text-sm font-semibold leading-tight">{item.productName || item.productId || "Товар"}</div>
+                                        <div className="mt-1 text-xs text-gray-500">{item.size ? `Размер: ${item.size}` : "Размер: —"}</div>
+                                        <div className="mt-3 text-sm font-bold">{formatRubles(lineTotal)}</div>
+                                        <div className="text-xs text-gray-500">{formatRubles(unitPrice)} × {quantity}</div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-4 border-t border-gray-100 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+                            <div className="text-left xl:text-right">
+                              <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Итого</p>
+                              <p className="text-2xl font-black leading-none">{formatRubles(order.totalAmount)}</p>
+                            </div>
+
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Оплата</p>
+                                <p className="font-medium">{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Адрес</p>
+                                <p className="break-words text-gray-700">{order.shippingAddress || "—"}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-end border-t border-gray-100 pt-4">
-                        <div><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">СТАТУС</p><span className="inline-block px-3 py-1 bg-black text-white text-xs font-bold uppercase tracking-widest rounded-full">{ORDER_STATUS_LABELS[order.status] || order.status || "В обработке"}</span></div>
-                        <div className="text-right"><p className="text-xs text-gray-400 uppercase tracking-widest mb-1">ИТОГО</p><p className="text-2xl font-black">${Number(order.totalAmount).toFixed(2)}</p></div>
-                      </div>
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm border-t border-gray-100 pt-4">
-                        <p><span className="font-semibold">Способ оплаты:</span> {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—"}</p>
-                        <p><span className="font-semibold">Адрес доставки:</span> {order.shippingAddress || "—"}</p>
-                      </div>
-                      <div className="mt-3 text-sm">
-                        <p className="font-semibold mb-1">Товары:</p>
-                        <ul className="list-disc pl-5 space-y-1">
-                          {parseJsonArray(order.items).map((item, idx) => (
-                            <li key={`${order.id}-${idx}`}>
-                              {item.productName || item.productId || "Товар"} {item.size ? `(размер ${item.size})` : ""} × {Number(item.quantity || 1)}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </TabsContent>
@@ -355,61 +623,123 @@ export default function ProfilePage() {
             </TabsContent>
 
             <TabsContent value="settings" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="max-w-xl">
-                <form onSubmit={handleUpdateProfile} className="space-y-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="profile-name">Полное имя</Label>
-                    <Input id="profile-name" value={profile?.name || ""} onChange={(e) => setProfile({ ...profile, name: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
-                  </div>
+              <div className="w-full max-w-none">
+                <form onSubmit={handleUpdateProfile} className="space-y-8">
+                  <div className="profile-settings-layout">
+                    <div className="profile-settings-main">
+                      <div className="profile-settings-main-panel space-y-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="profile-name">Полное имя</Label>
+                          <Input id="profile-name" value={profile?.name || ""} onChange={(e) => setProfile({ ...profile, name: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
+                        </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="profile-nickname">Ник</Label>
-                    <Input id="profile-nickname" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
-                  </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="profile-nickname">Ник</Label>
+                          <Input id="profile-nickname" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
+                        </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor="profile-email">Email</Label>
-                      {!(!emailChanged && profile?.emailVerified) && (
-                        <Button type="button" variant="outline" className="h-8 rounded-none" onClick={handleStartEmailVerification} disabled={actionLoading}>Подтвердить email</Button>
-                      )}
-                    </div>
-                    <Input id="profile-email" value={emailDraft} onChange={(e) => {
-                      setEmailDraft(e.target.value);
-                      setProfile((prev) => ({ ...(prev || {}), emailVerified: false }));
-                    }} className="rounded-none border-black focus-visible:ring-black" placeholder="example@mail.com" />
-                    {profile?.emailVerified && !emailChanged && <p className="text-xs text-emerald-600">Email подтвержден</p>}
-                    {emailCodeRequested && (
-                      <div className="flex gap-2">
-                        <Input value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="Код из письма" className="rounded-none border-black" />
-                        <Button type="button" className="rounded-none" onClick={handleConfirmEmailVerification} disabled={actionLoading}>Подтвердить</Button>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label htmlFor="profile-email">Email</Label>
+                            {!(!emailChanged && profile?.emailVerified) && (
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartEmailVerification} disabled={actionLoading}>Подтвердить email</Button>
+                            )}
+                          </div>
+                          <Input id="profile-email" value={emailDraft} onChange={(e) => {
+                            setEmailDraft(e.target.value);
+                            setProfile((prev) => ({ ...(prev || {}), emailVerified: false }));
+                          }} className="rounded-none border-black focus-visible:ring-black" placeholder="example@mail.com" />
+                          {profile?.emailVerified && !emailChanged && <p className="text-xs text-emerald-600">Email подтвержден</p>}
+                          {emailCodeRequested && (
+                            <div className="flex gap-2">
+                              <Input value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="Код из письма" className="rounded-none border-black" />
+                              <Button type="button" className="h-10 rounded-none" onClick={handleConfirmEmailVerification} disabled={actionLoading}>Подтвердить</Button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label htmlFor="profile-phone">Телефон</Label>
+                            {!(!phoneChanged && profile?.phoneVerified) && (
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerifyState}>Подтвердить в Telegram</Button>
+                            )}
+                          </div>
+                          <Input id="profile-phone" value={phoneDraft} onChange={(e) => {
+                            setPhoneDraft(e.target.value);
+                            setProfile((prev) => ({ ...(prev || {}), phoneVerified: false }));
+                          }} className="rounded-none border-black focus-visible:ring-black" />
+                          {profile?.phoneVerified && !phoneChanged && <p className="text-xs text-emerald-600">Телефон подтвержден</p>}
+                          {!!phoneVerifyState && <p className="text-xs text-muted-foreground">Ожидаем подтверждение номера в Telegram…</p>}
+                        </div>
+
+                        <div className="flex flex-col gap-3 pt-2 md:flex-row">
+                          <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest px-8 py-6 md:flex-1">СОХРАНИТЬ ИЗМЕНЕНИЯ</Button>
+                          <Button type="button" variant="outline" className="rounded-none font-bold uppercase tracking-widest px-8 py-6 md:min-w-[220px]" onClick={handleLogout}>ВЫЙТИ</Button>
+                        </div>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor="profile-phone">Телефон</Label>
-                      {!(!phoneChanged && profile?.phoneVerified) && (
-                        <Button type="button" variant="outline" className="h-8 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerifyState}>Подтвердить в Telegram</Button>
-                      )}
                     </div>
-                    <Input id="profile-phone" value={phoneDraft} onChange={(e) => {
-                      setPhoneDraft(e.target.value);
-                      setProfile((prev) => ({ ...(prev || {}), phoneVerified: false }));
-                    }} className="rounded-none border-black focus-visible:ring-black" />
-                    {profile?.phoneVerified && !phoneChanged && <p className="text-xs text-emerald-600">Телефон подтвержден</p>}
-                    {!!phoneVerifyState && <p className="text-xs text-muted-foreground">Ожидаем подтверждение номера в Telegram…</p>}
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="profile-address">Адрес доставки по умолчанию</Label>
-                    <Input id="profile-address" value={profile?.shippingAddress || ""} onChange={(e) => setProfile({ ...profile, shippingAddress: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
-                  </div>
+                    <div className="profile-settings-addresses space-y-3">
+                      <div className="profile-settings-addresses-panel space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label className="text-base">Адреса доставки</Label>
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleAddShippingAddress}>
+                            Добавить адрес
+                          </Button>
+                        </div>
 
-                  <div className="flex flex-col gap-3">
-                    <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest px-8 py-6">СОХРАНИТЬ ИЗМЕНЕНИЯ</Button>
-                    <Button type="button" variant="outline" className="rounded-none font-bold uppercase tracking-widest px-8 py-6" onClick={handleLogout}>ВЫЙТИ</Button>
+                        <div className="space-y-3">
+                          {(profile?.shippingAddresses || []).length === 0 ? (
+                            <div className="border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
+                              Добавьте адреса доставки. Один из них будет использоваться по умолчанию.
+                            </div>
+                          ) : (
+                            (profile?.shippingAddresses || []).map((address, index) => (
+                              <div key={address.id} className="space-y-3 border border-gray-200 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="pt-3 text-xs uppercase tracking-widest text-gray-400">
+                                    Адрес {index + 1}
+                                  </div>
+                                  <div className="flex flex-wrap items-stretch gap-2">
+                                    {address.isDefault ? (
+                                      <span className="inline-flex h-10 min-w-[154px] items-center justify-center border border-black bg-black px-4 text-xs font-bold uppercase tracking-widest text-white">
+                                        По умолчанию
+                                      </span>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-10 min-w-[154px] rounded-none px-4 text-xs font-bold uppercase tracking-widest"
+                                        onClick={() => handleSetDefaultShippingAddress(address.id)}
+                                      >
+                                        Сделать основным
+                                      </Button>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="h-10 min-w-[104px] rounded-none px-4 text-xs font-bold uppercase tracking-widest"
+                                      onClick={() => handleRemoveShippingAddress(address.id)}
+                                    >
+                                      Удалить
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                <Input
+                                  value={address.value}
+                                  onChange={(e) => handleShippingAddressChange(address.id, e.target.value)}
+                                  className="rounded-none border-black focus-visible:ring-black"
+                                  placeholder="Город, улица, дом, квартира"
+                                />
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                      </div>
+                    </div>
                   </div>
                 </form>
               </div>
