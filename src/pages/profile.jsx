@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ProductCard from "@/components/ProductCard";
@@ -727,10 +728,10 @@ export default function ProfilePage() {
                                   </div>
                                 </div>
 
-                                <Input
+                                <AddressAutocompleteInput
                                   value={address.value}
-                                  onChange={(e) => handleShippingAddressChange(address.id, e.target.value)}
-                                  className="rounded-none border-black focus-visible:ring-black"
+                                  onValueChange={(nextValue) => handleShippingAddressChange(address.id, nextValue)}
+                                  inputClassName="rounded-none border-black focus-visible:ring-black"
                                   placeholder="Город, улица, дом, квартира"
                                 />
                               </div>

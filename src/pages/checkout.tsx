@@ -1,5 +1,6 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,7 +24,6 @@ export default function CheckoutPage() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cod");
-  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
   const [shipping, setShipping] = useState(10);
   const [shippingLoading, setShippingLoading] = useState(false);
 
@@ -84,28 +84,6 @@ export default function CheckoutPage() {
     return (product.sizeStock[item.size] ?? 0) < item.quantity;
   });
 
-
-  useEffect(() => {
-    const q = address.trim();
-    if (q.length < 4) {
-      setAddressSuggestions([]);
-      return;
-    }
-
-    const timeout = setTimeout(async () => {
-      try {
-        const res = await FLOW.dadataSuggestAddresses({ input: { query: q, count: 5 } });
-        const suggestions = Array.isArray(res?.suggestions)
-          ? res.suggestions.map((x: any) => x.unrestrictedValue || x.value).filter(Boolean)
-          : [];
-        setAddressSuggestions(suggestions);
-      } catch {
-        setAddressSuggestions([]);
-      }
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [address]);
 
   useEffect(() => {
     const run = async () => {
@@ -237,30 +215,13 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   <h2 className="text-xl font-bold uppercase tracking-wider border-b pb-2">АДРЕС ДОСТАВКИ</h2>
                   <div className="space-y-2">
-                    <Input
+                    <AddressAutocompleteInput
                       value={address}
-                      onChange={(e) => setAddress(e.target.value)}
+                      onValueChange={(nextValue) => setAddress(nextValue)}
                       required
-                      className="rounded-none border-black focus-visible:ring-black"
+                      inputClassName="rounded-none border-black focus-visible:ring-black"
                       placeholder="Начните вводить адрес"
                     />
-                    {addressSuggestions.length > 0 && (
-                      <div className="border border-gray-200 bg-white">
-                        {addressSuggestions.map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            type="button"
-                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm hover:bg-gray-50"
-                            onClick={() => {
-                              setAddress(suggestion);
-                              setAddressSuggestions([]);
-                            }}
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
 

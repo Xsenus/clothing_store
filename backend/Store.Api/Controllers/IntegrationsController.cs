@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,17 +12,17 @@ namespace Store.Api.Controllers;
 [Route("integrations")]
 public class IntegrationsController : ControllerBase
 {
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly ITelegramBotManager _telegramBotManager;
+    private readonly IDaDataAddressSuggestService _daDataAddressSuggestService;
 
-    public IntegrationsController(IHttpClientFactory httpClientFactory, StoreDbContext db, IConfiguration configuration, ITelegramBotManager telegramBotManager)
+    public IntegrationsController(StoreDbContext db, IConfiguration configuration, ITelegramBotManager telegramBotManager, IDaDataAddressSuggestService daDataAddressSuggestService)
     {
-        _httpClientFactory = httpClientFactory;
         _db = db;
         _configuration = configuration;
         _telegramBotManager = telegramBotManager;
+        _daDataAddressSuggestService = daDataAddressSuggestService;
     }
 
     [HttpPost("telegram/webhook/{id}")]
@@ -39,41 +37,17 @@ public class IntegrationsController : ControllerBase
     }
 
     [HttpPost("dadata/suggest")]
-    public async Task<IResult> SuggestAddress([FromBody] AddressSuggestPayload payload)
+    public async Task<IResult> SuggestAddress([FromBody] AddressSuggestPayload payload, CancellationToken cancellationToken)
     {
-        var token = await GetSettingOrConfigAsync("dadata_api_key", "Integrations:DaData:ApiKey");
-        if (string.IsNullOrWhiteSpace(token))
-            return Results.BadRequest(new { detail = "DaData API key is not configured" });
-
-        var query = payload.Query?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(query))
-            return Results.Ok(new { suggestions = Array.Empty<object>() });
-
-        var client = _httpClientFactory.CreateClient();
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
-        req.Content = new StringContent(JsonSerializer.Serialize(new
+        try
         {
-            query,
-            count = Math.Clamp(payload.Count ?? 5, 1, 10)
-        }), Encoding.UTF8, "application/json");
-
-        using var res = await client.SendAsync(req);
-        if (!res.IsSuccessStatusCode)
-            return Results.BadRequest(new { detail = $"DaData request failed: {(int)res.StatusCode}" });
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var suggestions = doc.RootElement
-            .GetProperty("suggestions")
-            .EnumerateArray()
-            .Select(item => new
-            {
-                value = item.GetProperty("value").GetString(),
-                unrestrictedValue = item.TryGetProperty("unrestricted_value", out var uv) ? uv.GetString() : null
-            })
-            .ToList();
-
-        return Results.Ok(new { suggestions });
+            var suggestions = await _daDataAddressSuggestService.SuggestAsync(payload, cancellationToken);
+            return Results.Ok(new { suggestions });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpPost("yandex/delivery/calculate")]

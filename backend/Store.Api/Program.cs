@@ -48,8 +48,10 @@ builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminDataSeeder>();
+builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestService>();
 builder.Services.AddScoped<TransactionalEmailService>();
 builder.Services.AddHttpClient();
+builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddSingleton<GalleryStorageService>();
 builder.Services.AddSingleton<TelegramBotManager>();

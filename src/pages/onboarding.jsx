@@ -1,4 +1,5 @@
 import React from "react";
+import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -98,12 +99,12 @@ export default function OnboardingPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="address">Адрес доставки (необязательно)</Label>
-                  <Input
+                  <AddressAutocompleteInput
                     id="address"
                     value={shippingAddress}
-                    onChange={(e) => setShippingAddress(e.target.value)}
+                    onValueChange={(nextValue) => setShippingAddress(nextValue)}
                     placeholder="Улица, Дом, Квартира, Город"
-                    className="rounded-none border-black focus-visible:ring-black"
+                    inputClassName="rounded-none border-black focus-visible:ring-black"
                   />
                 </div>
               </CardContent>
