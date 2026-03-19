@@ -126,6 +126,12 @@ public class CartController : ControllerBase
 
     private async Task<int?> GetAvailableStockAsync(string productId, string sizeName)
     {
+        var product = await _db.Products
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == productId && !x.IsHidden);
+        if (product is null)
+            return null;
+
         var normalizedSize = sizeName.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(normalizedSize)) return null;
 

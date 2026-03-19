@@ -1,18 +1,89 @@
-import { Link, useLocation } from 'react-router';
-import { ShoppingBag, User, Menu, X } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { ShoppingBag, User, Menu, LogOut, Package, Settings2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useCart } from '@/context/CartContext';
-import { useAuthActions, Authenticated, Unauthenticated } from '@/context/AuthContext';
+import { useAuth, useAuthActions } from '@/context/AuthContext';
+import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const getUserPrimaryLabel = (user: { nickname?: string; name?: string; email?: string } | null) => {
+  const nickname = String(user?.nickname || '').trim();
+  if (nickname) {
+    return nickname.startsWith('@') ? nickname : `@${nickname}`;
+  }
+
+  const name = String(user?.name || '').trim();
+  if (name) {
+    return name;
+  }
+
+  const email = String(user?.email || '').trim();
+  if (email) {
+    return email;
+  }
+
+  return 'МОЙ АККАУНТ';
+};
+
+const getUserCompactLabel = (user: { nickname?: string; name?: string; email?: string } | null) => {
+  const nickname = String(user?.nickname || '').trim();
+  if (nickname) {
+    return nickname.startsWith('@') ? nickname : `@${nickname}`;
+  }
+
+  const name = String(user?.name || '').trim();
+  if (name) {
+    return name;
+  }
+
+  const email = String(user?.email || '').trim();
+  if (email.includes('@')) {
+    const localPart = email.split('@')[0]?.trim();
+    if (localPart) {
+      return localPart;
+    }
+  }
+
+  if (email) {
+    return email;
+  }
+
+  return 'Аккаунт';
+};
+
+const getUserSecondaryLabel = (user: { email?: string } | null, primaryLabel: string) => {
+  const email = String(user?.email || '').trim();
+  if (email && email !== primaryLabel) {
+    return email;
+  }
+
+  return 'Личный кабинет';
+};
 
 export default function Header() {
   const { totalItems } = useCart();
+  const { user, isAuthenticated } = useAuth();
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const { signOut } = useAuthActions();
+  const confirmAction = useConfirmDialog();
+
+  const userPrimaryLabel = getUserPrimaryLabel(user);
+  const userCompactLabel = getUserCompactLabel(user);
+  const userSecondaryLabel = getUserSecondaryLabel(user, userPrimaryLabel);
+  const shouldHideDesktopAccountTrigger = location.pathname === '/' && !isScrolled;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -28,8 +99,16 @@ export default function Header() {
   ];
 
   const handleSignOut = async () => {
+    const confirmed = await confirmAction({
+      title: 'Выйти из аккаунта?',
+      description: 'Текущая сессия будет завершена на этом устройстве.',
+      confirmText: 'Выйти',
+    });
+    if (!confirmed) return false;
+
     await signOut();
-    window.location.href = "/";
+    navigate('/', { replace: true });
+    return true;
   };
 
   return (
@@ -61,26 +140,43 @@ export default function Header() {
                     {link.name}
                   </Link>
                 ))}
-                <Authenticated>
-                   <Link 
-                    to="/profile"
-                    className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <User className="h-6 w-6" />
-                    ПРОФИЛЬ
-                  </Link>
+                {isAuthenticated ? (
+                  <>
+                    <div className="border-t border-border pt-6">
+                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Аккаунт</p>
+                      <p className="mt-2 text-lg font-bold">{userPrimaryLabel}</p>
+                      <p className="text-sm text-muted-foreground">{userSecondaryLabel}</p>
+                    </div>
+                    <Link 
+                      to="/profile?tab=settings"
+                      className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Settings2 className="h-6 w-6" />
+                      ПРОФИЛЬ
+                    </Link>
+                    <Link 
+                      to="/profile"
+                      className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Package className="h-6 w-6" />
+                      ЗАКАЗЫ
+                    </Link>
                   <button 
-                    onClick={() => {
-                      handleSignOut();
-                      setIsOpen(false);
+                    onClick={async () => {
+                      const signedOut = await handleSignOut();
+                      if (signedOut) {
+                        setIsOpen(false);
+                      }
                     }}
-                    className="text-2xl font-bold text-left hover:text-muted-foreground transition-colors"
+                    className="text-2xl font-bold text-left hover:text-muted-foreground transition-colors flex items-center gap-2"
                   >
+                    <LogOut className="h-6 w-6" />
                     ВЫЙТИ
                   </button>
-                </Authenticated>
-                <Unauthenticated>
+                  </>
+                ) : (
                   <Link 
                     to="/auth"
                     className="text-2xl font-bold hover:text-muted-foreground transition-colors"
@@ -88,7 +184,7 @@ export default function Header() {
                   >
                     ВОЙТИ
                   </Link>
-                </Unauthenticated>
+                )}
               </nav>
             </SheetContent>
           </Sheet>
@@ -117,20 +213,83 @@ export default function Header() {
         {/* Actions */}
         <div className="flex items-center gap-2 md:gap-4">
           <div className="hidden md:block">
-            <Authenticated>
-              <Link to="/profile">
-                <Button variant="ghost" size="icon">
-                  <User className="h-5 w-5" />
-                </Button>
-              </Link>
-            </Authenticated>
-            <Unauthenticated>
+            {isAuthenticated && !shouldHideDesktopAccountTrigger ? (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="h-auto rounded-full px-0 py-0 text-left hover:bg-transparent"
+                  >
+                    <div className="flex items-center gap-3 rounded-full px-1 py-1 transition-colors hover:bg-black/[0.035]">
+                      <div className="max-w-[126px] text-right leading-tight">
+                        <div
+                          className="truncate text-[15px] font-semibold tracking-[0.01em]"
+                          title={userPrimaryLabel}
+                        >
+                          {userCompactLabel}
+                        </div>
+                      </div>
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white shadow-[0_6px_16px_rgba(15,23,42,0.08)]">
+                        <User className="h-5 w-5" />
+                      </span>
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={10}
+                  className="w-[292px] rounded-[24px] border border-black/8 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.14)]"
+                >
+                  <DropdownMenuLabel className="rounded-[18px] bg-stone-50 px-3 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white">
+                        <User className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-[17px] font-semibold leading-none">
+                          {userPrimaryLabel}
+                        </div>
+                        <div className="truncate pt-1.5 text-sm font-medium normal-case text-muted-foreground">
+                          {userSecondaryLabel}
+                        </div>
+                      </div>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator className="mx-2 my-2 bg-black/8" />
+                  <DropdownMenuItem
+                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
+                    onSelect={() => navigate('/profile?tab=settings')}
+                  >
+                    <Settings2 className="mr-3 h-4 w-4" />
+                    Профиль
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
+                    onSelect={() => navigate('/profile')}
+                  >
+                    <Package className="mr-3 h-4 w-4" />
+                    Заказы
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="mx-2 my-2 bg-black/8" />
+                  <DropdownMenuItem
+                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium text-red-600 focus:bg-red-50 focus:text-red-600"
+                    onSelect={async (event) => {
+                      event.preventDefault();
+                      await handleSignOut();
+                    }}
+                  >
+                    <LogOut className="mr-3 h-4 w-4" />
+                    Выйти
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : !isAuthenticated ? (
               <Link to="/auth">
                 <Button variant="ghost" size="sm" className="font-bold">
                   ВОЙТИ
                 </Button>
               </Link>
-            </Unauthenticated>
+            ) : null}
           </div>
           
           <Link to="/cart" className="relative" id="cart-icon-target">

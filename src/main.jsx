@@ -11,6 +11,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import CookieBanner from "@/components/CookieBanner";
 import MetricsScripts from "@/components/MetricsScripts";
 import SiteBranding from "@/components/SiteBranding";
+import { ConfirmDialogProvider } from "@/components/ConfirmDialogProvider";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -19,12 +20,14 @@ createRoot(document.getElementById("root")).render(
         <TooltipProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
-            <App />
-            <CookieBanner />
-            <MetricsScripts />
-            <SiteBranding />
-          </BrowserRouter>
+          <ConfirmDialogProvider>
+            <BrowserRouter>
+              <App />
+              <CookieBanner />
+              <MetricsScripts />
+              <SiteBranding />
+            </BrowserRouter>
+          </ConfirmDialogProvider>
         </TooltipProvider>
       </CartProvider>
     </AuthProvider>

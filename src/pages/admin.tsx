@@ -1,5 +1,6 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,7 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
-import { type ChangeEvent, type DragEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
   buildProductCardBackgroundStyleFromColor,
@@ -53,7 +54,7 @@ import {
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -281,6 +282,8 @@ interface Product {
   shipping?: string;
   reviewsEnabled?: boolean;
   sizeStock?: Record<string, number>;
+  isHidden?: boolean;
+  hiddenAt?: number | null;
 }
 
 interface AdminProductReview {
@@ -317,6 +320,8 @@ interface AdminUser {
 
 interface AdminOrder {
   id: string;
+  orderNumber?: number;
+  displayOrderNumber?: string;
   userId: string;
   userEmail?: string;
   userProfile?: {
@@ -333,8 +338,11 @@ interface AdminOrder {
   items?: Array<{
     productId?: string;
     productName?: string | null;
+    productImageUrl?: string | null;
     size?: string | null;
     quantity?: number;
+    unitPrice?: number;
+    lineTotal?: number;
   }> | unknown;
   paymentMethod?: string;
   purchaseChannel?: string;
@@ -372,6 +380,7 @@ interface OrderTablePreferences {
   columnOrder: OrderTableColumnId[];
   hiddenColumns: OrderTableColumnId[];
   pageSize: number;
+  columnWidths: Partial<Record<OrderTableColumnId, number>>;
 }
 
 interface OrderTableColumnDefinition {
@@ -423,6 +432,13 @@ interface GalleryImagesPage {
   totalItems: number;
   totalPages: number;
 }
+
+type CollectionPreviewMode = "gallery" | "products";
+
+type GalleryPickerTarget =
+  | { type: "product-media"; slot: number }
+  | { type: "collection-create" }
+  | { type: "collection-edit"; itemId: string };
 
 type GalleryUploadStatus = "pending" | "uploading" | "success" | "error";
 
@@ -481,7 +497,7 @@ const ORDER_HISTORY_FIELD_LABELS: Record<string, string> = {
 };
 
 const ORDER_TABLE_COLUMNS: OrderTableColumnDefinition[] = [
-  { id: "id", label: "ID" },
+  { id: "id", label: "№ заказа" },
   { id: "client", label: "Клиент" },
   { id: "items", label: "Товары" },
   { id: "payment", label: "Оплата" },
@@ -492,8 +508,33 @@ const ORDER_TABLE_COLUMNS: OrderTableColumnDefinition[] = [
   { id: "actions", label: "Действия", required: true },
 ];
 
+const ORDER_TABLE_COLUMN_MIN_WIDTHS: Record<OrderTableColumnId, number> = {
+  id: 150,
+  client: 220,
+  items: 280,
+  payment: 170,
+  delivery: 220,
+  status: 130,
+  amount: 120,
+  date: 170,
+  actions: 150,
+};
+
+const ORDER_TABLE_COLUMN_DEFAULT_WIDTHS: Record<OrderTableColumnId, number> = {
+  id: 190,
+  client: 260,
+  items: 360,
+  payment: 200,
+  delivery: 250,
+  status: 150,
+  amount: 140,
+  date: 190,
+  actions: 150,
+};
+
 const ORDER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
-const ORDER_TABLE_PREFERENCE_KEY_PREFIX = "admin_orders_table_preferences__";
+const ADMIN_ORDER_TABLE_PREFERENCE_KEY = "orders_table_layout";
+const ORDER_TABLE_COLUMN_MAX_WIDTH = 720;
 const ORDER_STATUS_ROW_COLOR_SETTING_KEYS: Record<string, string> = {
   processing: "admin_orders_row_color_processing",
   created: "admin_orders_row_color_created",
@@ -505,10 +546,20 @@ const ORDER_STATUS_ROW_COLOR_SETTING_KEYS: Record<string, string> = {
   returned: "admin_orders_row_color_returned",
 };
 
+const createDefaultOrderTableColumnWidths = () =>
+  Object.fromEntries(ORDER_TABLE_COLUMNS.map((column) => [column.id, ORDER_TABLE_COLUMN_DEFAULT_WIDTHS[column.id]])) as Record<OrderTableColumnId, number>;
+
+const clampOrderTableColumnWidth = (columnId: OrderTableColumnId, rawValue: number) => {
+  const minWidth = ORDER_TABLE_COLUMN_MIN_WIDTHS[columnId] ?? 120;
+  const safeValue = Number.isFinite(rawValue) ? Math.round(rawValue) : minWidth;
+  return Math.min(ORDER_TABLE_COLUMN_MAX_WIDTH, Math.max(minWidth, safeValue));
+};
+
 const createDefaultOrderTablePreferences = (): OrderTablePreferences => ({
   columnOrder: ORDER_TABLE_COLUMNS.map((column) => column.id),
   hiddenColumns: [],
   pageSize: ORDER_PAGE_SIZE_OPTIONS[0],
+  columnWidths: createDefaultOrderTableColumnWidths(),
 });
 
 const sanitizeOrderTablePreferences = (raw: unknown): OrderTablePreferences => {
@@ -537,16 +588,19 @@ const sanitizeOrderTablePreferences = (raw: unknown): OrderTablePreferences => {
   const pageSize = ORDER_PAGE_SIZE_OPTIONS.includes(parsed?.pageSize as (typeof ORDER_PAGE_SIZE_OPTIONS)[number])
     ? Number(parsed?.pageSize)
     : defaults.pageSize;
+  const columnWidths = defaults.columnOrder.reduce((result, columnId) => {
+    const rawWidth = parsed?.columnWidths?.[columnId];
+    result[columnId] = clampOrderTableColumnWidth(columnId, Number(rawWidth ?? defaults.columnWidths[columnId]));
+    return result;
+  }, {} as Record<OrderTableColumnId, number>);
 
   return {
     columnOrder,
     hiddenColumns,
     pageSize,
+    columnWidths,
   };
 };
-
-const getOrderTablePreferenceKey = (adminId?: string | null) =>
-  adminId ? `${ORDER_TABLE_PREFERENCE_KEY_PREFIX}${adminId}` : "";
 
 const normalizeHexColorSetting = (value?: string | null) => {
   const normalized = (value || "").trim();
@@ -708,6 +762,8 @@ interface DictionaryItem {
   name: string;
   slug: string;
   color?: string | null;
+  imageUrl?: string | null;
+  previewMode?: CollectionPreviewMode;
   description?: string | null;
   isActive?: boolean;
   showInCatalogFilter?: boolean;
@@ -721,6 +777,8 @@ interface DictionaryDraft {
   name: string;
   slug: string;
   color: string;
+  imageUrl: string;
+  previewMode: CollectionPreviewMode;
   description: string;
   isActive: boolean;
   showInCatalogFilter: boolean;
@@ -756,6 +814,8 @@ interface DictionaryCreateDialogState {
   name: string;
   slug: string;
   color: string;
+  imageUrl: string;
+  previewMode: CollectionPreviewMode;
   description: string;
   showColorInCatalog: boolean;
   sortOrder: string;
@@ -860,6 +920,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
   site_title: "fashiondemon",
   site_favicon_url: "",
+  site_loading_animation_enabled: "true",
   product_card_background_mode: "standard",
   product_card_background_color: "#e9e3da",
   product_card_image_fit_mode: "contain",
@@ -910,6 +971,9 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   catalog_filter_materials_order: "30",
   catalog_filter_colors_order: "40",
   catalog_filter_collections_order: "50",
+  catalog_collections_slider_enabled: "true",
+  catalog_collections_slider_title: "Коллекции",
+  catalog_collections_slider_description: "",
   admin_orders_row_color_processing: "#e5e7eb",
   admin_orders_row_color_created: "#e0f2fe",
   admin_orders_row_color_paid: "#dbeafe",
@@ -966,6 +1030,7 @@ const PRODUCT_CARD_SETTINGS_PREVIEW_IMAGE = `data:image/svg+xml;charset=UTF-8,${
 `)}`;
 
 export default function AdminPage({ embedded = false }: { embedded?: boolean }) {
+  const confirmAction = useConfirmDialog();
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -1005,6 +1070,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     name: "",
     slug: "",
     color: "#3b82f6",
+    imageUrl: "",
+    previewMode: "gallery",
     description: "",
     showColorInCatalog: true,
     sortOrder: "1"
@@ -1031,6 +1098,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [orderTableDraft, setOrderTableDraft] = useState<OrderTablePreferences>(createDefaultOrderTablePreferences);
   const [isOrderTableDialogOpen, setIsOrderTableDialogOpen] = useState(false);
   const [orderTableSaving, setOrderTableSaving] = useState(false);
+  const [draggedOrderColumnId, setDraggedOrderColumnId] = useState<OrderTableColumnId | null>(null);
+  const [orderColumnDropTargetId, setOrderColumnDropTargetId] = useState<OrderTableColumnId | null>(null);
+  const [resizingOrderColumnId, setResizingOrderColumnId] = useState<OrderTableColumnId | null>(null);
   const [pendingOrderSaveChanges, setPendingOrderSaveChanges] = useState<OrderFormChange[]>([]);
   const [isOrderSaveConfirmOpen, setIsOrderSaveConfirmOpen] = useState(false);
   const [orderForm, setOrderForm] = useState({
@@ -1061,6 +1131,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotTokenVisible, setTelegramBotTokenVisible] = useState(false);
   const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
   const ordersRequestIdRef = useRef(0);
+  const latestOrderTablePreferencesRef = useRef<OrderTablePreferences>(createDefaultOrderTablePreferences());
   const deferredOrderSearch = useDeferredValue(orderSearch);
   const navigate = useNavigate();
   const location = useLocation();
@@ -1103,8 +1174,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingGalleryName, setEditingGalleryName] = useState("");
   const [editingGalleryDescription, setEditingGalleryDescription] = useState("");
   const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [isMediaGalleryPickerOpen, setIsMediaGalleryPickerOpen] = useState(false);
-  const [mediaGallerySlot, setMediaGallerySlot] = useState<number | null>(null);
+  const [galleryPickerTarget, setGalleryPickerTarget] = useState<GalleryPickerTarget | null>(null);
   const [mediaGallerySearch, setMediaGallerySearch] = useState("");
   const deferredMediaGallerySearch = useDeferredValue(mediaGallerySearch);
   const [mediaGalleryPage, setMediaGalleryPage] = useState(1);
@@ -1246,9 +1316,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const fetchAdminData = async (sessionUser: AdminSessionUser | null = adminUser) => {
     try {
-      const [usersRes, settingsRes, botsRes, dictionariesRes, stockHistoryRes] = await Promise.all([
+      const [usersRes, settingsRes, preferencesRes, botsRes, dictionariesRes, stockHistoryRes] = await Promise.all([
         FLOW.adminGetUsers(),
         FLOW.adminGetSettings(),
+        FLOW.adminGetPreferences(),
         FLOW.adminGetTelegramBots(),
         FLOW.adminGetDictionaries(),
         FLOW.adminGetStockHistory()
@@ -1256,7 +1327,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
       const mergedSettings = { ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) };
-      const resolvedPreferences = sanitizeOrderTablePreferences(mergedSettings[getOrderTablePreferenceKey(sessionUser?.id)]);
+      const resolvedPreferences = sanitizeOrderTablePreferences(preferencesRes?.[ADMIN_ORDER_TABLE_PREFERENCE_KEY]);
       setSettings(mergedSettings);
       setOrderTablePreferences(resolvedPreferences);
       setOrderTableDraft(resolvedPreferences);
@@ -1336,12 +1407,147 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const persistOrderTablePreferences = async (nextPreferences: OrderTablePreferences) => {
-    const preferenceKey = getOrderTablePreferenceKey(adminUser?.id);
-    if (!preferenceKey) return;
-
     const serializedValue = JSON.stringify(nextPreferences);
-    await FLOW.adminSaveSettings({ input: { [preferenceKey]: serializedValue } });
-    setSettings((prev) => ({ ...prev, [preferenceKey]: serializedValue }));
+    await FLOW.adminSavePreferences({ input: { [ADMIN_ORDER_TABLE_PREFERENCE_KEY]: serializedValue } });
+  };
+
+  const applyResolvedOrderTablePreferences = (nextPreferences: OrderTablePreferences) => {
+    latestOrderTablePreferencesRef.current = nextPreferences;
+    setOrderTablePreferences(nextPreferences);
+    setOrderTableDraft(nextPreferences);
+  };
+
+  const getOrderTableColumnWidth = (columnId: OrderTableColumnId) =>
+    clampOrderTableColumnWidth(
+      columnId,
+      Number(latestOrderTablePreferencesRef.current.columnWidths?.[columnId] ?? ORDER_TABLE_COLUMN_DEFAULT_WIDTHS[columnId]),
+    );
+
+  const getOrderTableColumnCellStyle = (columnId: OrderTableColumnId) => {
+    const width = getOrderTableColumnWidth(columnId);
+    return {
+      width,
+      minWidth: width,
+      maxWidth: width,
+    } as const;
+  };
+
+  const buildMovedOrderColumns = (columnOrder: OrderTableColumnId[], sourceId: OrderTableColumnId, targetId: OrderTableColumnId) => {
+    if (sourceId === targetId) {
+      return columnOrder;
+    }
+
+    const nextColumnOrder = columnOrder.filter((columnId) => columnId !== sourceId);
+    const targetIndex = nextColumnOrder.indexOf(targetId);
+    if (targetIndex < 0) {
+      nextColumnOrder.push(sourceId);
+      return nextColumnOrder;
+    }
+
+    nextColumnOrder.splice(targetIndex, 0, sourceId);
+    return nextColumnOrder;
+  };
+
+  const saveImmediateOrderTablePreferences = async (
+    nextPreferences: OrderTablePreferences,
+    previousPreferences: OrderTablePreferences,
+    errorMessage: string,
+  ) => {
+    applyResolvedOrderTablePreferences(nextPreferences);
+
+    try {
+      await persistOrderTablePreferences(nextPreferences);
+    } catch (error) {
+      applyResolvedOrderTablePreferences(previousPreferences);
+      toast.error(getErrorMessage(error, errorMessage));
+    }
+  };
+
+  const handleOrderColumnDragStart = (columnId: OrderTableColumnId, event: DragEvent<HTMLDivElement>) => {
+    setDraggedOrderColumnId(columnId);
+    setOrderColumnDropTargetId(columnId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", columnId);
+  };
+
+  const handleOrderColumnDragOver = (targetColumnId: OrderTableColumnId, event: DragEvent<HTMLTableCellElement>) => {
+    if (!draggedOrderColumnId || draggedOrderColumnId === targetColumnId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setOrderColumnDropTargetId(targetColumnId);
+  };
+
+  const handleOrderColumnDrop = async (targetColumnId: OrderTableColumnId, event: DragEvent<HTMLTableCellElement>) => {
+    event.preventDefault();
+
+    const droppedColumnId = (draggedOrderColumnId || event.dataTransfer.getData("text/plain")) as OrderTableColumnId | "";
+    setDraggedOrderColumnId(null);
+    setOrderColumnDropTargetId(null);
+
+    if (!droppedColumnId || droppedColumnId === targetColumnId) {
+      return;
+    }
+
+    const previousPreferences = latestOrderTablePreferencesRef.current;
+    const nextColumnOrder = buildMovedOrderColumns(previousPreferences.columnOrder, droppedColumnId, targetColumnId);
+    const nextPreferences = sanitizeOrderTablePreferences({
+      ...previousPreferences,
+      columnOrder: nextColumnOrder,
+    });
+
+    await saveImmediateOrderTablePreferences(nextPreferences, previousPreferences, "Не удалось сохранить новый порядок колонок");
+  };
+
+  const handleOrderColumnResizeStart = (columnId: OrderTableColumnId, startEvent: ReactPointerEvent<HTMLButtonElement>) => {
+    startEvent.preventDefault();
+    startEvent.stopPropagation();
+
+    const previousPreferences = latestOrderTablePreferencesRef.current;
+    const startWidth = getOrderTableColumnWidth(columnId);
+    const startX = startEvent.clientX;
+
+    setResizingOrderColumnId(columnId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = clampOrderTableColumnWidth(columnId, startWidth + (moveEvent.clientX - startX));
+      const nextPreferences = sanitizeOrderTablePreferences({
+        ...latestOrderTablePreferencesRef.current,
+        columnWidths: {
+          ...latestOrderTablePreferencesRef.current.columnWidths,
+          [columnId]: nextWidth,
+        },
+      });
+
+      applyResolvedOrderTablePreferences(nextPreferences);
+    };
+
+    const handlePointerUp = async () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      setResizingOrderColumnId(null);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      const finalPreferences = latestOrderTablePreferencesRef.current;
+      if ((previousPreferences.columnWidths[columnId] ?? startWidth) === finalPreferences.columnWidths[columnId]) {
+        return;
+      }
+
+      try {
+        await persistOrderTablePreferences(finalPreferences);
+      } catch (error) {
+        applyResolvedOrderTablePreferences(previousPreferences);
+        toast.error(getErrorMessage(error, "Не удалось сохранить ширину колонки"));
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
   };
 
   const refreshStockHistory = async () => {
@@ -1355,9 +1561,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   }, [isAdmin, galleryPage, deferredGallerySearch]);
 
   useEffect(() => {
-    if (!isAdmin || !isMediaGalleryPickerOpen) return;
+    if (!isAdmin || !galleryPickerTarget) return;
     void loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch });
-  }, [isAdmin, isMediaGalleryPickerOpen, mediaGalleryPage, deferredMediaGallerySearch]);
+  }, [isAdmin, galleryPickerTarget, mediaGalleryPage, deferredMediaGallerySearch]);
 
   useEffect(() => {
     setGalleryPage(1);
@@ -1366,6 +1572,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   useEffect(() => {
     setMediaGalleryPage(1);
   }, [deferredMediaGallerySearch]);
+
+  useEffect(() => {
+    latestOrderTablePreferencesRef.current = orderTablePreferences;
+  }, [orderTablePreferences]);
 
   const loadOrders = async (overrides?: Partial<{ page: number; pageSize: number; search: string; status: string; dateFrom: string; dateTo: string; userId: string }>) => {
     const requestId = ++ordersRequestIdRef.current;
@@ -1450,8 +1660,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setOrderTableSaving(true);
     try {
       await persistOrderTablePreferences(nextPreferences);
-      setOrderTablePreferences(nextPreferences);
-      setOrderTableDraft(nextPreferences);
+      applyResolvedOrderTablePreferences(nextPreferences);
       setIsOrderTableDialogOpen(false);
       toast.success("Вид таблицы сохранен");
     } catch (error) {
@@ -1463,18 +1672,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const changeOrdersPageSize = async (nextPageSize: (typeof ORDER_PAGE_SIZE_OPTIONS)[number]) => {
     const previousPageSize = ordersPageSize;
-    const previousPreferences = orderTablePreferences;
-    const nextPreferences = { ...orderTablePreferences, pageSize: nextPageSize };
+    const previousPreferences = latestOrderTablePreferencesRef.current;
+    const nextPreferences = sanitizeOrderTablePreferences({ ...previousPreferences, pageSize: nextPageSize });
 
-    setOrdersPageSize(nextPageSize);
+    setOrdersPageSize(nextPreferences.pageSize);
     setOrdersPage(1);
-    setOrderTablePreferences(nextPreferences);
+    applyResolvedOrderTablePreferences(nextPreferences);
 
     try {
       await persistOrderTablePreferences(nextPreferences);
     } catch (error) {
       setOrdersPageSize(previousPageSize);
-      setOrderTablePreferences(previousPreferences);
+      applyResolvedOrderTablePreferences(previousPreferences);
       toast.error(getErrorMessage(error, "Не удалось сохранить количество строк"));
     }
   };
@@ -1536,6 +1745,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return timestamp > 0 ? new Date(timestamp).toLocaleString("ru-RU") : "—";
   };
 
+  const formatRubles = (value?: number | string | null) => {
+    const numeric = Number(value ?? 0);
+    if (!Number.isFinite(numeric)) return "вЂ”";
+    return `${new Intl.NumberFormat("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(numeric)} ₽`;
+  };
+
+  const formatAdminOrderNumber = (order?: AdminOrder | null) => {
+    const explicitDisplayNumber = String(order?.displayOrderNumber || "").trim();
+    if (explicitDisplayNumber) return explicitDisplayNumber;
+
+    const numericOrderNumber = Number(order?.orderNumber || 0);
+    if (Number.isFinite(numericOrderNumber) && numericOrderNumber > 0) {
+      return String(Math.trunc(numericOrderNumber)).padStart(7, "0");
+    }
+
+    return order?.id || "вЂ”";
+  };
+
   const resolveOrderCustomerSnapshot = (order: AdminOrder) => {
     const user = usersById.get(order.userId) || null;
     const userProfile = order.userProfile || user?.profile || null;
@@ -1558,12 +1788,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const items = parseOrderItems(order?.itemsJson || order?.items);
     return items.map((item: any) => {
       const qty = Math.max(1, Number(item?.quantity || 1));
+      const unitPrice = Number(item?.unitPrice || 0);
+      const lineTotal = Number(item?.lineTotal || unitPrice * qty);
       const product = productsById.get(item?.productId);
       return {
         productId: item?.productId || "",
         title: item?.productName || product?.name || item?.productId || "Товар",
+        imageUrl: item?.productImageUrl || product?.catalogImageUrl || product?.images?.[0] || "",
         size: item?.size || "",
         quantity: qty,
+        unitPrice,
+        lineTotal,
       };
     });
   };
@@ -1572,6 +1807,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     if (value === null || value === undefined) return "—";
     const textValue = String(value).trim();
     if (!textValue) return "—";
+
+    if (field === "totalAmount") {
+      const numeric = Number(textValue);
+      return Number.isFinite(numeric) ? formatRubles(numeric) : textValue;
+    }
 
     switch (field) {
       case "status":
@@ -1764,7 +2004,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const deleteUser = async (user: AdminUser) => {
-    if (!confirm(`Удалить пользователя ${user.email}?`)) return;
+    const confirmed = await confirmAction({
+      title: "Удалить пользователя?",
+      description: `Пользователь ${user.email} будет удалён без возможности быстрого восстановления.`,
+      confirmText: "Удалить",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
     try {
       await FLOW.adminDeleteUser({ input: { userId: user.id } });
       await fetchAdminData();
@@ -1942,6 +2189,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           name,
           slug: slug || undefined,
           color: dictionaryCreateDialog.color.trim() || undefined,
+          imageUrl: dictionaryCreateDialog.imageUrl.trim() || undefined,
+          previewMode: dictionaryCreateDialog.previewMode,
           description: dictionaryCreateDialog.description.trim() || undefined,
           isActive: true,
           showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
@@ -1963,6 +2212,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         color: "#3b82f6",
+        imageUrl: "",
+        previewMode: "gallery",
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -1977,6 +2228,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     name: item.name || "",
     slug: item.slug || "",
     color: item.color || getDictionaryDotColor(item.name || ""),
+    imageUrl: item.imageUrl || "",
+    previewMode: item.previewMode === "products" ? "products" : "gallery",
     description: item.description || "",
     isActive: item.isActive ?? true,
     showInCatalogFilter: item.showInCatalogFilter ?? true,
@@ -1994,6 +2247,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         name: "",
         slug: "",
         color: "#3b82f6",
+        imageUrl: "",
+        previewMode: "gallery",
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -2079,6 +2334,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           name: nextName,
           slug: nextSlug,
           color: draft.color,
+          imageUrl: draft.imageUrl,
+          previewMode: draft.previewMode,
           description: draft.description,
           isActive: draft.isActive,
           showInCatalogFilter: kind !== "collections" && draft.showInCatalogFilter,
@@ -2255,7 +2512,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       if (uploadedImages.length > 0) {
         setGalleryPage(1);
         await loadGalleryImages({ page: 1, search: deferredGallerySearch, silent: true });
-        if (isMediaGalleryPickerOpen) {
+        if (galleryPickerTarget) {
           setMediaGalleryPage(1);
           await loadMediaGalleryImages({ page: 1, search: deferredMediaGallerySearch, silent: true });
         }
@@ -2290,13 +2547,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const deleteGalleryImage = async (image: GalleryImage) => {
-    if (!confirm(`Удалить изображение «${image.name}»?`)) return;
+    const confirmed = await confirmAction({
+      title: "Удалить изображение?",
+      description: `Изображение «${image.name}» будет удалено из галереи.`,
+      confirmText: "Удалить",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
     try {
       await FLOW.deleteAdminGalleryImage({ input: { id: image.id } });
       const targetPage = galleryImages.length === 1 && galleryPage > 1 ? galleryPage - 1 : galleryPage;
       setGalleryPage(targetPage);
       await loadGalleryImages({ page: targetPage, search: deferredGallerySearch, silent: true });
-      if (isMediaGalleryPickerOpen) {
+      if (galleryPickerTarget) {
         await loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch, silent: true });
       }
       toast.success("Изображение удалено");
@@ -2319,7 +2583,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     try {
       const result = await FLOW.restoreMissingAdminGalleryImages();
       await loadGalleryImages({ page: galleryPage, search: deferredGallerySearch, silent: true });
-      if (isMediaGalleryPickerOpen) {
+      if (galleryPickerTarget) {
         await loadMediaGalleryImages({ page: mediaGalleryPage, search: deferredMediaGallerySearch, silent: true });
       }
       toast.success(`Восстановлено файлов: ${result?.restored ?? 0}`);
@@ -2933,7 +3197,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const deleteTelegramBot = async (bot: TelegramBot) => {
-    if (!confirm(`Удалить бота ${bot.name}?`)) return;
+    const confirmed = await confirmAction({
+      title: "Удалить Telegram-бота?",
+      description: `Бот «${bot.name}» будет удалён из настроек интеграций.`,
+      confirmText: "Удалить",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
     try {
       await FLOW.adminDeleteTelegramBot({ input: { id: bot.id } });
       await fetchAdminData();
@@ -3026,6 +3297,49 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const images = (product.images || []).map((url) => ({ type: "image" as const, url }));
     const videos = (product.videos || []).map((url) => ({ type: "video" as const, url }));
     return [...images, ...videos];
+  };
+
+  const resolveProductCollectionPreviewImageUrls = (product: Product) => {
+    const previewImages = [
+      product.catalogImageUrl,
+      ...(product.images || []),
+      ...((product.media || [])
+        .filter((item) => item.type === "image")
+        .map((item) => item.url)),
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+
+    return previewImages.filter((value, index, list) => list.indexOf(value) === index);
+  };
+
+  const getCollectionPreviewImagesFromProducts = (collectionName?: string | null) => {
+    const normalizedCollection = normalizeDictionaryUsageKey(collectionName);
+    if (!normalizedCollection) {
+      return [] as string[];
+    }
+
+    const previewImages: string[] = [];
+    for (const product of products) {
+      const productCollections = normalizeDictionaryValues(product.collections);
+      const belongsToCollection = productCollections.some((value) => normalizeDictionaryUsageKey(value) === normalizedCollection);
+      if (!belongsToCollection) {
+        continue;
+      }
+
+      for (const previewImage of resolveProductCollectionPreviewImageUrls(product)) {
+        if (!previewImage || previewImages.includes(previewImage)) {
+          continue;
+        }
+
+        previewImages.push(previewImage);
+        if (previewImages.length >= 6) {
+          return previewImages;
+        }
+      }
+    }
+
+    return previewImages;
   };
 
   const resetProductEditor = () => {
@@ -3225,6 +3539,46 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     };
   };
 
+  const buildDuplicateProductPayload = (product: Product) => {
+    const suffix = Date.now().toString(36).slice(-5);
+    const baseSlug = (product.slug || product.name || "product")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "product";
+
+    return {
+      name: `${product.name} (копия)`,
+      slug: `${baseSlug}-copy-${suffix}`,
+      description: product.description || "",
+      basePrice: Number(product.basePrice ?? product.price ?? 0),
+      discountPercent: Number(product.discountPercent ?? 0),
+      discountedPrice: Number(product.discountedPrice ?? product.price ?? 0),
+      category: product.categories?.[0] || product.category || "",
+      categories: [...(product.categories || (product.category ? [product.category] : []))],
+      collections: [...(product.collections || [])],
+      images: [...(product.images || [])],
+      catalogImageUrl: product.catalogImageUrl || "",
+      videos: [...(product.videos || [])],
+      media: Array.isArray(product.media) ? product.media.map((item) => ({ ...item })) : [],
+      sizes: [...(product.sizes || [])],
+      isNew: !!product.isNew,
+      isPopular: !!product.isPopular,
+      reviewsEnabled: product.reviewsEnabled !== false,
+      sku: product.sku || "",
+      material: product.materials?.[0] || product.material || "",
+      materials: [...(product.materials || (product.material ? [product.material] : []))],
+      printType: product.printType || "",
+      fit: product.fit || "",
+      gender: product.gender || "",
+      color: product.colors?.[0] || product.color || "",
+      colors: [...(product.colors || (product.color ? [product.color] : []))],
+      shipping: product.shipping || "",
+      sizeStock: { ...(product.sizeStock || {}) },
+      isHidden: true,
+    };
+  };
+
   const submitProductForm = async () => {
     setProductSubmitting(true);
     try {
@@ -3274,13 +3628,69 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Вы уверены, что хотите удалить этот товар?")) return;
+    const product = products.find((item) => item._id === id || (item as any).id === id);
+    const confirmed = await confirmAction({
+      title: "Удалить товар?",
+      description: product?.name
+        ? `Товар «${product.name}» будет удалён из каталога.`
+        : "Товар будет удалён из каталога.",
+      confirmText: "Удалить",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
     try {
       await FLOW.deleteProduct({ input: { id } });
       toast.success("Товар удален");
       fetchProducts();
     } catch (error) {
       toast.error("Не удалось удалить");
+    }
+  };
+
+  const handleToggleHidden = async (product: Product) => {
+    const nextHidden = !product.isHidden;
+    const confirmed = await confirmAction({
+      title: nextHidden ? "Скрыть товар?" : "Показать товар?",
+      description: nextHidden
+        ? `Товар «${product.name}» останется в админке, но исчезнет с витрины для покупателей.`
+        : `Товар «${product.name}» снова станет виден покупателям на витрине.`,
+      confirmText: nextHidden ? "Скрыть" : "Показать",
+    });
+    if (!confirmed) return;
+
+    try {
+      await FLOW.updateProduct({
+        input: {
+          id: product._id,
+          isHidden: nextHidden,
+        }
+      });
+      toast.success(nextHidden ? "Товар скрыт" : "Товар снова виден покупателям");
+      await fetchProducts();
+    } catch (error) {
+      toast.error(nextHidden ? "Не удалось скрыть товар" : "Не удалось показать товар");
+    }
+  };
+
+  const handleDuplicate = async (product: Product) => {
+    try {
+      const created = await FLOW.createProduct({
+        input: buildDuplicateProductPayload(product)
+      });
+
+      toast.success("Копия товара создана и пока скрыта от покупателей");
+      await fetchProducts();
+
+      if (created?._id) {
+        if (isStandaloneAdmin) {
+          navigate(`/admin/products/${created._id}/edit`);
+        } else {
+          handleOpen(created);
+        }
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось создать копию товара"));
     }
   };
 
@@ -3499,18 +3909,51 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setMediaDeleteDialog({ open: false, slot: null });
   };
 
-  const openMediaGalleryPicker = (slot: number) => {
-    setMediaGallerySlot(slot);
+  const openGalleryPicker = (target: GalleryPickerTarget) => {
     setMediaGallerySearch("");
     setMediaGalleryPage(1);
-    setIsMediaGalleryPickerOpen(true);
+    setGalleryPickerTarget(target);
   };
 
-  const selectMediaFromGallery = (url: string) => {
-    if (!mediaGallerySlot) return;
-    setMediaSlot(mediaGallerySlot, "image", url);
-    setIsMediaGalleryPickerOpen(false);
-    setMediaGallerySlot(null);
+  const openMediaGalleryPicker = (slot: number) => {
+    openGalleryPicker({ type: "product-media", slot });
+  };
+
+  const openCollectionCreateGalleryPicker = () => {
+    openGalleryPicker({ type: "collection-create" });
+  };
+
+  const openCollectionEditGalleryPicker = (itemId: string) => {
+    openGalleryPicker({ type: "collection-edit", itemId });
+  };
+
+  const closeGalleryPicker = () => {
+    setGalleryPickerTarget(null);
+  };
+
+  const assignSelectedGalleryImage = (url: string) => {
+    if (!galleryPickerTarget) return;
+
+    if (galleryPickerTarget.type === "product-media") {
+      setMediaSlot(galleryPickerTarget.slot, "image", url);
+    } else if (galleryPickerTarget.type === "collection-create") {
+      setDictionaryCreateDialog((prev) => ({ ...prev, imageUrl: url, previewMode: "gallery" }));
+    } else if (galleryPickerTarget.type === "collection-edit") {
+      setDictionaryDrafts((prev) => {
+        const current = prev[galleryPickerTarget.itemId];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [galleryPickerTarget.itemId]: {
+            ...current,
+            imageUrl: url,
+            previewMode: "gallery",
+          },
+        };
+      });
+    }
+
+    closeGalleryPicker();
   };
 
   const uploadMediaToGalleryAndAssign = async (file: File | null, slot: number) => {
@@ -3528,7 +3971,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setMediaSlot(slot, preparedFile.type.startsWith("video") ? "video" : "image", uploaded.url);
       setGalleryPage(1);
       await loadGalleryImages({ page: 1, search: deferredGallerySearch, silent: true });
-      if (isMediaGalleryPickerOpen) {
+      if (galleryPickerTarget) {
         setMediaGalleryPage(1);
         await loadMediaGalleryImages({ page: 1, search: deferredMediaGallerySearch, silent: true });
       }
@@ -3541,10 +3984,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const uploadFromPickerToGallery = async (file: File | null) => {
-    if (!file || !mediaGallerySlot) return;
-    await uploadMediaToGalleryAndAssign(file, mediaGallerySlot);
-    setIsMediaGalleryPickerOpen(false);
-    setMediaGallerySlot(null);
+    if (!file || !galleryPickerTarget) return;
+
+    if (galleryPickerTarget.type === "product-media") {
+      await uploadMediaToGalleryAndAssign(file, galleryPickerTarget.slot);
+      closeGalleryPicker();
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const preparedFile = await optimizeImageFileForUpload(file, settings, "gallery");
+      const payload = new FormData();
+      payload.append("file", preparedFile);
+      payload.append("name", preparedFile.name);
+      const uploaded = await FLOW.uploadAdminGalleryImage({ input: payload });
+      if (!uploaded?.url) {
+        throw new Error("Не удалось получить URL загруженного файла");
+      }
+
+      setGalleryPage(1);
+      await loadGalleryImages({ page: 1, search: deferredGallerySearch, silent: true });
+      setMediaGalleryPage(1);
+      await loadMediaGalleryImages({ page: 1, search: deferredMediaGallerySearch, silent: true });
+      assignSelectedGalleryImage(uploaded.url);
+      toast.success("Изображение загружено в галерею и выбрано");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось загрузить изображение в галерею"));
+    } finally {
+      setUploading(false);
+    }
   };
 
   const filteredGalleryPickerImages = galleryPickerImages;
@@ -3594,8 +4063,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const handleModerateReview = async (reviewId: string, action: "hide" | "show" | "delete" | "restore") => {
     if (!editingProduct) return;
 
-    if (action === "delete" && !window.confirm("Удалить отзыв? Он пропадет с витрины, но останется в базе.")) {
-      return;
+    if (action === "delete") {
+      const confirmed = await confirmAction({
+        title: "Удалить отзыв?",
+        description: "Отзыв пропадёт с витрины, но запись останется в базе.",
+        confirmText: "Удалить",
+        variant: "destructive",
+      });
+      if (!confirmed) return;
     }
 
     try {
@@ -3701,6 +4176,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             className="text-left transition-opacity hover:opacity-80"
                           >
                             <div className="font-bold">{product.name}</div>
+                            {product.isHidden && (
+                              <div className="mt-1 text-[11px] font-medium uppercase tracking-[0.16em] text-amber-700">
+                                Скрыт с витрины
+                              </div>
+                            )}
                           </button>
                         </TableCell>
                         <TableCell>{Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price))}₽</TableCell>
@@ -3743,15 +4223,30 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <div className="flex gap-1 flex-wrap">
                             {product.isNew && <span className="px-2 py-0.5 bg-black text-white text-[10px] uppercase font-bold">Новинка</span>}
                             {product.isPopular && <span className="px-2 py-0.5 bg-gray-200 text-black text-[10px] uppercase font-bold">Хит</span>}
+                            {product.isHidden && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] uppercase font-bold">Скрыт</span>}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right space-x-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleOpen(product)}>
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(product._id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" title="Редактировать" onClick={() => handleOpen(product)}>
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" title="Скопировать" onClick={() => handleDuplicate(product)}>
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title={product.isHidden ? "Показать товар" : "Скрыть товар"}
+                              onClick={() => handleToggleHidden(product)}
+                              className={product.isHidden ? "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" : "text-amber-600 hover:text-amber-700 hover:bg-amber-50"}
+                            >
+                              {product.isHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            </Button>
+                            <Button variant="ghost" size="icon" title="Удалить" onClick={() => handleDelete(product._id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -4186,8 +4681,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <div className="font-semibold">{user.email}</div>
                           <div className="text-xs text-muted-foreground">
                             {user.profile?.name || "Без имени"}
-                            {user.profile?.nickname ? ` · @${user.profile.nickname}` : ""}
-                            {user.profile?.phone ? ` · ${user.profile.phone}` : ""}
+                            {user.profile?.nickname ? ` В· @${user.profile.nickname}` : ""}
+                            {user.profile?.phone ? ` В· ${user.profile.phone}` : ""}
                           </div>
                         </TableCell>
                         <TableCell>{user.isAdmin ? "Админ" : "Пользователь"}{user.isSystem ? " (system)" : ""}</TableCell>
@@ -4349,7 +4844,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>ID</TableHead>
+                                <TableHead>№ заказа</TableHead>
                                 <TableHead>Сумма</TableHead>
                                 <TableHead>Статус</TableHead>
                                 <TableHead>Дата</TableHead>
@@ -4358,8 +4853,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             <TableBody>
                               {selectedUserOrders.map((order) => (
                                 <TableRow key={order.id}>
-                                  <TableCell className="max-w-[180px] truncate">{order.id}</TableCell>
-                                  <TableCell>{order.totalAmount}</TableCell>
+                                  <TableCell className="font-mono">{formatAdminOrderNumber(order)}</TableCell>
+                                  <TableCell>{formatRubles(order.totalAmount)}</TableCell>
                                   <TableCell>{formatOrderStatus(order.status)}</TableCell>
                                   <TableCell>{order.createdAt ? new Date(order.createdAt).toLocaleString() : "—"}</TableCell>
                                 </TableRow>
@@ -4503,13 +4998,44 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </Button>
                 </div>
 
-                <div className="overflow-x-auto border border-gray-200">
-                  <Table>
+                <div className="border border-gray-200">
+                  <Table className="min-w-max table-fixed">
+                    <colgroup>
+                      {visibleOrderColumns.map((column) => (
+                        <col key={`order-col-${column.id}`} style={getOrderTableColumnCellStyle(column.id)} />
+                      ))}
+                    </colgroup>
                     <TableHeader>
                       <TableRow>
                         {visibleOrderColumns.map((column) => (
-                          <TableHead key={column.id} className={column.id === "actions" ? "text-right" : undefined}>
-                            {column.label}
+                          <TableHead
+                            key={column.id}
+                            className={`${column.id === "actions" ? "relative select-none px-3 text-right" : "relative select-none px-3"} ${orderColumnDropTargetId === column.id && draggedOrderColumnId !== column.id ? "bg-black/5" : ""}`}
+                            style={getOrderTableColumnCellStyle(column.id)}
+                            onDragOver={(event) => handleOrderColumnDragOver(column.id, event)}
+                            onDrop={(event) => void handleOrderColumnDrop(column.id, event)}
+                          >
+                            <div
+                              draggable={resizingOrderColumnId !== column.id}
+                              onDragStart={(event) => handleOrderColumnDragStart(column.id, event)}
+                              onDragEnd={() => {
+                                setDraggedOrderColumnId(null);
+                                setOrderColumnDropTargetId(null);
+                              }}
+                              className={`flex items-center gap-2 ${column.id === "actions" ? "justify-end pr-3" : "cursor-grab pr-3 active:cursor-grabbing"}`}
+                            >
+                              {column.id !== "actions" ? <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" /> : null}
+                              <span className="truncate">{column.label}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onPointerDown={(event) => handleOrderColumnResizeStart(column.id, event)}
+                              className="absolute inset-y-0 right-0 z-10 w-3 cursor-col-resize touch-none"
+                              aria-label={`Изменить ширину колонки ${column.label}`}
+                              tabIndex={-1}
+                            >
+                              <span className={`absolute right-0.5 top-1/2 h-6 w-px -translate-y-1/2 transition ${resizingOrderColumnId === column.id ? "bg-black" : "bg-black/15 hover:bg-black/40"}`} />
+                            </button>
                           </TableHead>
                         ))}
                       </TableRow>
@@ -4538,19 +5064,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {visibleOrderColumns.map((column) => {
                                 if (column.id === "id") {
                                   return (
-                                    <TableCell key={column.id} className="max-w-[190px] align-top">
-                                      <div className="font-mono text-xs break-all">{order.id}</div>
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
+                                      <div className="font-mono text-sm font-bold">{formatAdminOrderNumber(order)}</div>
+                                      <div className="mt-1 text-[11px] text-muted-foreground">создан {formatOrderDateTime(order.createdAt)}</div>
                                     </TableCell>
                                   );
                                 }
 
                                 if (column.id === "client") {
                                   return (
-                                    <TableCell key={column.id} className="min-w-[220px] align-top">
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <div className="font-semibold">{customer.email || order.userId}</div>
                                       <div className="text-xs text-muted-foreground">
                                         {customer.name || "Без имени"}
-                                        {customer.phone ? ` · ${customer.phone}` : ""}
+                                        {customer.phone ? ` В· ${customer.phone}` : ""}
                                       </div>
                                     </TableCell>
                                   );
@@ -4558,16 +5085,31 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                                 if (column.id === "items") {
                                   return (
-                                    <TableCell key={column.id} className="min-w-[300px] align-top">
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       {items.length === 0 ? (
                                         <span className="text-sm text-muted-foreground">Нет данных по товарам</span>
                                       ) : (
-                                        <div className="space-y-2">
+                                        <div className="space-y-3">
                                           {items.map((item, index) => (
-                                            <div key={`${order.id}-${item.productId}-${item.size}-${index}`} className="border-b border-dashed border-gray-200 pb-2 last:border-b-0 last:pb-0">
-                                              <div className="font-medium">{item.title}</div>
-                                              <div className="text-xs text-muted-foreground">
-                                                Размер: {item.size || "—"} · Количество: {item.quantity}
+                                            <div key={`${order.id}-${item.productId}-${item.size}-${index}`} className="grid gap-3 border-b border-dashed border-gray-200 pb-3 last:border-b-0 last:pb-0 md:grid-cols-[56px_minmax(0,1fr)_auto] md:items-center">
+                                              <div className="h-16 w-14 overflow-hidden bg-gray-100">
+                                                {item.imageUrl ? (
+                                                  <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                                                ) : (
+                                                  <div className="flex h-full w-full items-center justify-center bg-gray-900 px-1 text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-white">
+                                                    FD
+                                                  </div>
+                                                )}
+                                              </div>
+                                              <div className="min-w-0">
+                                                <div className="font-medium leading-tight">{item.title}</div>
+                                                <div className="mt-1 text-xs text-muted-foreground">
+                                                  Размер: {item.size || "—"} · Количество: {item.quantity}
+                                                </div>
+                                              </div>
+                                              <div className="text-left md:text-right">
+                                                <div className="font-semibold">{formatRubles(item.lineTotal)}</div>
+                                                <div className="text-xs text-muted-foreground">{formatRubles(item.unitPrice)} × {item.quantity}</div>
                                               </div>
                                             </div>
                                           ))}
@@ -4579,7 +5121,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                                 if (column.id === "payment") {
                                   return (
-                                    <TableCell key={column.id} className="min-w-[170px] align-top">
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <div>{formatPaymentMethod(order.paymentMethod)}</div>
                                       <div className="text-xs text-muted-foreground">Канал: {formatPurchaseChannel(order.purchaseChannel)}</div>
                                     </TableCell>
@@ -4588,7 +5130,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                                 if (column.id === "delivery") {
                                   return (
-                                    <TableCell key={column.id} className="min-w-[220px] align-top">
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <div className="text-sm">{customer.shippingAddress || "—"}</div>
                                       <div className="text-xs text-muted-foreground">Получатель: {customer.name || "—"}</div>
                                     </TableCell>
@@ -4597,7 +5139,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                                 if (column.id === "status") {
                                   return (
-                                    <TableCell key={column.id} className="align-top">
+                                    <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(order.status)}`}>
                                         {formatOrderStatus(order.status)}
                                       </span>
@@ -4607,22 +5149,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                                 if (column.id === "amount") {
                                   return (
-                                    <TableCell key={column.id} className="whitespace-nowrap align-top font-semibold">
-                                      {Number(order.totalAmount || 0).toFixed(2)} ₽
+                                    <TableCell key={column.id} className="whitespace-nowrap align-top font-semibold" style={getOrderTableColumnCellStyle(column.id)}>
+                                      {formatRubles(order.totalAmount)}
                                     </TableCell>
                                   );
                                 }
 
                                 if (column.id === "date") {
                                   return (
-                                    <TableCell key={column.id} className="whitespace-nowrap align-top text-sm">
+                                    <TableCell key={column.id} className="whitespace-nowrap align-top text-sm" style={getOrderTableColumnCellStyle(column.id)}>
                                       {formatOrderDateTime(order.createdAt)}
                                     </TableCell>
                                   );
                                 }
 
                                 return (
-                                  <TableCell key={column.id} className="align-top text-right">
+                                  <TableCell key={column.id} className="align-top text-right" style={getOrderTableColumnCellStyle(column.id)}>
                                     <TooltipProvider delayDuration={150}>
                                       <div className="flex justify-end gap-2">
                                         <Tooltip>
@@ -4814,7 +5356,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto rounded-none">
                   <DialogHeader>
                     <DialogTitle className="uppercase">
-                      Редактирование заказа{editingOrder ? ` · ${editingOrder.id}` : ""}
+                      Редактирование заказа{editingOrder ? ` · ${formatAdminOrderNumber(editingOrder)}` : ""}
                     </DialogTitle>
                   </DialogHeader>
 
@@ -4833,7 +5375,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Сумма</div>
-                                <div className="font-semibold">{Number(editingOrder.totalAmount || 0).toFixed(2)} ₽</div>
+                                <div className="font-semibold">{formatRubles(editingOrder.totalAmount)}</div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Создан</div>
@@ -4887,10 +5429,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             ) : (
                               <div className="space-y-3">
                                 {editingOrderItems.map((item, index) => (
-                                  <div key={`${editingOrder.id}-${item.productId}-${item.size}-${index}`} className="border border-dashed border-gray-200 p-3">
-                                    <div className="font-semibold">{item.title}</div>
-                                    <div className="text-sm text-muted-foreground">
-                                      Размер: {item.size || "—"} · Количество: {item.quantity}
+                                  <div key={`${editingOrder.id}-${item.productId}-${item.size}-${index}`} className="grid gap-3 border border-dashed border-gray-200 p-3 md:grid-cols-[72px_minmax(0,1fr)_auto] md:items-center">
+                                    <div className="h-20 w-[72px] overflow-hidden bg-gray-100">
+                                      {item.imageUrl ? (
+                                        <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center bg-gray-900 px-2 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
+                                          FD
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-semibold leading-tight">{item.title}</div>
+                                      <div className="mt-1 text-sm text-muted-foreground">
+                                        Размер: {item.size || "—"} · Количество: {item.quantity}
+                                      </div>
+                                    </div>
+                                    <div className="text-left md:text-right">
+                                      <div className="font-semibold">{formatRubles(item.lineTotal)}</div>
+                                      <div className="text-sm text-muted-foreground">{formatRubles(item.unitPrice)} × {item.quantity}</div>
                                     </div>
                                   </div>
                                 ))}
@@ -5015,7 +5572,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                     <div>
                                       <div className="font-semibold">{entryTitle}</div>
                                       <div className="text-xs text-muted-foreground">
-                                        {formatOrderDateTime(entry.changedAt)} · {entry.changedBy || "system"}
+                                        {formatOrderDateTime(entry.changedAt)} В· {entry.changedBy || "system"}
                                       </div>
                                     </div>
                                     {entry.status ? (
@@ -5237,6 +5794,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       const isEditing = editingDictionaryItemId === item.id;
                       const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
                       const itemUsed = isDictionaryItemUsed(selectedDictionaryGroup, item);
+                      const collectionPreviewImages = selectedDictionaryGroup === "collections"
+                        ? getCollectionPreviewImagesFromProducts(draft.name || item.name)
+                        : [];
                       return (
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
@@ -5314,6 +5874,73 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   placeholder="Описание словарного значения"
                                 />
                               </div>
+                              {selectedDictionaryGroup === "collections" && (
+                                <div className="space-y-3 rounded-none border border-slate-200 p-3">
+                                  <div className="space-y-1">
+                                    <Label className="mb-1 block text-xs">Режим изображения коллекции</Label>
+                                    <Select
+                                      value={draft.previewMode}
+                                      onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMode: value as CollectionPreviewMode } }))}
+                                    >
+                                      <SelectTrigger className="h-11 rounded-none border-slate-300">
+                                        <SelectValue placeholder="Выберите режим" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
+                                        <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  {draft.previewMode === "gallery" ? (
+                                    <div className="space-y-3">
+                                      <div className="flex flex-wrap gap-2">
+                                        <Button type="button" variant="outline" className="rounded-none" onClick={() => openCollectionEditGalleryPicker(item.id)}>
+                                          <Images className="mr-2 h-4 w-4" /> Выбрать из галереи
+                                        </Button>
+                                        {draft.imageUrl?.trim() && (
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="rounded-none"
+                                            onClick={() => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, imageUrl: "" } }))}
+                                          >
+                                            <X className="mr-2 h-4 w-4" /> Убрать изображение
+                                          </Button>
+                                        )}
+                                      </div>
+                                      {draft.imageUrl?.trim() ? (
+                                        <div className="overflow-hidden border border-slate-200 bg-slate-50">
+                                          <img src={draft.imageUrl} alt={draft.name || item.name} className="h-44 w-full object-cover" />
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-none border border-dashed border-slate-300 px-3 py-4 text-sm text-muted-foreground">
+                                          Выберите изображение из общей галереи. Оно будет использовано как главный кадр коллекции.
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-3">
+                                      {collectionPreviewImages.length > 0 ? (
+                                        <div className="grid grid-cols-3 gap-2 overflow-hidden">
+                                          {collectionPreviewImages.map((imageUrl, index) => (
+                                            <div key={`${item.id}-preview-${index}`} className="overflow-hidden border border-slate-200 bg-slate-50">
+                                              <img src={imageUrl} alt="" className="h-32 w-full object-cover" />
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-none border border-dashed border-slate-300 px-3 py-4 text-sm text-muted-foreground">
+                                          Как только в коллекции появятся товары с изображениями, коллаж соберётся автоматически из всех картинок этой коллекции.
+                                        </div>
+                                      )}
+                                      <p className="text-xs leading-5 text-muted-foreground">
+                                        В этом режиме блок на главной и в каталоге сам собирает широкий коллаж из всех изображений товаров коллекции и ротирует их автоматически.
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               <div className="flex flex-wrap gap-3">
                                 <label className="flex cursor-pointer items-center gap-3 rounded-none border border-slate-300 bg-white px-3 py-2 text-sm">
                                   <Checkbox
@@ -5963,12 +6590,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         подкаталогами и не пролистывать весь раздел целиком.
                       </p>
                       <Tabs value={selectedGeneralSettingsCatalog} onValueChange={setSelectedGeneralSettingsCatalog} className="space-y-4">
-                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-4">
+                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-5">
                           <TabsTrigger value="branding" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Брендинг
                           </TabsTrigger>
                           <TabsTrigger value="catalog-card" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Карточки каталога
+                          </TabsTrigger>
+                          <TabsTrigger value="catalog-page" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Страница каталога
                           </TabsTrigger>
                           <TabsTrigger value="product-page" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Страница товара
@@ -6047,6 +6677,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <p className="text-xs text-muted-foreground">
                           Для этого поля поддерживается прямая загрузка только файла <b>favicon.ico</b>. Файл используется только как иконка вкладки.
                         </p>
+                      </div>
+                      <div className="rounded-none border border-gray-200 p-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-sm font-semibold uppercase tracking-[0.12em]">Анимация загрузки сайта</Label>
+                            <p className="text-xs leading-5 text-muted-foreground">
+                              Легкий стартовый экран для переходов между страницами и первой загрузки сайта.
+                            </p>
+                          </div>
+                          <Checkbox
+                            checked={(settings.site_loading_animation_enabled || DEFAULT_APP_SETTINGS.site_loading_animation_enabled) !== "false"}
+                            onCheckedChange={(checked) => updateSetting("site_loading_animation_enabled", checked ? "true" : "false")}
+                          />
+                        </div>
                       </div>
                         </TabsContent>
                         <TabsContent value="catalog-card" className="mt-0">
@@ -6138,6 +6782,55 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             `Вписать целиком` оставляет товар полностью в кадре. `Вписать крупнее` уменьшает пустые поля без сильной обрезки. `Заполнить с обрезкой` делает карточку плотнее. `Растянуть` заполняет всю площадь, но может исказить пропорции.
                           </p>
                         </div>
+                      </div>
+                        </TabsContent>
+                        <TabsContent value="catalog-page" className="mt-0">
+                      <div className="space-y-4 border border-gray-200 p-3">
+                        <div className="space-y-1">
+                          <h4 className="font-semibold">Верхний слайдер коллекций</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Блок появится в самом верху каталога. Клик по карточке коллекции сразу откроет товары этой подборки.
+                          </p>
+                        </div>
+
+                        <label className="flex cursor-pointer items-center justify-between gap-3 rounded-none border border-gray-200 px-3 py-3">
+                          <div className="space-y-1">
+                            <span className="block text-sm font-medium">Показывать слайдер коллекций</span>
+                            <span className="block text-xs text-muted-foreground">
+                              Если выключить, каталог останется без верхней карусели, а фильтр по коллекциям продолжит работать.
+                            </span>
+                          </div>
+                          <Checkbox
+                            checked={(settings.catalog_collections_slider_enabled || DEFAULT_APP_SETTINGS.catalog_collections_slider_enabled) !== "false"}
+                            onCheckedChange={(checked) => updateSetting("catalog_collections_slider_enabled", checked ? "true" : "false")}
+                          />
+                        </label>
+
+                        <div className="grid gap-3 xl:grid-cols-2">
+                          <div className="space-y-1">
+                            <Label htmlFor="catalog-collections-slider-title">Заголовок блока</Label>
+                            <Input
+                              id="catalog-collections-slider-title"
+                              value={settings.catalog_collections_slider_title || ""}
+                              onChange={(e) => updateSetting("catalog_collections_slider_title", e.target.value)}
+                              placeholder="Коллекции"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="catalog-collections-slider-description">Короткое описание</Label>
+                            <Textarea
+                              id="catalog-collections-slider-description"
+                              value={settings.catalog_collections_slider_description || ""}
+                              onChange={(e) => updateSetting("catalog_collections_slider_description", e.target.value)}
+                              placeholder="Например: откройте подборку и сразу перейдите к товарам коллекции."
+                              className="min-h-[96px] rounded-none"
+                            />
+                          </div>
+                        </div>
+
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Изображения для карточек коллекций задаются в словаре `Коллекции`. Если у коллекции нет картинки, слайдер покажет карточку с фирменным градиентом.
+                        </p>
                       </div>
                         </TabsContent>
                         <TabsContent value="product-page" className="mt-0">
@@ -7594,6 +8287,72 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   />
                 </div>
 
+                {dictionaryCreateDialog.kind === "collections" && (
+                  <div className="space-y-3 rounded-none border border-black/10 p-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-dictionary-preview-mode">Режим изображения коллекции</Label>
+                      <Select
+                        value={dictionaryCreateDialog.previewMode}
+                        onValueChange={(value) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMode: value as CollectionPreviewMode }))}
+                      >
+                        <SelectTrigger id="create-dictionary-preview-mode" className="h-11 rounded-none border-black">
+                          <SelectValue placeholder="Выберите режим" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
+                          <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {dictionaryCreateDialog.previewMode === "gallery" ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="outline" className="rounded-none" onClick={openCollectionCreateGalleryPicker}>
+                            <Images className="mr-2 h-4 w-4" /> Выбрать из галереи
+                          </Button>
+                          {dictionaryCreateDialog.imageUrl?.trim() && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-none"
+                              onClick={() => setDictionaryCreateDialog((prev) => ({ ...prev, imageUrl: "" }))}
+                            >
+                              <X className="mr-2 h-4 w-4" /> Убрать изображение
+                            </Button>
+                          )}
+                        </div>
+                        {dictionaryCreateDialog.imageUrl?.trim() ? (
+                          <div className="overflow-hidden border border-black/10 bg-stone-50">
+                            <img src={dictionaryCreateDialog.imageUrl} alt={dictionaryCreateDialog.name || "Коллекция"} className="h-44 w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="rounded-none border border-dashed border-black/20 px-3 py-4 text-sm text-muted-foreground">
+                            Выберите готовое изображение из общей галереи. Оно станет основным кадром коллекции.
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name).length > 0 ? (
+                          <div className="grid grid-cols-3 gap-2 overflow-hidden">
+                            {getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name).map((imageUrl, index) => (
+                              <div key={`create-collection-preview-${index}`} className="overflow-hidden border border-black/10 bg-stone-50">
+                                <img src={imageUrl} alt="" className="h-32 w-full object-cover" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-none border border-dashed border-black/20 px-3 py-4 text-sm text-muted-foreground">
+                            Когда у коллекции появятся товары с фото, блок автоматически соберёт широкий коллаж из их изображений.
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">Этот режим собирает витрину из всех изображений товаров коллекции и автоматически меняет композицию в слайдере.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <DialogFooter>
                   <Button type="button" variant="outline" className="rounded-none" onClick={closeCreateDictionaryDialog} disabled={dictionaryCreateDialog.submitting}>
                     Отмена
@@ -7694,10 +8453,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Dialog open={isMediaGalleryPickerOpen} onOpenChange={setIsMediaGalleryPickerOpen}>
+          <Dialog open={Boolean(galleryPickerTarget)} onOpenChange={(open) => { if (!open) closeGalleryPicker(); }}>
             <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto rounded-none border-black">
               <DialogHeader>
-                <DialogTitle className="text-xl font-black uppercase">Выбрать изображение из галереи</DialogTitle>
+                <DialogTitle className="text-xl font-black uppercase">
+                  {galleryPickerTarget?.type === "product-media"
+                    ? "Выбрать изображение для товара"
+                    : "Выбрать изображение коллекции из галереи"}
+                </DialogTitle>
               </DialogHeader>
 
               <div className="space-y-3">
@@ -7744,7 +8507,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       type="button"
                       key={`picker-${image.id}`}
                       className="border border-gray-200 text-left hover:border-black transition-colors"
-                      onClick={() => selectMediaFromGallery(image.url)}
+                      onClick={() => assignSelectedGalleryImage(image.url)}
                     >
                       <img src={image.url} alt={image.name} className="w-full h-36 object-cover bg-gray-100" />
                       <div className="p-2">
@@ -7896,6 +8659,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       </div>
   );
 }
+
 
 
 

@@ -255,6 +255,56 @@ const normalizeProductCollectionGroups = (payload) =>
     }))
     : [];
 
+const normalizeOrderItem = (item) => {
+  if (!item || typeof item !== "object") return item;
+  return {
+    ...item,
+    productImageUrl: toAbsoluteMediaUrl(item?.productImageUrl),
+  };
+};
+
+const normalizeOrder = (order) => {
+  if (!order || typeof order !== "object") return order;
+  return {
+    ...order,
+    items: Array.isArray(order?.items) ? order.items.map(normalizeOrderItem) : order?.items,
+  };
+};
+
+const normalizeOrdersPage = (payload) => ({
+  ...payload,
+  items: Array.isArray(payload?.items) ? payload.items.map(normalizeOrder) : [],
+});
+
+const normalizeCatalogFiltersPayload = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+
+  const normalizeOption = (item) => (
+    item && typeof item === "object"
+      ? {
+        ...item,
+        imageUrl: toAbsoluteMediaUrl(item?.imageUrl),
+        previewImages: Array.isArray(item?.previewImages) ? item.previewImages.map(toAbsoluteMediaUrl) : [],
+      }
+      : item
+  );
+
+  return {
+    ...payload,
+    collections: Array.isArray(payload?.collections) ? payload.collections.map(normalizeOption) : [],
+    collectionSlider: payload?.collectionSlider && typeof payload.collectionSlider === "object"
+      ? {
+        ...payload.collectionSlider,
+        items: Array.isArray(payload.collectionSlider.items)
+          ? payload.collectionSlider.items.map(normalizeOption)
+          : [],
+      }
+      : payload?.collectionSlider,
+  };
+};
+
 const uploadWithProgress = ({ path, body, onProgress, headers = {} }) => new Promise((resolve, reject) => {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", buildRequestUrl(path), true);
@@ -315,7 +365,7 @@ export const FLOW = {
 
   getAllProducts: async () => normalizeProducts(await request("/products")),
 
-  getCatalogFilters: async () => request("/products/filters"),
+  getCatalogFilters: async () => normalizeCatalogFiltersPayload(await request("/products/filters")),
 
   catalogFilter: async ({ input } = {}) => {
     const products = normalizeProducts(await request("/products"));
@@ -350,7 +400,10 @@ export const FLOW = {
     body: JSON.stringify({ productId: input.productId }),
   }),
 
-  getUserOrders: async () => request("/orders"),
+  getUserOrders: async () => {
+    const result = await request("/orders");
+    return Array.isArray(result) ? result.map(normalizeOrder) : [];
+  },
 
   createOrder: async ({ input }) => request("/orders", {
     method: "POST",
@@ -689,7 +742,8 @@ export const FLOW = {
     if (input?.dateTo) params.set("dateTo", input.dateTo);
     if (input?.userId) params.set("userId", input.userId);
     const query = params.toString();
-    return request(query ? `/admin/orders?${query}` : "/admin/orders");
+    const result = await request(query ? `/admin/orders?${query}` : "/admin/orders");
+    return normalizeOrdersPage(result);
   },
 
   adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
@@ -774,6 +828,8 @@ export const FLOW = {
       name: input.name,
       slug: input.slug,
       color: input.color,
+      imageUrl: input.imageUrl,
+      previewMode: input.previewMode,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
@@ -793,6 +849,8 @@ export const FLOW = {
       name: input.name,
       slug: input.slug,
       color: input.color,
+      imageUrl: input.imageUrl,
+      previewMode: input.previewMode,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
@@ -808,6 +866,14 @@ export const FLOW = {
   adminGetSettings: async () => request("/admin/settings"),
 
   adminSaveSettings: async ({ input }) => request("/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminGetPreferences: async () => request("/admin/preferences"),
+
+  adminSavePreferences: async ({ input }) => request("/admin/preferences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

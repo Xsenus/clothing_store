@@ -46,6 +46,32 @@ export default function CheckoutPage() {
     fetchProducts();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateProfile = async () => {
+      try {
+        const profile = await FLOW.getProfile({ input: {} });
+        if (!profile || cancelled) {
+          return;
+        }
+
+        setName((prev) => prev || profile.name || "");
+        setEmail((prev) => prev || profile.email || "");
+        setPhone((prev) => prev || profile.phone || "");
+        setAddress((prev) => prev || profile.shippingAddress || "");
+      } catch {
+        // Keep checkout available even if profile prefill fails.
+      }
+    };
+
+    hydrateProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const subtotal = cartItems.reduce((sum, item) => {
     const product = products[item.productId];
     return sum + (product ? product.price * item.quantity : 0);

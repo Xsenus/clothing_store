@@ -28,7 +28,14 @@ public record RefreshPayload(string RefreshToken);
 /// <summary>
 /// Данные профиля пользователя.
 /// </summary>
-public record ProfilePayload(string? Name, string? Phone, string? ShippingAddress, string? Nickname, string? Email = null);
+public record ProfileAddressPayload(string? Id, string? Value, bool? IsDefault);
+public record ProfilePayload(
+    string? Name,
+    string? Phone,
+    string? ShippingAddress,
+    string? Nickname,
+    string? Email = null,
+    List<ProfileAddressPayload>? ShippingAddresses = null);
 
 /// <summary>
 /// Данные для добавления товара в корзину.
@@ -154,6 +161,6 @@ public record TelegramBotPatchPayload(
 
 public record TelegramBotValidatePayload(string Token);
 
-public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
+public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
 
-public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
+public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);

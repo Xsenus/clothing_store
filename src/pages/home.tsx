@@ -4,9 +4,10 @@ import ProductCard from '@/components/ProductCard';
 import { Button } from '@/components/ui/button';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PageSeo from '@/components/PageSeo';
+import CatalogCollectionsSlider, { type CatalogCollectionSliderItem } from '@/components/CatalogCollectionsSlider';
 
 const HOME_KEYWORDS = [
   'fashiondemon',
@@ -28,7 +29,22 @@ interface Product {
   likesCount?: number;
 }
 
+interface CollectionSliderState {
+  enabled: boolean;
+  title: string;
+  description: string;
+  items: CatalogCollectionSliderItem[];
+}
+
+const DEFAULT_COLLECTION_SLIDER: CollectionSliderState = {
+  enabled: true,
+  title: 'Коллекции',
+  description: '',
+  items: [],
+};
+
 export default function HomePage() {
+  const navigate = useNavigate();
   const handleScrollToNew = () => {
     const section = document.getElementById("new-arrivals");
     if (section) {
@@ -37,18 +53,30 @@ export default function HomePage() {
   };
   const [newProducts, setNewProducts] = useState<Product[]>([]);
   const [popularProducts, setPopularProducts] = useState<Product[]>([]);
+  const [collectionSlider, setCollectionSlider] = useState<CollectionSliderState>(DEFAULT_COLLECTION_SLIDER);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [newRes, popularRes] = await Promise.all([
+        const [newRes, popularRes, filtersRes] = await Promise.all([
           FLOW.getNewProducts({ input: {} }),
-          FLOW.getPopularProducts({ input: {} })
+          FLOW.getPopularProducts({ input: {} }),
+          FLOW.getCatalogFilters(),
         ]);
         
         if (Array.isArray(newRes)) setNewProducts(newRes.slice(0, 4));
         if (Array.isArray(popularRes)) setPopularProducts(popularRes.slice(0, 4));
+        setCollectionSlider({
+          enabled: filtersRes?.collectionSlider?.enabled !== false,
+          title: typeof filtersRes?.collectionSlider?.title === "string" && filtersRes.collectionSlider.title.trim()
+            ? filtersRes.collectionSlider.title
+            : DEFAULT_COLLECTION_SLIDER.title,
+          description: typeof filtersRes?.collectionSlider?.description === "string"
+            ? filtersRes.collectionSlider.description
+            : DEFAULT_COLLECTION_SLIDER.description,
+          items: Array.isArray(filtersRes?.collectionSlider?.items) ? filtersRes.collectionSlider.items : [],
+        });
       } catch (error) {
         console.error("Failed to fetch products:", error);
       } finally {
@@ -110,6 +138,24 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {collectionSlider.enabled && collectionSlider.items.length > 0 && (
+        <section className="bg-white py-20 text-black">
+          <div className="container mx-auto px-4">
+            {loading ? (
+              <LoadingSpinner className="min-h-[320px]" />
+            ) : (
+              <CatalogCollectionsSlider
+                eyebrow="Коллекции"
+                title={collectionSlider.title}
+                description={collectionSlider.description}
+                items={collectionSlider.items}
+                onSelect={(item) => navigate(`/catalog?collection=${encodeURIComponent(item.slug || item.value)}`)}
+              />
+            )}
+          </div>
+        </section>
+      )}
 
       {/* New Arrivals */}
       <section id="new-arrivals" className="py-24 bg-white text-black">

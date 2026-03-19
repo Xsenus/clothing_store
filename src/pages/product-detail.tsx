@@ -31,6 +31,7 @@ import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
 import { getProductDetailImageDisplayClasses, getProductDetailMediaPageLayoutClasses } from '@/lib/product-card-background';
 import { optimizeFilesForUpload } from '@/lib/image-upload-optimization';
 import { fetchPublicSettings, getCachedPublicSettings } from '@/lib/site-settings';
+import { formatProductPrice } from '@/lib/price-format';
 
 interface ProductReview {
   id: string;
@@ -754,14 +755,20 @@ export default function ProductDetailPage() {
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="text-3xl font-bold text-black">{formatPrice(product.price)}</span>
+                  <span className="text-3xl font-bold text-black">{formatProductPrice(product.price)}</span>
                   <span className="text-sm text-gray-400 line-through">
-                    {formatPrice(Math.round(product.price * 1.2))}
+                    {formatProductPrice(product.price * 1.2)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={handleLike}>
-                    <Heart className={`w-6 h-6 transition-all ${isLiked ? "fill-white stroke-white" : ""}`} />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleLike}
+                    className="rounded-full border border-gray-200 text-black transition-colors hover:bg-red-50 hover:text-red-500"
+                    aria-label={isLiked ? "Убрать из избранного" : "Добавить в избранное"}
+                  >
+                    <Heart className={`h-6 w-6 transition-colors ${isLiked ? "fill-red-500 stroke-red-500 text-red-500" : "stroke-black text-black"}`} />
                   </Button>
                 </div>
               </div>
@@ -1185,4 +1192,3 @@ export default function ProductDetailPage() {
   );
 }
 
-const formatPrice = (price: number) => `${Math.round(price)}₽`;

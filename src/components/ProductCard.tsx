@@ -12,6 +12,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
 import { getProductCardImageDisplayClasses } from '@/lib/product-card-background';
+import { formatProductPrice } from '@/lib/price-format';
 
 interface Product {
   _id: string;
@@ -75,8 +76,6 @@ const FlyingImage = ({ src, startRect, onComplete }: { src: string, startRect: D
     document.body
   );
 };
-
-const formatPrice = (price: number) => `${Math.round(price)}₽`;
 
 export default function ProductCard({ product, allowQuickAdd = true }: ProductCardProps) {
   const [isLiked, setIsLiked] = useState(false);
@@ -232,7 +231,7 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
                     </div>
                     <div>
                       <h3 className="font-bold">{product.name}</h3>
-                      <p className="text-muted-foreground">{formatPrice(product.price)}</p>
+                      <p className="text-muted-foreground">{formatProductPrice(product.price)}</p>
                     </div>
                   </div>
                   
@@ -275,10 +274,11 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
       {/* Like Button */}
       <button
         onClick={handleLike}
-        className="absolute top-2 right-2 p-2 rounded-full bg-white/0 hover:bg-white/20 text-white transition-all z-10"
+        className="absolute top-2 right-2 z-10 rounded-full border border-black/10 bg-white/85 p-2 text-black shadow-sm backdrop-blur-sm transition-all hover:scale-105 hover:bg-white"
+        aria-label={isLiked ? 'Убрать из избранного' : 'Добавить в избранное'}
       >
-        <Heart 
-          className={`w-6 h-6 transition-all ${isLiked ? 'fill-white stroke-white' : 'stroke-white'}`} 
+        <Heart
+          className={`h-6 w-6 transition-colors ${isLiked ? 'fill-red-500 stroke-red-500 text-red-500' : 'stroke-black text-black'}`}
         />
       </button>
 
@@ -286,9 +286,9 @@ export default function ProductCard({ product, allowQuickAdd = true }: ProductCa
           <h3 className="font-bold text-lg truncate mb-1">{product.name}</h3>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <span className="text-xl font-black text-black">{formatPrice(product.price)}</span>
+              <span className="text-xl font-black text-black">{formatProductPrice(product.price)}</span>
               <span className="text-sm text-gray-400 line-through">
-                {formatPrice(Math.round(product.price * 1.2))}
+                {formatProductPrice(product.price * 1.2)}
               </span>
             </div>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">

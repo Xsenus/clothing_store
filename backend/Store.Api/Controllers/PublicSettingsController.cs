@@ -24,6 +24,7 @@ public class PublicSettingsController : ControllerBase
         "telegram_bot_username",
         "site_title",
         "site_favicon_url",
+        "site_loading_animation_enabled",
         "product_card_background_mode",
         "product_card_background_color",
         "product_card_image_fit_mode",

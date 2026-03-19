@@ -342,11 +342,17 @@ public class Profile
     [Column("shipping_address")]
     public string? ShippingAddress { get; set; }
 
+    [Column("shipping_addresses_json", TypeName = "jsonb")]
+    public string ShippingAddressesJson { get; set; } = "[]";
+
     /// <summary>
     /// Получает или задаёт никнейм.
     /// </summary>
     [Column("nickname")]
     public string? Nickname { get; set; }
+
+    [Column("admin_preferences_json")]
+    public string? AdminPreferencesJson { get; set; }
 }
 
 [Table("telegram_auth_requests")]
@@ -492,6 +498,15 @@ public class Product
     /// </summary>
     [Column("creation_time")]
     public long CreationTime { get; set; }
+
+    [Column("is_hidden")]
+    public bool IsHidden { get; set; }
+
+    [Column("hidden_at")]
+    public long? HiddenAt { get; set; }
+
+    [Column("hidden_by_user_id")]
+    public string? HiddenByUserId { get; set; }
 
     /// <summary>
     /// Получает или задаёт исходные JSON-данные товара.
@@ -709,6 +724,12 @@ public class CollectionDictionary
     [Column("color")]
     public string? Color { get; set; }
 
+    [Column("image_url")]
+    public string? ImageUrl { get; set; }
+
+    [Column("preview_mode")]
+    public string PreviewMode { get; set; } = "gallery";
+
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 
@@ -882,6 +903,9 @@ public class Order
     /// </summary>
     [Column("user_id")]
     public string UserId { get; set; } = string.Empty;
+
+    [Column("order_number")]
+    public int OrderNumber { get; set; }
 
     /// <summary>
     /// Получает или задаёт сериализованные позиции заказа.

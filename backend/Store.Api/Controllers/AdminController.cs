@@ -141,6 +141,7 @@ public class AdminController : ControllerBase
         if (!string.IsNullOrWhiteSpace(trimmedSearch))
         {
             var pattern = $"%{trimmedSearch}%";
+            var orderNumberSearch = TryParseOrderNumberSearch(trimmedSearch);
             var matchingUserIds = _db.Users
                 .AsNoTracking()
                 .Where(x => EF.Functions.ILike(x.Email, pattern))
@@ -157,6 +158,7 @@ public class AdminController : ControllerBase
 
             query = query.Where(x =>
                 EF.Functions.ILike(x.Id, pattern) ||
+                (orderNumberSearch.HasValue && x.OrderNumber == orderNumberSearch.Value) ||
                 EF.Functions.ILike(x.UserId, pattern) ||
                 EF.Functions.ILike(x.CustomerName, pattern) ||
                 EF.Functions.ILike(x.CustomerEmail, pattern) ||
@@ -188,39 +190,24 @@ public class AdminController : ControllerBase
             ? new Dictionary<string, Profile>()
             : await _db.Profiles.AsNoTracking().Where(x => userIds.Contains(x.UserId)).ToDictionaryAsync(x => x.UserId);
 
-        var normalizedItemsByOrderId = orders.ToDictionary(x => x.Id, x => ParseOrderItems(x.ItemsJson));
-        var productIds = normalizedItemsByOrderId.Values
+        var storedItemsByOrderId = orders.ToDictionary(
+            x => x.Id,
+            x => OrderPresentation.ParseStoredOrderItems(x.ItemsJson),
+            StringComparer.Ordinal);
+        var productIds = storedItemsByOrderId.Values
             .SelectMany(x => x)
             .Select(x => x.ProductId)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct()
             .ToList();
-        var productNames = productIds.Count == 0
-            ? new Dictionary<string, string>()
+        var productSnapshots = productIds.Count == 0
+            ? new Dictionary<string, ProductOrderSnapshot>(StringComparer.Ordinal)
             : (await _db.Products
                 .AsNoTracking()
                 .Where(x => productIds.Contains(x.Id))
                 .ToListAsync())
-                .ToDictionary(
-                    x => x.Id,
-                    x =>
-                    {
-                        try
-                        {
-                            using var json = JsonDocument.Parse(x.Data);
-                            if (json.RootElement.TryGetProperty("name", out var nameElement))
-                            {
-                                var name = nameElement.GetString()?.Trim();
-                                if (!string.IsNullOrWhiteSpace(name))
-                                    return name;
-                            }
-                        }
-                        catch (JsonException)
-                        {
-                        }
-
-                        return x.Slug;
-                    });
+                .Select(OrderPresentation.BuildProductSnapshot)
+                .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
 
         return Results.Ok(new
         {
@@ -228,10 +215,12 @@ public class AdminController : ControllerBase
             {
                 var user = users.GetValueOrDefault(o.UserId);
                 var profile = profiles.GetValueOrDefault(o.UserId);
-                var normalizedItems = normalizedItemsByOrderId.GetValueOrDefault(o.Id) ?? [];
+                var storedItems = storedItemsByOrderId.GetValueOrDefault(o.Id) ?? [];
                 return new
                 {
                     o.Id,
+                    o.OrderNumber,
+                    displayOrderNumber = OrderPresentation.FormatOrderNumber(o.OrderNumber),
                     o.UserId,
                     userEmail = user?.Email,
                     userProfile = profile is null
@@ -256,12 +245,20 @@ public class AdminController : ControllerBase
                     o.CreatedAt,
                     o.UpdatedAt,
                     o.ItemsJson,
-                    items = normalizedItems.Select(item => new
+                    items = storedItems.Select(item =>
                     {
-                        item.ProductId,
-                        productName = productNames.GetValueOrDefault(item.ProductId),
-                        item.Size,
-                        item.Quantity
+                        var productSnapshot = productSnapshots.GetValueOrDefault(item.ProductId);
+                        var unitPrice = Math.Round(item.UnitPrice ?? productSnapshot?.UnitPrice ?? 0d, 2, MidpointRounding.AwayFromZero);
+                        return new
+                        {
+                            item.ProductId,
+                            productName = item.ProductName ?? productSnapshot?.Name ?? item.ProductId,
+                            productImageUrl = item.ProductImageUrl ?? productSnapshot?.ImageUrl,
+                            item.Size,
+                            item.Quantity,
+                            unitPrice,
+                            lineTotal = Math.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero)
+                        };
                     })
                 };
             }),
@@ -441,7 +438,10 @@ public class AdminController : ControllerBase
             profile.Nickname = NormalizeOptionalText(payload.Nickname);
 
         if (payload.ShippingAddress is not null)
+        {
             profile.ShippingAddress = NormalizeOptionalText(payload.ShippingAddress);
+            profile.ShippingAddressesJson = ProfileAddressBook.Serialize(null, profile.ShippingAddress);
+        }
 
         if (payload.Phone is not null)
         {
@@ -628,6 +628,51 @@ public class AdminController : ControllerBase
         return Results.Ok(all.ToDictionary(x => x.Key, x => x.Value));
     }
 
+    [HttpGet("preferences")]
+    public async Task<IResult> Preferences()
+    {
+        var admin = await RequireAdminUserAsync();
+        if (admin is null) return Results.Unauthorized();
+
+        var profile = await _db.Profiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == admin.Id);
+
+        return Results.Ok(ParseAdminPreferences(profile?.AdminPreferencesJson));
+    }
+
+    [HttpPost("preferences")]
+    public async Task<IResult> SavePreferences([FromBody] Dictionary<string, string> payload)
+    {
+        var admin = await RequireAdminUserAsync();
+        if (admin is null) return Results.Unauthorized();
+
+        var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == admin.Id);
+        if (profile is null)
+        {
+            profile = new Profile
+            {
+                UserId = admin.Id,
+                Email = admin.Email,
+            };
+            _db.Profiles.Add(profile);
+        }
+
+        var preferences = ParseAdminPreferences(profile.AdminPreferencesJson);
+        foreach (var (key, value) in payload)
+        {
+            var normalizedKey = key?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedKey))
+                continue;
+
+            preferences[normalizedKey] = value ?? string.Empty;
+        }
+
+        profile.AdminPreferencesJson = JsonSerializer.Serialize(preferences);
+        await _db.SaveChangesAsync();
+        return Results.Ok(new { ok = true });
+    }
+
     [HttpPost("settings")]
     public async Task<IResult> SaveSettings([FromBody] Dictionary<string, string> payload)
     {
@@ -687,6 +732,8 @@ public class AdminController : ControllerBase
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var description = NormalizeOptionalText(payload.Description);
         var color = NormalizeOptionalColor(payload.Color);
+        var imageUrl = NormalizeOptionalText(payload.ImageUrl);
+        var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -807,6 +854,8 @@ public class AdminController : ControllerBase
                     Slug = collectionSlug,
                     Description = description,
                     Color = color,
+                    ImageUrl = imageUrl,
+                    PreviewMode = previewMode,
                     IsActive = isActive,
                     ShowInCatalogFilter = false,
                     ShowColorInCatalog = showColorInCatalog,
@@ -839,6 +888,8 @@ public class AdminController : ControllerBase
 
         var description = NormalizeOptionalText(payload.Description);
         var colorValue = NormalizeOptionalColor(payload.Color);
+        var imageUrl = NormalizeOptionalText(payload.ImageUrl);
+        var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -968,6 +1019,8 @@ public class AdminController : ControllerBase
                 collection.Slug = resolvedCollectionSlug;
                 collection.Description = description;
                 collection.Color = colorValue;
+                collection.ImageUrl = imageUrl;
+                collection.PreviewMode = previewMode;
                 collection.IsActive = isActive;
                 collection.ShowInCatalogFilter = false;
                 collection.ShowColorInCatalog = showColorInCatalog;
@@ -1606,6 +1659,20 @@ public class AdminController : ControllerBase
         return true;
     }
 
+    private static int? TryParseOrderNumberSearch(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var digits = new string(value.Where(char.IsDigit).ToArray()).TrimStart('0');
+        if (string.IsNullOrWhiteSpace(digits))
+            return null;
+
+        return int.TryParse(digits, out var parsed) && parsed > 0
+            ? parsed
+            : null;
+    }
+
     private static bool IsInventoryReleasedStatus(string? status)
     {
         var normalized = NormalizeOrderStatus(status);
@@ -1739,6 +1806,15 @@ public class AdminController : ControllerBase
         return null;
     }
 
+    private static string NormalizeCollectionPreviewMode(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "products" => "products",
+            _ => "gallery"
+        };
+    }
+
     private static int NormalizeSortOrder(int? value, int fallback)
     {
         var normalizedValue = value ?? fallback;
@@ -1765,6 +1841,24 @@ public class AdminController : ControllerBase
         return password.Any(char.IsUpper)
                && password.Any(char.IsLower)
                && password.Any(char.IsDigit);
+    }
+
+    private static Dictionary<string, string> ParseAdminPreferences(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(raw);
+            return parsed is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(parsed, StringComparer.Ordinal);
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
     }
 
     private Task<User?> RequireAdminUserAsync() => _auth.RequireAdminUserAsync(Request);

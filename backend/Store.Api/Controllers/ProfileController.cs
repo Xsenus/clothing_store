@@ -48,6 +48,9 @@ public class ProfileController : ControllerBase
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         var rawEmail = string.IsNullOrWhiteSpace(profile?.Email) ? user.Email : profile!.Email;
         var telegramTechnicalEmail = IsTelegramTechnicalEmail(rawEmail);
+        var shippingAddresses = profile is not null
+            ? ProfileAddressBook.Parse(profile.ShippingAddressesJson, profile.ShippingAddress)
+            : [];
 
         return profile is not null
             ? Results.Ok(new
@@ -55,6 +58,12 @@ public class ProfileController : ControllerBase
                 name = profile.Name,
                 phone = profile.Phone,
                 shippingAddress = profile.ShippingAddress,
+                shippingAddresses = shippingAddresses.Select(address => new
+                {
+                    id = address.Id,
+                    value = address.Value,
+                    isDefault = address.IsDefault
+                }),
                 email = telegramTechnicalEmail ? string.Empty : rawEmail,
                 nickname = profile.Nickname,
                 phoneVerified = profile.PhoneVerified,
@@ -67,6 +76,7 @@ public class ProfileController : ControllerBase
                 name = "",
                 phone = "",
                 shippingAddress = "",
+                shippingAddresses = Array.Empty<object>(),
                 email = telegramTechnicalEmail ? string.Empty : rawEmail,
                 nickname = $"user{user.Id[..6]}",
                 phoneVerified = false,
@@ -319,12 +329,49 @@ public class ProfileController : ControllerBase
         if (!string.Equals(requestedPhone, currentPhone, StringComparison.Ordinal))
             return Results.BadRequest(new { detail = "Phone must be verified before saving" });
 
+        List<ProfileAddressEntry> nextShippingAddresses;
+        if (payload.ShippingAddresses is not null)
+        {
+            nextShippingAddresses = ProfileAddressBook.Normalize(
+                payload.ShippingAddresses.Select(address => new ProfileAddressEntry(
+                    address.Id ?? string.Empty,
+                    address.Value ?? string.Empty,
+                    address.IsDefault == true)),
+                payload.ShippingAddress);
+        }
+        else if (payload.ShippingAddress is not null)
+        {
+            nextShippingAddresses = ProfileAddressBook.Normalize(null, payload.ShippingAddress);
+        }
+        else
+        {
+            nextShippingAddresses = ProfileAddressBook.Parse(profile.ShippingAddressesJson, profile.ShippingAddress);
+        }
+
         profile.Name = payload.Name;
-        profile.ShippingAddress = payload.ShippingAddress;
+        profile.ShippingAddress = ProfileAddressBook.GetDefaultAddress(nextShippingAddresses);
+        profile.ShippingAddressesJson = ProfileAddressBook.Serialize(nextShippingAddresses);
         profile.Nickname = nickname;
 
         await _db.SaveChangesAsync();
-        return Results.Ok(profile);
+        return Results.Ok(new
+        {
+            name = profile.Name,
+            phone = profile.Phone,
+            shippingAddress = profile.ShippingAddress,
+            shippingAddresses = nextShippingAddresses.Select(address => new
+            {
+                id = address.Id,
+                value = address.Value,
+                isDefault = address.IsDefault
+            }),
+            email = profile.Email,
+            nickname = profile.Nickname,
+            phoneVerified = profile.PhoneVerified,
+            emailVerified = user.Verified,
+            isAdmin = user.IsAdmin,
+            isBlocked = user.IsBlocked
+        });
     }
 
     private async Task TrySendVerificationEmailAsync(string email, string code)

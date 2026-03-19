@@ -75,6 +75,8 @@ public class StoreDbContext : DbContext
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasSequence<int>("orders_order_number_seq");
+
         modelBuilder.Entity<VerificationCode>().HasKey(x => new { x.Email, x.Kind });
 
         modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
@@ -104,6 +106,11 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => new { x.UserId, x.Kind, x.Status });
         modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => x.State);
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
+        modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
+        modelBuilder.Entity<Order>()
+            .Property(x => x.OrderNumber)
+            .HasDefaultValueSql("nextval('orders_order_number_seq')")
+            .ValueGeneratedOnAdd();
 
         modelBuilder.Entity<Session>()
             .HasOne<User>()

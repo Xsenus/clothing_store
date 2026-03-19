@@ -29,17 +29,30 @@ public class ProductsController : ControllerBase
         _auth = auth;
     }
 
+    private static IQueryable<Product> ApplyProductVisibility(IQueryable<Product> query, bool includeHidden)
+        => includeHidden ? query : query.Where(x => !x.IsHidden);
+
+    private async Task<Product?> FindProductByIdAsync(string productId, bool includeHidden)
+        => await ApplyProductVisibility(_db.Products, includeHidden).FirstOrDefaultAsync(x => x.Id == productId);
+
+    private async Task<Product?> FindProductBySlugAsync(string slug, bool includeHidden)
+        => await ApplyProductVisibility(_db.Products, includeHidden).FirstOrDefaultAsync(x => x.Slug == slug);
+
     [HttpGet]
     public async Task<IResult> List()
     {
-        var products = await _db.Products.ToListAsync();
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var products = await ApplyProductVisibility(_db.Products, includeHidden).ToListAsync();
+        var productIds = products.Select(x => x.Id).ToList();
         var sizeDictionaries = await _db.SizeDictionaries
             .AsNoTracking()
             .Select(x => new { x.Id, x.Name, x.SortOrder })
             .ToListAsync();
         var sizeMap = sizeDictionaries.ToDictionary(x => x.Id, x => x.Name);
         var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
-        var stock = await _db.ProductSizeStocks.ToListAsync();
+        var stock = productIds.Count == 0
+            ? new List<ProductSizeStock>()
+            : await _db.ProductSizeStocks.Where(x => productIds.Contains(x.ProductId)).ToListAsync();
         var stockByProduct = stock.GroupBy(x => x.ProductId).ToDictionary(
             g => g.Key,
             g => g.ToDictionary(x => sizeMap.GetValueOrDefault(x.SizeId, x.SizeId), x => x.Stock));
@@ -58,20 +71,32 @@ public class ProductsController : ControllerBase
             }
 
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+            AppendProductVisibilityFields(json, product);
             return json;
         }));
     }
 
     [HttpGet("new")]
-    public async Task<IResult> ListNew() => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.IsNew)));
+    public async Task<IResult> ListNew()
+    {
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        return Results.Json(await BuildOrderedProductPayloadsAsync(ApplyProductVisibility(_db.Products.Where(p => p.IsNew), includeHidden), includeHidden));
+    }
 
     [HttpGet("popular")]
-    public async Task<IResult> ListPopular() => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.IsPopular).OrderByDescending(p => p.LikesCount)));
+    public async Task<IResult> ListPopular()
+    {
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        return Results.Json(await BuildOrderedProductPayloadsAsync(
+            ApplyProductVisibility(_db.Products.Where(p => p.IsPopular), includeHidden).OrderByDescending(p => p.LikesCount),
+            includeHidden));
+    }
 
     [HttpGet("filters")]
     public async Task<IResult> GetCatalogFilters()
     {
-        var usedCategoryNames = await _db.Products
+        var visibleProducts = _db.Products.Where(p => !p.IsHidden);
+        var usedCategoryNames = await visibleProducts
             .Where(p => p.Category != null && p.Category != string.Empty)
             .Select(p => p.Category!)
             .Distinct()
@@ -85,14 +110,16 @@ public class ProductsController : ControllerBase
         var usedMaterials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var usedColors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var usedCollections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var productDataList = await _db.Products
-            .Select(p => p.Data)
+        var collectionUsageCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var collectionPreviewImages = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var visibleProductData = await visibleProducts
+            .Select(p => new { p.Id, p.Data })
             .ToListAsync();
-        foreach (var data in productDataList)
+        foreach (var entry in visibleProductData)
         {
             try
             {
-                var json = JsonNode.Parse(data)?.AsObject();
+                var json = JsonNode.Parse(entry.Data)?.AsObject();
                 foreach (var category in NormalizeLookupValues(json?["categories"] as JsonArray, json?["category"]?.ToString()))
                 {
                     usedCategories.Add(category);
@@ -116,6 +143,25 @@ public class ProductsController : ControllerBase
                 foreach (var collection in NormalizeLookupValues(json?["collections"] as JsonArray, json?["collection"]?.ToString()))
                 {
                     usedCollections.Add(collection);
+                    var collectionKey = NormalizeLookupKey(collection);
+                    collectionUsageCounts[collectionKey] = collectionUsageCounts.GetValueOrDefault(collectionKey) + 1;
+
+                    if (!collectionPreviewImages.TryGetValue(collectionKey, out var previewImages))
+                    {
+                        previewImages = [];
+                        collectionPreviewImages[collectionKey] = previewImages;
+                    }
+
+                    foreach (var previewImageUrl in ResolveProductPreviewImageUrls(json))
+                    {
+                        if (previewImages.Count >= 18)
+                            break;
+
+                        if (previewImages.Any(value => string.Equals(value, previewImageUrl, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+
+                        previewImages.Add(previewImageUrl);
+                    }
                 }
             }
             catch
@@ -124,8 +170,12 @@ public class ProductsController : ControllerBase
             }
         }
 
+        var visibleProductIds = visibleProductData.Select(x => x.Id).ToList();
         var sizeMap = await _db.SizeDictionaries.ToDictionaryAsync(x => x.Id, x => x.Name);
-        var stockSizes = await _db.ProductSizeStocks
+        var stockSizes = visibleProductIds.Count == 0
+            ? new List<string>()
+            : await _db.ProductSizeStocks
+                .Where(x => visibleProductIds.Contains(x.ProductId))
             .Select(x => x.SizeId)
             .Distinct()
             .ToListAsync();
@@ -165,7 +215,10 @@ public class ProductsController : ControllerBase
             "catalog_filter_sizes_order",
             "catalog_filter_materials_order",
             "catalog_filter_colors_order",
-            "catalog_filter_collections_order"
+            "catalog_filter_collections_order",
+            "catalog_collections_slider_enabled",
+            "catalog_collections_slider_title",
+            "catalog_collections_slider_description"
         };
         var settingsRows = await _db.AppSettings
             .Where(x => settingKeys.Contains(x.Key))
@@ -240,9 +293,33 @@ public class ProductsController : ControllerBase
             {
                 value = x.Name,
                 label = x.Name,
+                slug = x.Slug,
+                imageUrl = x.ImageUrl,
+                previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
+                previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
+                description = x.Description,
                 color = showCollectionColors && x.ShowColorInCatalog ? x.Color : null,
                 showColorInCatalog = showCollectionColors && x.ShowColorInCatalog
             })
+            .ToList();
+
+        var collectionSliderItems = collectionDictionaryItems
+            .Where(x => usedCollections.Contains(x.Name))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new
+            {
+                value = x.Name,
+                label = x.Name,
+                slug = x.Slug,
+                imageUrl = x.ImageUrl,
+                previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
+                previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
+                description = x.Description,
+                color = x.Color,
+                productCount = collectionUsageCounts.GetValueOrDefault(NormalizeLookupKey(x.Name), 0)
+            })
+            .Where(x => x.productCount > 0)
             .ToList();
 
         return Results.Ok(new
@@ -252,6 +329,13 @@ public class ProductsController : ControllerBase
             materials,
             colors,
             collections,
+            collectionSlider = new
+            {
+                enabled = ParseBooleanSetting(settings, "catalog_collections_slider_enabled", true),
+                title = GetTextSetting(settings, "catalog_collections_slider_title", "Коллекции"),
+                description = GetTextSetting(settings, "catalog_collections_slider_description", string.Empty),
+                items = collectionSliderItems
+            },
             visibility = new
             {
                 categories = ParseBooleanSetting(settings, "catalog_filter_categories_enabled", true),
@@ -272,16 +356,28 @@ public class ProductsController : ControllerBase
     }
 
     [HttpGet("category/{category}/new")]
-    public async Task<IResult> CategoryNew(string category) => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.Category == category && p.IsNew)));
+    public async Task<IResult> CategoryNew(string category)
+    {
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        return Results.Json(await BuildOrderedProductPayloadsAsync(
+            ApplyProductVisibility(_db.Products.Where(p => p.Category == category && p.IsNew), includeHidden),
+            includeHidden));
+    }
 
     [HttpGet("category/{category}/popular")]
-    public async Task<IResult> CategoryPopular(string category) => Results.Json(await BuildOrderedProductPayloadsAsync(_db.Products.Where(p => p.Category == category && p.IsPopular).OrderByDescending(p => p.LikesCount)));
+    public async Task<IResult> CategoryPopular(string category)
+    {
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        return Results.Json(await BuildOrderedProductPayloadsAsync(
+            ApplyProductVisibility(_db.Products.Where(p => p.Category == category && p.IsPopular), includeHidden).OrderByDescending(p => p.LikesCount),
+            includeHidden));
+    }
 
     [HttpGet("{slug}/collections")]
     public async Task<IResult> GetCollectionGroups(string slug)
     {
-        var product = await _db.Products
-            .AsNoTracking()
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var product = await ApplyProductVisibility(_db.Products.AsNoTracking(), includeHidden)
             .FirstOrDefaultAsync(x => x.Slug == slug);
         if (product is null)
             return Results.NotFound(new { detail = "Product not found" });
@@ -305,9 +401,9 @@ public class ProductsController : ControllerBase
             StringComparer.OrdinalIgnoreCase);
 
         var relatedProducts = await BuildOrderedProductPayloadsAsync(
-            _db.Products
-                .Where(x => x.Id != product.Id)
-                .OrderByDescending(x => x.CreationTime));
+            ApplyProductVisibility(_db.Products.Where(x => x.Id != product.Id), includeHidden)
+                .OrderByDescending(x => x.CreationTime),
+            includeHidden);
         var groups = collectionNames
             .Select(collectionName =>
             {
@@ -343,7 +439,8 @@ public class ProductsController : ControllerBase
     [HttpGet("{slug}")]
     public async Task<IResult> GetBySlug(string slug)
     {
-        var p = await _db.Products.FirstOrDefaultAsync(x => x.Slug == slug);
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var p = await FindProductBySlugAsync(slug, includeHidden);
         if (p is null)
             return Results.NotFound(new { detail = "Product not found" });
 
@@ -371,6 +468,7 @@ public class ProductsController : ControllerBase
         }
 
         ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+        AppendProductVisibilityFields(json, p);
         return Results.Json(json);
     }
 
@@ -401,6 +499,14 @@ public class ProductsController : ControllerBase
         return int.TryParse(value.Trim(), out var parsedValue) && parsedValue >= 0
             ? parsedValue
             : fallback;
+    }
+
+    private static string GetTextSetting(IDictionary<string, string> settings, string key, string fallback)
+    {
+        if (!settings.TryGetValue(key, out var value))
+            return fallback;
+
+        return value?.Trim() ?? fallback;
     }
 
     private static string ResolveCategoryLabel(string value, string? description)
@@ -435,11 +541,14 @@ public class ProductsController : ControllerBase
     {
         var admin = await _auth.RequireAdminUserAsync(Request);
         if (admin is null) return Results.Unauthorized();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var id = payload["id"]?.ToString() ?? Guid.NewGuid().ToString("N");
+        var isHidden = payload["isHidden"]?.GetValue<bool>() ?? false;
         payload["id"] = id;
         EnsureProductDefaults(payload);
         NormalizePriceFields(payload);
         ApplyDictionaryOrdering(payload, await LoadDictionaryOrderMapsAsync());
+        RemoveProductVisibilityFields(payload);
 
         var product = new Product
         {
@@ -449,12 +558,16 @@ public class ProductsController : ControllerBase
             IsNew = payload["isNew"]?.GetValue<bool>() ?? false,
             IsPopular = payload["isPopular"]?.GetValue<bool>() ?? false,
             LikesCount = payload["likesCount"]?.GetValue<int>() ?? 0,
-            CreationTime = payload["creationTime"]?.GetValue<long>() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            CreationTime = payload["creationTime"]?.GetValue<long>() ?? now,
+            IsHidden = isHidden,
+            HiddenAt = isHidden ? now : null,
+            HiddenByUserId = isHidden ? admin.Id : null,
             Data = payload.ToJsonString()
         };
         _db.Products.Add(product);
         await _db.SaveChangesAsync();
         await SyncSizeStockAsync(id, payload["sizeStock"] as JsonObject, payload["sizes"] as JsonArray, admin.Id);
+        AppendProductVisibilityFields(payload, product);
         return Results.Json(payload);
     }
 
@@ -468,21 +581,41 @@ public class ProductsController : ControllerBase
 
         var before = ProductJsonService.Parse(product);
         var json = ProductJsonService.Merge(before.DeepClone().AsObject(), payload);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var isHidden = json["isHidden"]?.GetValue<bool>() ?? product.IsHidden;
         EnsureProductDefaults(json);
         NormalizePriceFields(json);
         ApplyDictionaryOrdering(json, await LoadDictionaryOrderMapsAsync());
+        RemoveProductVisibilityFields(json);
 
         product.Slug = json["slug"]?.ToString() ?? product.Slug;
         product.Category = json["category"]?.ToString() ?? (json["categories"] as JsonArray)?[0]?.ToString();
         product.IsNew = json["isNew"]?.GetValue<bool>() ?? false;
         product.IsPopular = json["isPopular"]?.GetValue<bool>() ?? false;
         product.LikesCount = json["likesCount"]?.GetValue<int>() ?? product.LikesCount;
+        if (isHidden)
+        {
+            if (!product.IsHidden)
+            {
+                product.HiddenAt = now;
+                product.HiddenByUserId = admin.Id;
+            }
+
+            product.IsHidden = true;
+        }
+        else
+        {
+            product.IsHidden = false;
+            product.HiddenAt = null;
+            product.HiddenByUserId = null;
+        }
         product.Data = json.ToJsonString();
 
         await _db.SaveChangesAsync();
         await SyncSizeStockAsync(product.Id, json["sizeStock"] as JsonObject, json["sizes"] as JsonArray, admin.Id);
         await SavePriceHistoryAsync(product.Id, before, json, admin.Id);
 
+        AppendProductVisibilityFields(json, product);
         return Results.Json(json);
     }
 
@@ -503,7 +636,8 @@ public class ProductsController : ControllerBase
     [HttpGet("{productId}/reviews")]
     public async Task<IResult> GetReviews(string productId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var product = await FindProductByIdAsync(productId, includeHidden);
         if (product is null) return Results.NotFound(new { detail = "Product not found" });
 
         var currentUser = await _auth.RequireUserAsync(Request);
@@ -553,7 +687,7 @@ public class ProductsController : ControllerBase
         var admin = await _auth.RequireAdminUserAsync(Request);
         if (admin is null) return Results.Unauthorized();
 
-        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
+        var product = await FindProductByIdAsync(productId, includeHidden: true);
         if (product is null) return Results.NotFound(new { detail = "Product not found" });
 
         var productJson = ProductJsonService.Parse(product);
@@ -576,7 +710,8 @@ public class ProductsController : ControllerBase
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
 
-        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == productId);
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var product = await FindProductByIdAsync(productId, includeHidden);
         if (product is null) return Results.NotFound(new { detail = "Product not found" });
 
         var productJson = ProductJsonService.Parse(product);
@@ -646,6 +781,8 @@ public class ProductsController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
+        if (await FindProductByIdAsync(productId, includeHidden: false) is null)
+            return Results.NotFound(new { detail = "Product not found" });
 
         var review = await _db.ProductReviews.FirstOrDefaultAsync(x => x.ProductId == productId && x.UserId == user.Id);
         if (review is null || review.IsDeleted)
@@ -979,7 +1116,7 @@ public class ProductsController : ControllerBase
             collections.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase));
     }
 
-    private async Task<List<JsonObject>> BuildOrderedProductPayloadsAsync(IQueryable<Product> query)
+    private async Task<List<JsonObject>> BuildOrderedProductPayloadsAsync(IQueryable<Product> query, bool appendVisibilityFields = false)
     {
         var products = await query.ToListAsync();
         var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
@@ -988,8 +1125,22 @@ public class ProductsController : ControllerBase
         {
             var json = ProductJsonService.Parse(product);
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+            if (appendVisibilityFields)
+                AppendProductVisibilityFields(json, product);
             return json;
         }).ToList();
+    }
+
+    private static void RemoveProductVisibilityFields(JsonObject json)
+    {
+        json.Remove("isHidden");
+        json.Remove("hiddenAt");
+    }
+
+    private static void AppendProductVisibilityFields(JsonObject json, Product product)
+    {
+        json["isHidden"] = product.IsHidden;
+        json["hiddenAt"] = product.HiddenAt.HasValue ? JsonValue.Create(product.HiddenAt.Value) : null;
     }
 
     private static void ApplyDictionaryOrdering(JsonObject json, DictionaryOrderMaps maps)
@@ -1091,6 +1242,53 @@ public class ProductsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(normalizedFallbackValue) && seen.Add(normalizedFallbackValue))
         {
             result.Add(normalizedFallbackValue);
+        }
+
+        return result;
+    }
+
+    private static string NormalizeLookupKey(string value)
+        => value.Trim().ToLowerInvariant();
+
+    private static string NormalizeCollectionPreviewMode(string? value)
+        => value?.Trim().ToLowerInvariant() == "products" ? "products" : "gallery";
+
+    private static IReadOnlyList<string> ResolveProductPreviewImageUrls(JsonObject? json)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCandidate(string? value)
+        {
+            var normalizedValue = value?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedValue))
+                return;
+
+            if (seen.Add(normalizedValue))
+                result.Add(normalizedValue);
+        }
+
+        var catalogImageUrl = json?["catalogImageUrl"]?.ToString()?.Trim();
+        AddCandidate(catalogImageUrl);
+
+        if (json?["images"] is JsonArray images)
+        {
+            foreach (var image in images)
+            {
+                AddCandidate(image?.ToString());
+            }
+        }
+
+        if (json?["media"] is JsonArray media)
+        {
+            foreach (var mediaItem in media.OfType<JsonObject>())
+            {
+                var mediaType = mediaItem["type"]?.ToString()?.Trim();
+                if (!string.Equals(mediaType, "image", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                AddCandidate(mediaItem["url"]?.ToString());
+            }
         }
 
         return result;

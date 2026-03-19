@@ -42,14 +42,61 @@ public class OrdersController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
-        return Results.Json(await _db.Orders.Where(x => x.UserId == user.Id).OrderByDescending(x => x.CreatedAt).Select(x => new
+        var orders = await _db.Orders
+            .Where(x => x.UserId == user.Id)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        var parsedItemsByOrderId = orders.ToDictionary(
+            x => x.Id,
+            x => OrderPresentation.ParseStoredOrderItems(x.ItemsJson),
+            StringComparer.Ordinal);
+        var missingProductSnapshotIds = parsedItemsByOrderId.Values
+            .SelectMany(x => x)
+            .Where(x => string.IsNullOrWhiteSpace(x.ProductName) || string.IsNullOrWhiteSpace(x.ProductImageUrl) || !x.UnitPrice.HasValue)
+            .Select(x => x.ProductId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+        var productSnapshots = missingProductSnapshotIds.Count == 0
+            ? new Dictionary<string, ProductOrderSnapshot>(StringComparer.Ordinal)
+            : (await _db.Products
+                .AsNoTracking()
+                .Where(x => missingProductSnapshotIds.Contains(x.Id))
+                .ToListAsync())
+                .Select(OrderPresentation.BuildProductSnapshot)
+                .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
+
+        return Results.Json(orders.Select(order =>
         {
-            x.Id,
-            items = x.ItemsJson,
-            x.TotalAmount,
-            x.Status,
-            x.CreatedAt
-        }).ToListAsync());
+            var items = parsedItemsByOrderId.GetValueOrDefault(order.Id) ?? [];
+            return new
+            {
+                order.Id,
+                order.OrderNumber,
+                displayOrderNumber = OrderPresentation.FormatOrderNumber(order.OrderNumber),
+                items = items.Select(item =>
+                {
+                    var productSnapshot = productSnapshots.GetValueOrDefault(item.ProductId);
+                    var unitPrice = Math.Round(item.UnitPrice ?? productSnapshot?.UnitPrice ?? 0d, 2, MidpointRounding.AwayFromZero);
+                    return new
+                    {
+                        item.ProductId,
+                        productName = item.ProductName ?? productSnapshot?.Name ?? item.ProductId,
+                        productImageUrl = item.ProductImageUrl ?? productSnapshot?.ImageUrl,
+                        item.Size,
+                        item.Quantity,
+                        unitPrice,
+                        lineTotal = Math.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero)
+                    };
+                }),
+                order.TotalAmount,
+                order.Status,
+                order.PaymentMethod,
+                order.ShippingAddress,
+                order.CreatedAt
+            };
+        }).ToList());
     }
 
     /// <summary>
@@ -83,6 +130,17 @@ public class OrdersController : ControllerBase
 
             var requestedSizeIds = sizeMap.Values.Select(x => x.Id).Distinct().ToList();
             var requestedProductIds = normalizedItems.Select(x => x.ProductId).Distinct().ToList();
+            var requestedProducts = await _db.Products
+                .AsNoTracking()
+                .Where(x => requestedProductIds.Contains(x.Id) && !x.IsHidden)
+                .ToListAsync();
+            var productSnapshots = requestedProducts
+                .Select(OrderPresentation.BuildProductSnapshot)
+                .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
+            var unavailableProductId = requestedProductIds.FirstOrDefault(productId => !productSnapshots.ContainsKey(productId));
+            if (!string.IsNullOrWhiteSpace(unavailableProductId))
+                return Results.BadRequest(new { detail = $"Товар {unavailableProductId} больше недоступен" });
+
             var stockRows = await _db.ProductSizeStocks
                 .Where(x => requestedProductIds.Contains(x.ProductId) && requestedSizeIds.Contains(x.SizeId))
                 .ToListAsync();
@@ -121,12 +179,26 @@ public class OrdersController : ControllerBase
                 });
             }
 
-            var serializedItems = normalizedItems.Select(item => new
-            {
-                productId = item.ProductId,
-                size = item.Size,
-                quantity = item.Quantity
-            });
+            var serializedItems = normalizedItems
+                .Select(item =>
+                {
+                    var productSnapshot = productSnapshots[item.ProductId];
+                    var unitPrice = Math.Round(productSnapshot.UnitPrice, 2, MidpointRounding.AwayFromZero);
+                    return new
+                    {
+                        productId = item.ProductId,
+                        productName = productSnapshot.Name,
+                        productImageUrl = productSnapshot.ImageUrl,
+                        unitPrice,
+                        size = item.Size,
+                        quantity = item.Quantity
+                    };
+                })
+                .ToList();
+            var computedTotalAmount = Math.Round(serializedItems.Sum(item => item.unitPrice * item.quantity), 2, MidpointRounding.AwayFromZero);
+            var resolvedTotalAmount = computedTotalAmount > 0
+                ? computedTotalAmount
+                : Math.Round(payload.TotalAmount, 2, MidpointRounding.AwayFromZero);
 
             var resolvedStatus = string.IsNullOrWhiteSpace(payload.Status)
                 ? "processing"
@@ -159,7 +231,7 @@ public class OrdersController : ControllerBase
                         resolvedCustomerEmail,
                         resolvedCustomerPhone,
                         resolvedShippingAddress,
-                        payload.TotalAmount)
+                        resolvedTotalAmount)
                 }
             };
 
@@ -168,7 +240,7 @@ public class OrdersController : ControllerBase
                 Id = orderId,
                 UserId = user.Id,
                 ItemsJson = JsonSerializer.Serialize(serializedItems),
-                TotalAmount = payload.TotalAmount,
+                TotalAmount = resolvedTotalAmount,
                 Status = resolvedStatus,
                 PaymentMethod = resolvedPaymentMethod,
                 PurchaseChannel = resolvedPurchaseChannel,
@@ -189,7 +261,12 @@ public class OrdersController : ControllerBase
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
             await _emailService.TrySendOrderCreatedEmailAsync(order);
-            return Results.Ok(new { id = order.Id });
+            return Results.Ok(new
+            {
+                id = order.Id,
+                orderNumber = order.OrderNumber,
+                displayOrderNumber = OrderPresentation.FormatOrderNumber(order.OrderNumber)
+            });
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
         {

@@ -3,6 +3,31 @@ import { FLOW } from "@/lib/api-mapping";
 
 const AuthContext = createContext(undefined);
 
+const normalizeAuthUser = (rawUser) => {
+  if (!rawUser || typeof rawUser !== "object") {
+    return null;
+  }
+
+  const email = String(rawUser.email || "").trim();
+  const name = String(rawUser.name || "").trim();
+  const nickname = String(rawUser.nickname || "").trim();
+  const id = String(rawUser.id || "").trim();
+  const isAdmin = !!rawUser.isAdmin;
+
+  if (!email && !name && !nickname && !id) {
+    return null;
+  }
+
+  return {
+    ...rawUser,
+    id: id || undefined,
+    email,
+    name,
+    nickname,
+    isAdmin,
+  };
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -12,9 +37,7 @@ export function AuthProvider({ children }) {
     const bootstrap = async () => {
       try {
         const me = await FLOW.getProfile();
-        if (me && me.email) {
-          setUser({ email: me.email, name: me.name });
-        }
+        setUser(normalizeAuthUser(me));
       } catch (err) {
         setUser(null);
       } finally {
@@ -42,7 +65,7 @@ export function AuthProvider({ children }) {
     if (flow === "telegram") {
       const telegramPayload = formData.get ? JSON.parse(formData.get("telegramPayload") || "{}") : formData.telegramPayload;
       const result = await FLOW.telegramLogin({ input: telegramPayload });
-      setUser(result.user);
+      setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
 
@@ -53,7 +76,7 @@ export function AuthProvider({ children }) {
       const nextUser = typeof rawUser === "string" ? JSON.parse(rawUser || "{}") : rawUser;
       if (token) localStorage.setItem("authToken", token);
       if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
-      setUser(nextUser || null);
+      setUser(normalizeAuthUser(nextUser));
       return { signingIn: true };
     }
 
@@ -63,19 +86,17 @@ export function AuthProvider({ children }) {
     }
     if (flow === "email-verification") {
       const result = await FLOW.verifySignup({ input: { email, code: password } });
-      setUser(result.user);
+      setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
     const result = await FLOW.signIn({ input: { email, password } });
     if (result.user) {
-      setUser(result.user);
+      setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
 
     const me = await FLOW.getProfile();
-    if (me?.email) {
-      setUser({ email: me.email, name: me.name, isAdmin: !!me.isAdmin });
-    }
+    setUser(normalizeAuthUser(me));
     return { signingIn: true };
   };
 

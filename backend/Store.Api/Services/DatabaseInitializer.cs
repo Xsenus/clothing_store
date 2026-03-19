@@ -673,6 +673,10 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "catalog_filter_materials_order", "30");
         await EnsureAppSettingExistsAsync(db, "catalog_filter_colors_order", "40");
         await EnsureAppSettingExistsAsync(db, "catalog_filter_collections_order", "50");
+        await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_title", "Коллекции");
+        await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_description", "");
+        await EnsureAppSettingExistsAsync(db, "site_loading_animation_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "smtp_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "smtp_host", "");
         await EnsureAppSettingExistsAsync(db, "smtp_port", "587");

@@ -431,23 +431,21 @@ public class TransactionalEmailService
         string? managerComment,
         CancellationToken cancellationToken)
     {
-        var items = ParseOrderItems(order.ItemsJson);
+        var items = OrderPresentation.ParseStoredOrderItems(order.ItemsJson);
         var productIds = items
             .Select(x => x.ProductId)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        var productNames = productIds.Count == 0
-            ? new Dictionary<string, string>(StringComparer.Ordinal)
+        var productSnapshots = productIds.Count == 0
+            ? new Dictionary<string, ProductOrderSnapshot>(StringComparer.Ordinal)
             : (await _db.Products
                 .AsNoTracking()
                 .Where(x => productIds.Contains(x.Id))
                 .ToListAsync(cancellationToken))
-                .ToDictionary(
-                    x => x.Id,
-                    x => ResolveProductName(x),
-                    StringComparer.Ordinal);
+                .Select(OrderPresentation.BuildProductSnapshot)
+                .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
 
         var orderItems = items.Count == 0
             ? "Состав заказа не указан."
@@ -455,19 +453,21 @@ public class TransactionalEmailService
                 Environment.NewLine,
                 items.Select(item =>
                 {
-                    var productName = productNames.GetValueOrDefault(item.ProductId, item.ProductId);
+                    var productName = item.ProductName ?? productSnapshots.GetValueOrDefault(item.ProductId)?.Name ?? item.ProductId;
                     var sizePart = string.IsNullOrWhiteSpace(item.Size) ? string.Empty : $" / {item.Size}";
                     return $"- {productName}{sizePart} x {item.Quantity}";
                 }));
 
         var normalizedStatus = NormalizeOrderStatus(order.Status);
         var normalizedPreviousStatus = NormalizeOrderStatus(previousStatus);
-        var formattedTotal = order.TotalAmount.ToString("0.##", CultureInfo.GetCultureInfo("ru-RU"));
+        var formattedOrderNumber = OrderPresentation.FormatOrderNumber(order.OrderNumber);
+        var resolvedOrderNumber = string.IsNullOrWhiteSpace(formattedOrderNumber) ? order.Id : formattedOrderNumber;
+        var formattedTotal = OrderPresentation.FormatRubles(order.TotalAmount);
 
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["order_id"] = order.Id,
-            ["order_number"] = order.Id,
+            ["order_number"] = resolvedOrderNumber,
             ["order_status"] = normalizedStatus,
             ["order_status_label"] = GetDictionaryValue(OrderStatusLabels, normalizedStatus),
             ["previous_order_status"] = normalizedPreviousStatus,
@@ -480,7 +480,7 @@ public class TransactionalEmailService
             ["customer_email"] = NormalizeEmail(order.CustomerEmail),
             ["customer_phone"] = order.CustomerPhone?.Trim(),
             ["shipping_address"] = order.ShippingAddress?.Trim(),
-            ["total_amount"] = $"{formattedTotal} ₽",
+            ["total_amount"] = formattedTotal,
             ["order_items"] = orderItems,
             ["manager_comment"] = string.IsNullOrWhiteSpace(managerComment) ? "без комментария" : managerComment.Trim()
         };

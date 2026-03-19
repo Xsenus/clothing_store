@@ -46,7 +46,7 @@ public class LikesController : ControllerBase
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
         var existing = await _db.Likes.FirstOrDefaultAsync(x => x.UserId == user.Id && x.ProductId == payload.ProductId);
-        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == payload.ProductId);
+        var product = await _db.Products.FirstOrDefaultAsync(x => x.Id == payload.ProductId && !x.IsHidden);
         if (product is null) return Results.BadRequest(new { detail = "Product not found" });
         if (existing is null)
         {

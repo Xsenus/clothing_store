@@ -7,11 +7,12 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { FLOW } from '@/lib/api-mapping';
-import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { SlidersHorizontal } from 'lucide-react';
 import PageSeo from '@/components/PageSeo';
+import CatalogCollectionsSlider, { type CatalogCollectionSliderItem } from '@/components/CatalogCollectionsSlider';
 
 const CATALOG_KEYWORDS = [
   'каталог одежды',
@@ -47,9 +48,29 @@ interface Product {
 interface DictionaryOption {
   value: string;
   label: string;
+  slug?: string | null;
+  imageUrl?: string | null;
+  previewMode?: "gallery" | "products";
+  previewImages?: string[];
+  description?: string | null;
   color?: string | null;
   showColorInCatalog?: boolean;
+  productCount?: number;
 }
+
+interface CollectionSliderState {
+  enabled: boolean;
+  title: string;
+  description: string;
+  items: CatalogCollectionSliderItem[];
+}
+
+const DEFAULT_COLLECTION_SLIDER: CollectionSliderState = {
+  enabled: true,
+  title: 'Коллекции',
+  description: '',
+  items: [],
+};
 
 type CatalogFilterGroupKey = 'categories' | 'sizes' | 'materials' | 'colors' | 'collections';
 
@@ -321,6 +342,8 @@ export default function CatalogPage() {
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
+  const initialCollectionParamAppliedRef = useRef(false);
 
   // Filters state
   const [sortBy, setSortBy] = useState('popular');
@@ -343,6 +366,7 @@ export default function CatalogPage() {
   const [showColorFilter, setShowColorFilter] = useState(true);
   const [showCollectionFilter, setShowCollectionFilter] = useState(true);
   const [filterGroupOrder, setFilterGroupOrder] = useState<CatalogFilterOrder>(DEFAULT_CATALOG_FILTER_ORDER);
+  const [collectionSlider, setCollectionSlider] = useState<CollectionSliderState>(DEFAULT_COLLECTION_SLIDER);
 
   const sortOptions = [
     { value: 'popular', label: 'Популярные' },
@@ -420,8 +444,28 @@ export default function CatalogPage() {
               .map((item: any) => ({
                 value: item.value,
                 label: item.label,
+                slug: item.slug ?? null,
+                imageUrl: item.imageUrl ?? null,
+                previewMode: item.previewMode === "products" ? "products" : "gallery",
+                previewImages: Array.isArray(item.previewImages) ? item.previewImages : [],
+                description: item.description ?? null,
                 color: item.color ?? null,
                 showColorInCatalog: item.showColorInCatalog !== false,
+              }))
+          : [];
+        const nextCollectionSliderItems = Array.isArray(response?.collectionSlider?.items)
+          ? response.collectionSlider.items
+              .filter((item: any) => item?.value && item?.label)
+              .map((item: any) => ({
+                value: item.value,
+                label: item.label,
+                slug: item.slug ?? null,
+                imageUrl: item.imageUrl ?? null,
+                previewMode: item.previewMode === "products" ? "products" : "gallery",
+                previewImages: Array.isArray(item.previewImages) ? item.previewImages : [],
+                description: item.description ?? null,
+                color: item.color ?? null,
+                productCount: Number.isFinite(Number(item.productCount)) ? Number(item.productCount) : 0,
               }))
           : [];
 
@@ -441,6 +485,16 @@ export default function CatalogPage() {
           materials: Number.isFinite(Number(response?.order?.materials)) ? Number(response.order.materials) : DEFAULT_CATALOG_FILTER_ORDER.materials,
           colors: Number.isFinite(Number(response?.order?.colors)) ? Number(response.order.colors) : DEFAULT_CATALOG_FILTER_ORDER.colors,
           collections: Number.isFinite(Number(response?.order?.collections)) ? Number(response.order.collections) : DEFAULT_CATALOG_FILTER_ORDER.collections,
+        });
+        setCollectionSlider({
+          enabled: response?.collectionSlider?.enabled !== false,
+          title: typeof response?.collectionSlider?.title === 'string' && response.collectionSlider.title.trim()
+            ? response.collectionSlider.title
+            : DEFAULT_COLLECTION_SLIDER.title,
+          description: typeof response?.collectionSlider?.description === 'string'
+            ? response.collectionSlider.description
+            : DEFAULT_COLLECTION_SLIDER.description,
+          items: nextCollectionSliderItems,
         });
       } catch (error) {
         console.error('Failed to fetch catalog filters:', error);
@@ -480,6 +534,57 @@ export default function CatalogPage() {
     setSelectedMaterials((prev) => prev.filter((value) => available.has(value)));
   }, [materials, showMaterialFilter]);
 
+  const scrollToCatalogResults = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById('catalog-results')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  };
+
+  const findCollectionOptionByQueryValue = (queryValue: string, items: DictionaryOption[]) => {
+    const normalizedValue = queryValue.trim().toLowerCase();
+    if (!normalizedValue) {
+      return null;
+    }
+
+    return items.find((item) => {
+      const candidates = [item.slug, item.value, item.label]
+        .filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0)
+        .map((candidate) => candidate.trim().toLowerCase());
+
+      return candidates.includes(normalizedValue);
+    }) || null;
+  };
+
+  const updateCollectionQueryParam = (collectionValue?: string | null) => {
+    const params = new URLSearchParams(location.search);
+    if (collectionValue?.trim()) {
+      params.set('collection', collectionValue.trim());
+    } else {
+      params.delete('collection');
+    }
+
+    const nextSearch = params.toString();
+    const currentSearch = location.search.startsWith('?') ? location.search.slice(1) : location.search;
+    if (nextSearch === currentSearch) {
+      return;
+    }
+
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : '',
+      },
+      { replace: true }
+    );
+  };
+
   useEffect(() => {
     if (!showColorFilter) {
       setSelectedColors([]);
@@ -491,14 +596,40 @@ export default function CatalogPage() {
   }, [colors, showColorFilter]);
 
   useEffect(() => {
-    if (!showCollectionFilter) {
-      setSelectedCollections([]);
+    const available = new Set(collections.map((item) => item.value));
+    setSelectedCollections((prev) => prev.filter((value) => available.has(value)));
+  }, [collections]);
+
+  useEffect(() => {
+    if (initialCollectionParamAppliedRef.current || collections.length === 0) {
       return;
     }
 
-    const available = new Set(collections.map((item) => item.value));
-    setSelectedCollections((prev) => prev.filter((value) => available.has(value)));
-  }, [collections, showCollectionFilter]);
+    initialCollectionParamAppliedRef.current = true;
+    const collectionParam = new URLSearchParams(location.search).get('collection');
+    if (!collectionParam) {
+      return;
+    }
+
+    const matchedCollection = findCollectionOptionByQueryValue(collectionParam, collections);
+    if (matchedCollection) {
+      setSelectedCollections([matchedCollection.value]);
+    }
+  }, [collections, location.search]);
+
+  useEffect(() => {
+    if (!initialCollectionParamAppliedRef.current) {
+      return;
+    }
+
+    if (selectedCollections.length !== 1) {
+      updateCollectionQueryParam(null);
+      return;
+    }
+
+    const activeCollection = collections.find((item) => item.value === selectedCollections[0]);
+    updateCollectionQueryParam(activeCollection?.slug || activeCollection?.value || null);
+  }, [collections, selectedCollections]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -632,6 +763,19 @@ export default function CatalogPage() {
     );
   };
 
+  const handleSliderCollectionSelect = (item: CatalogCollectionSliderItem) => {
+    const nextValue = item.value;
+    setSelectedCollections([nextValue]);
+    updateCollectionQueryParam(item.slug || item.value);
+    scrollToCatalogResults();
+  };
+
+  const clearSliderCollection = () => {
+    setSelectedCollections([]);
+    updateCollectionQueryParam(null);
+    scrollToCatalogResults();
+  };
+
   const resetFilters = () => {
     setSortBy('popular');
     setSelectedCategories([]);
@@ -733,6 +877,18 @@ export default function CatalogPage() {
           </Sheet>
         </div>
 
+        {collectionSlider.enabled && collectionSlider.items.length > 0 && (
+          <CatalogCollectionsSlider
+            eyebrow="Подборки"
+            title={collectionSlider.title}
+            description={collectionSlider.description}
+            items={collectionSlider.items}
+            activeValue={selectedCollections.length === 1 ? selectedCollections[0] : null}
+            onSelect={handleSliderCollectionSelect}
+            className="mb-10"
+          />
+        )}
+
         <div className="flex gap-8">
           {/* Desktop Sidebar */}
           <aside className="hidden md:block w-64 flex-shrink-0">
@@ -778,7 +934,22 @@ export default function CatalogPage() {
           </aside>
 
           {/* Product Grid */}
-          <div className="flex-1">
+          <div id="catalog-results" className="flex-1 scroll-mt-28">
+            {selectedCollections.length === 1 && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border border-black/10 bg-black/[0.03] px-4 py-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    Открыта подборка
+                  </div>
+                  <div className="text-lg font-bold uppercase tracking-tight">
+                    {collections.find((item) => item.value === selectedCollections[0])?.label || selectedCollections[0]}
+                  </div>
+                </div>
+                <Button variant="outline" className="rounded-none border-black" onClick={clearSliderCollection}>
+                  Показать весь каталог
+                </Button>
+              </div>
+            )}
             {loading ? (
               <LoadingSpinner className="min-h-[400px]" />
             ) : filteredProducts.length > 0 ? (
