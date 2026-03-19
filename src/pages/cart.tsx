@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useCart } from '@/context/CartContext';
 import { Link } from 'react-router';
 import { FLOW } from '@/lib/api-mapping';
+import { formatProductPrice } from '@/lib/price-format';
 import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PageSeo from '@/components/PageSeo';
@@ -136,7 +137,7 @@ export default function CartPage() {
                 <div className="space-y-4 mb-8">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600 uppercase tracking-wide">Промежуточный итог</span>
-                    <span className="font-bold">${subtotal.toFixed(2)}</span>
+                    <span className="font-bold">{formatProductPrice(subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600 uppercase tracking-wide">Доставка</span>
@@ -147,7 +148,7 @@ export default function CartPage() {
                 <div className="border-t border-gray-200 pt-6 mb-8">
                   <div className="flex justify-between items-end">
                     <span className="font-black uppercase tracking-widest">ИТОГО</span>
-                    <span className="text-3xl font-black">${subtotal.toFixed(2)}</span>
+                    <span className="text-3xl font-black">{formatProductPrice(subtotal)}</span>
                   </div>
                 </div>
 

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
+import { formatProductPrice } from '@/lib/price-format';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Authenticated } from '@/context/AuthContext';
@@ -244,7 +245,7 @@ export default function CheckoutPage() {
                   className="w-full h-16 text-xl font-black uppercase tracking-widest bg-black text-white hover:bg-gray-800 rounded-none transition-all"
                   disabled={loading || hasUnavailableItems}
                 >
-                  {loading ? "Обработка..." : `ОФОРМИТЬ ЗАКАЗ - $${total.toFixed(2)}`}
+                  {loading ? "Обработка..." : `ОФОРМИТЬ ЗАКАЗ - ${formatProductPrice(total)}`}
                 </Button>
                 {hasUnavailableItems && (
                   <p className="text-sm text-red-600">Некоторые товары закончились. Вернитесь в корзину и скорректируйте заказ.</p>
@@ -269,7 +270,7 @@ export default function CheckoutPage() {
                           <p className="text-red-600 text-xs">Закончился (доступно: {product.sizeStock[item.size] ?? 0})</p>
                         )}
                       </div>
-                      <span className="font-bold">${(product.price * item.quantity).toFixed(2)}</span>
+                      <span className="font-bold">{formatProductPrice(product.price * item.quantity)}</span>
                     </div>
                   );
                 })}
@@ -278,15 +279,15 @@ export default function CheckoutPage() {
               <div className="border-t border-gray-200 pt-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Промежуточный итог</span>
-                  <span className="font-bold">${subtotal.toFixed(2)}</span>
+                  <span className="font-bold">{formatProductPrice(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Доставка {shippingLoading ? "(расчет...)" : ""}</span>
-                  <span className="font-bold">${shipping.toFixed(2)}</span>
+                  <span className="font-bold">{formatProductPrice(shipping)}</span>
                 </div>
                 <div className="flex justify-between text-xl font-black mt-4 pt-4 border-t border-black">
                   <span>ИТОГО</span>
-                  <span>${total.toFixed(2)}</span>
+                  <span>{formatProductPrice(total)}</span>
                 </div>
               </div>
             </div>

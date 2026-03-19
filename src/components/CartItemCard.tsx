@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import QuantitySelector from '@/components/QuantitySelector';
 import { useCart } from '@/context/CartContext';
+import { formatProductPrice } from '@/lib/price-format';
 import { Trash2, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -57,10 +58,10 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
     <div className="flex gap-4 py-6 border-b border-gray-100 last:border-0">
       <div className="h-24 w-24 flex-shrink-0 bg-gray-100 border border-gray-200 overflow-hidden relative">
         {product.images?.[0] && !imgError ? (
-          <img 
-            src={product.images[0]} 
-            alt={product.name} 
-            className="w-full h-full object-cover" 
+          <img
+            src={product.images[0]}
+            alt={product.name}
+            className="w-full h-full object-cover"
             onError={() => setImgError(true)}
           />
         ) : (
@@ -74,10 +75,10 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
         <div>
           <div className="flex justify-between items-start">
             <h3 className="font-bold uppercase tracking-wide text-sm md:text-base">{product.name}</h3>
-            <span className="font-black text-lg">${(product.price * item.quantity).toFixed(2)}</span>
+            <span className="font-black text-lg">{formatProductPrice(product.price * item.quantity)}</span>
           </div>
           <p className="text-sm text-gray-500 uppercase tracking-wider mt-1">Размер: {item.size}</p>
-          <p className="text-xs text-gray-400 mt-1">${product.price.toFixed(2)} / шт</p>
+          <p className="text-xs text-gray-400 mt-1">{formatProductPrice(product.price)} / шт</p>
           {isOutOfStock && (
             <p className="text-xs text-red-600 mt-1 font-semibold">
               {availableStock === 0 ? "Товар закончился" : `Доступно: ${availableStock ?? 0} шт.`}
@@ -86,21 +87,21 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
         </div>
 
         <div className="flex justify-between items-center mt-4">
-          <QuantitySelector 
-            quantity={item.quantity} 
+          <QuantitySelector
+            quantity={item.quantity}
             onChange={handleQuantityChange}
             min={1}
             max={isOutOfStock ? item.quantity : Math.max(1, availableStock ?? 10)}
           />
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleRemove}
             className="text-red-500 hover:text-red-700 hover:bg-red-50"
             disabled={updating}
           >
             {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-            <span className="sr-only">Remove</span>
+            <span className="sr-only">Удалить</span>
           </Button>
         </div>
       </div>
