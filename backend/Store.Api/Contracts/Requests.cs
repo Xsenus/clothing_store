@@ -73,7 +73,10 @@ public record OrderPayload(
     string? CustomerPhone,
     string? ShippingAddress,
     string? PaymentMethod,
-    string? PurchaseChannel);
+    string? PurchaseChannel,
+    string? PaymentReturnUrl);
+
+public record OrderPaymentCheckoutPayload(string? ReturnUrl);
 
 public record AdminOrderPatchPayload(
     string? Status,
@@ -114,6 +117,45 @@ public record SmtpTestEmailPayload(
     string? FromName,
     bool UseSsl,
     string? SecurityMode);
+
+public record YooMoneyAdminTestPayload(
+    bool Enabled,
+    string? WalletNumber,
+    string? NotificationSecret,
+    string? AccessToken,
+    string? LabelPrefix,
+    int? PaymentTimeoutMinutes,
+    bool AllowBankCards,
+    bool AllowWallet,
+    string PaymentMethod,
+    decimal? Amount,
+    string? ReturnUrl);
+
+public record YooKassaAdminTestPayload(
+    bool Enabled,
+    string? ShopId,
+    string? SecretKey,
+    bool TestMode,
+    string? LabelPrefix,
+    int? PaymentTimeoutMinutes,
+    bool AllowBankCards,
+    bool AllowSbp,
+    bool AllowYooMoney,
+    string PaymentMethod,
+    decimal? Amount,
+    string? ReturnUrl);
+
+public record YandexDeliveryAdminTestPayload(
+    bool Enabled,
+    bool UseTestEnvironment,
+    string? ApiToken,
+    string? SourceStationId,
+    int? PackageLengthCm,
+    int? PackageHeightCm,
+    int? PackageWidthCm,
+    string ToAddress,
+    decimal? WeightKg,
+    decimal? DeclaredCost);
 
 /// <summary>
 /// Параметры поиска адреса через DaData.

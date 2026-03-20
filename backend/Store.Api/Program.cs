@@ -47,7 +47,11 @@ builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl))
 builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<IOrderInventoryService, OrderInventoryService>();
 builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestService>();
+builder.Services.AddScoped<IOrderPaymentService, OrderPaymentService>();
+builder.Services.AddScoped<IYooMoneyPaymentService, YooMoneyPaymentService>();
+builder.Services.AddScoped<IYooKassaPaymentService, YooKassaPaymentService>();
 builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
 builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
 builder.Services.AddScoped<TransactionalEmailService>();
@@ -61,6 +65,7 @@ builder.Services.AddSingleton<TelegramBotManager>();
 builder.Services.AddSingleton<ITelegramBotManager>(sp => sp.GetRequiredService<TelegramBotManager>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotManager>());
+builder.Services.AddHostedService<OrderPaymentMonitorService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

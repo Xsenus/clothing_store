@@ -26,9 +26,12 @@ public class AdminController : ControllerBase
     private readonly ITelegramBotManager _telegramBotManager;
     private readonly TransactionalEmailService _emailService;
     private readonly IOrderEmailQueue _orderEmailQueue;
+    private readonly IOrderInventoryService _orderInventoryService;
+    private readonly IOrderPaymentService _orderPaymentService;
+    private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
+    private readonly IYooKassaPaymentService _yooKassaPaymentService;
+    private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
-
-    private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
@@ -40,6 +43,11 @@ public class AdminController : ControllerBase
         ITelegramBotManager telegramBotManager,
         TransactionalEmailService emailService,
         IOrderEmailQueue orderEmailQueue,
+        IOrderInventoryService orderInventoryService,
+        IOrderPaymentService orderPaymentService,
+        IYooMoneyPaymentService yooMoneyPaymentService,
+        IYooKassaPaymentService yooKassaPaymentService,
+        IYandexDeliveryQuoteService yandexDeliveryQuoteService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService)
     {
         _configuration = configuration;
@@ -48,6 +56,11 @@ public class AdminController : ControllerBase
         _telegramBotManager = telegramBotManager;
         _emailService = emailService;
         _orderEmailQueue = orderEmailQueue;
+        _orderInventoryService = orderInventoryService;
+        _orderPaymentService = orderPaymentService;
+        _yooMoneyPaymentService = yooMoneyPaymentService;
+        _yooKassaPaymentService = yooKassaPaymentService;
+        _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
     }
 
@@ -220,6 +233,11 @@ public class AdminController : ControllerBase
                 .ToListAsync())
                 .Select(OrderPresentation.BuildProductSnapshot)
                 .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
+        var latestPaymentsByOrderId = await _orderPaymentService.GetLatestPaymentsByOrderIdAsync(
+            orders.Select(order => order.Id),
+            HttpContext.RequestAborted);
+        var manualRefreshProviders = await _orderPaymentService.GetManualRefreshAvailableProvidersAsync(HttpContext.RequestAborted);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         return Results.Ok(new
         {
@@ -269,6 +287,11 @@ public class AdminController : ControllerBase
                     o.CreatedAt,
                     o.UpdatedAt,
                     o.ItemsJson,
+                    payment = OrderPaymentPresentation.BuildSummary(
+                        latestPaymentsByOrderId.GetValueOrDefault(o.Id),
+                        manualRefreshProviders,
+                        now,
+                        o.Status),
                     items = storedItems.Select(item =>
                     {
                         var productSnapshot = productSnapshots.GetValueOrDefault(item.ProductId);
@@ -327,7 +350,8 @@ public class AdminController : ControllerBase
 
         if (!IsInventoryReleasedStatus(currentStatus) && IsInventoryReleasedStatus(nextStatus))
         {
-            await ReleaseOrderStockAsync(order, admin.Id, now, nextStatus == "returned" ? "order_return" : "order_cancel");
+            await _orderInventoryService.ReleaseOrderStockAsync(order, admin.Id, now, nextStatus == "returned" ? "order_return" : "order_cancel", HttpContext.RequestAborted);
+            await _orderPaymentService.CancelPendingPaymentsForOrderAsync(order.Id, "Заказ переведен в терминальный статус администратором.", HttpContext.RequestAborted);
         }
 
         order.Status = nextStatus;
@@ -384,9 +408,13 @@ public class AdminController : ControllerBase
 
         await using var tx = await _db.Database.BeginTransactionAsync();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var latestPayment = await _orderPaymentService.GetLatestPaymentAsync(order.Id, HttpContext.RequestAborted);
+        if (latestPayment is not null && string.Equals(latestPayment.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { detail = "Нельзя удалить заказ с активным онлайн-платежом. Сначала отмените заказ или дождитесь завершения оплаты." });
+
         if (!IsInventoryReleasedStatus(order.Status))
         {
-            await ReleaseOrderStockAsync(order, admin.Id, now, "order_delete");
+            await _orderInventoryService.ReleaseOrderStockAsync(order, admin.Id, now, "order_delete", HttpContext.RequestAborted);
         }
 
         _db.Orders.Remove(order);
@@ -394,6 +422,32 @@ public class AdminController : ControllerBase
         await tx.CommitAsync();
 
         return Results.Ok(new { ok = true });
+    }
+
+    [HttpPost("orders/{orderId}/payment/refresh")]
+    public async Task<IResult> RefreshOrderPayment(string orderId, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId, cancellationToken);
+        if (order is null) return Results.NotFound(new { detail = "Order not found" });
+
+        try
+        {
+            var payment = await _orderPaymentService.RefreshOrderPaymentAsync(order, cancellationToken);
+            return Results.Ok(new
+            {
+                payment = OrderPaymentPresentation.BuildSummary(
+                    payment,
+                    await _orderPaymentService.GetManualRefreshAvailableProvidersAsync(cancellationToken),
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    order.Status)
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpGet("users")]
@@ -715,6 +769,211 @@ public class AdminController : ControllerBase
             return Results.BadRequest(new { detail = result.Detail });
 
         return Results.Ok(new { ok = true, detail = result.Detail });
+    }
+
+    [HttpPost("settings/yoomoney/test")]
+    public async Task<IResult> TestYooMoney([FromBody] YooMoneyAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _yooMoneyPaymentService.TestIntegrationAsync(
+                new YooMoneyIntegrationOverrides(
+                    Enabled: payload.Enabled,
+                    WalletNumber: payload.WalletNumber,
+                    NotificationSecret: payload.NotificationSecret,
+                    AccessToken: payload.AccessToken,
+                    LabelPrefix: payload.LabelPrefix,
+                    PaymentTimeoutMinutes: payload.PaymentTimeoutMinutes,
+                    AllowBankCards: payload.AllowBankCards,
+                    AllowWallet: payload.AllowWallet),
+                payload.PaymentMethod,
+                payload.Amount,
+                payload.ReturnUrl,
+                cancellationToken);
+
+            return Results.Ok(new
+            {
+                provider = "yoomoney",
+                paymentMethod = result.PaymentMethod,
+                paymentType = result.PaymentType,
+                requestedAmount = result.RequestedAmount,
+                chargeAmount = result.ChargeAmount,
+                expectedReceivedAmount = result.ExpectedReceivedAmount,
+                walletNumber = result.WalletNumber,
+                checkoutAction = result.CheckoutAction,
+                checkoutMethod = result.CheckoutMethod,
+                checkoutFields = result.CheckoutFields,
+                tokenValid = result.TokenValid,
+                tokenDetail = result.TokenDetail,
+                lastOperation = result.LastOperation is null
+                    ? null
+                    : new
+                    {
+                        operationId = result.LastOperation.OperationId,
+                        status = result.LastOperation.Status,
+                        dateTime = result.LastOperation.DateTime,
+                        amount = result.LastOperation.Amount,
+                        type = result.LastOperation.Type
+                    },
+                note = result.Note
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/yookassa/test")]
+    public async Task<IResult> TestYooKassa([FromBody] YooKassaAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _yooKassaPaymentService.TestIntegrationAsync(
+                new YooKassaIntegrationOverrides(
+                    Enabled: payload.Enabled,
+                    ShopId: payload.ShopId,
+                    SecretKey: payload.SecretKey,
+                    TestMode: payload.TestMode,
+                    LabelPrefix: payload.LabelPrefix,
+                    PaymentTimeoutMinutes: payload.PaymentTimeoutMinutes,
+                    AllowBankCards: payload.AllowBankCards,
+                    AllowSbp: payload.AllowSbp,
+                    AllowYooMoney: payload.AllowYooMoney),
+                payload.PaymentMethod,
+                payload.Amount,
+                payload.ReturnUrl,
+                cancellationToken);
+
+            return Results.Ok(new
+            {
+                provider = "yookassa",
+                mode = result.Mode,
+                testMode = result.TestMode,
+                paymentMethod = result.PaymentMethod,
+                paymentType = result.PaymentType,
+                amount = result.Amount,
+                currency = result.Currency,
+                status = result.Status,
+                detail = result.Detail,
+                paymentId = result.PaymentId,
+                confirmationUrl = result.ConfirmationUrl,
+                createdAt = result.CreatedAt,
+                paid = result.Paid
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/yandex-delivery/test")]
+    public async Task<IResult> TestYandexDelivery([FromBody] YandexDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var overrides = new YandexDeliveryIntegrationOverrides(
+                Enabled: payload.Enabled,
+                UseTestEnvironment: payload.UseTestEnvironment,
+                ApiToken: payload.ApiToken,
+                SourceStationId: payload.SourceStationId,
+                PackageLengthCm: payload.PackageLengthCm,
+                PackageHeightCm: payload.PackageHeightCm,
+                PackageWidthCm: payload.PackageWidthCm);
+
+            var quote = await _yandexDeliveryQuoteService.CalculateAsync(
+                new YandexDeliveryCalculatePayload(
+                    ToAddress: payload.ToAddress,
+                    WeightKg: payload.WeightKg,
+                    DeclaredCost: payload.DeclaredCost),
+                overrides,
+                cancellationToken);
+
+            var pickupPoints = await _yandexDeliveryQuoteService.ListPickupPointsAsync(
+                new YandexDeliveryPickupPointsPayload(
+                    ToAddress: payload.ToAddress,
+                    Limit: 3,
+                    WeightKg: payload.WeightKg,
+                    DeclaredCost: payload.DeclaredCost),
+                overrides,
+                cancellationToken);
+            var firstPickupPoint = pickupPoints.FirstOrDefault();
+            var pickupPointQuote = firstPickupPoint is null
+                ? null
+                : await _yandexDeliveryQuoteService.CalculateAsync(
+                    new YandexDeliveryCalculatePayload(
+                        ToAddress: payload.ToAddress,
+                        WeightKg: payload.WeightKg,
+                        DeclaredCost: payload.DeclaredCost,
+                        PickupPointId: firstPickupPoint.Id),
+                    overrides,
+                    cancellationToken);
+
+            return Results.Ok(new
+            {
+                provider = quote.Provider,
+                currency = quote.Currency,
+                toAddress = quote.DestinationAddress,
+                homeDelivery = new
+                {
+                    available = quote.HomeDelivery.Available,
+                    estimatedCost = quote.HomeDelivery.EstimatedCost,
+                    deliveryDays = quote.HomeDelivery.DeliveryDays,
+                    tariff = quote.HomeDelivery.Tariff,
+                    error = quote.HomeDelivery.Error
+                },
+                pickupPointDelivery = pickupPointQuote is null
+                    ? null
+                    : new
+                    {
+                        available = pickupPointQuote.NearestPickupPointDelivery.Available,
+                        estimatedCost = pickupPointQuote.NearestPickupPointDelivery.EstimatedCost,
+                        deliveryDays = pickupPointQuote.NearestPickupPointDelivery.DeliveryDays,
+                        tariff = pickupPointQuote.NearestPickupPointDelivery.Tariff,
+                        error = pickupPointQuote.NearestPickupPointDelivery.Error,
+                        point = pickupPointQuote.NearestPickupPointDelivery.Point is null
+                            ? null
+                            : new
+                            {
+                                id = pickupPointQuote.NearestPickupPointDelivery.Point.Id,
+                                name = pickupPointQuote.NearestPickupPointDelivery.Point.Name,
+                                address = pickupPointQuote.NearestPickupPointDelivery.Point.Address,
+                                instruction = pickupPointQuote.NearestPickupPointDelivery.Point.Instruction,
+                                distanceKm = pickupPointQuote.NearestPickupPointDelivery.Point.DistanceKm
+                            }
+                    },
+                pickupPoints = pickupPoints.Select(point => new
+                {
+                    id = point.Id,
+                    name = point.Name,
+                    address = point.Address,
+                    instruction = point.Instruction,
+                    distanceKm = point.DistanceKm,
+                    available = point.Available,
+                    estimatedCost = point.EstimatedCost,
+                    deliveryDays = point.DeliveryDays,
+                    error = point.Error
+                }),
+                details = new
+                {
+                    testEnvironment = quote.Details.TestEnvironment,
+                    sourceStationId = quote.Details.SourceStationId,
+                    requestedWeightKg = quote.Details.RequestedWeightKg,
+                    declaredCost = quote.Details.DeclaredCost
+                }
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
 
@@ -1543,120 +1802,6 @@ public class AdminController : ControllerBase
             ["oldValue"] = string.IsNullOrWhiteSpace(oldText) ? null : oldText,
             ["newValue"] = string.IsNullOrWhiteSpace(newText) ? null : newText
         });
-    }
-
-    private async Task ReleaseOrderStockAsync(Order order, string changedByUserId, long changedAt, string reason)
-    {
-        var normalizedItems = ParseOrderItems(order.ItemsJson);
-        if (normalizedItems.Count == 0)
-            return;
-
-        var sizeLookups = normalizedItems.Select(x => x.LookupSize).Distinct().ToList();
-        var sizeDictionaries = await _db.SizeDictionaries
-            .Where(x => sizeLookups.Contains(x.Name.ToLower()))
-            .ToListAsync();
-        var sizeMap = sizeDictionaries.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x, StringComparer.OrdinalIgnoreCase);
-        if (sizeMap.Count == 0)
-            return;
-
-        var requestedSizeIds = sizeMap.Values.Select(x => x.Id).Distinct().ToList();
-        var requestedProductIds = normalizedItems.Select(x => x.ProductId).Distinct().ToList();
-        var stockRows = await _db.ProductSizeStocks
-            .Where(x => requestedProductIds.Contains(x.ProductId) && requestedSizeIds.Contains(x.SizeId))
-            .ToListAsync();
-        var stockMap = stockRows.ToDictionary(x => $"{x.ProductId}:{x.SizeId}", x => x, StringComparer.Ordinal);
-
-        foreach (var item in normalizedItems)
-        {
-            if (!sizeMap.TryGetValue(item.LookupSize, out var sizeDictionary))
-                continue;
-
-            var stockKey = $"{item.ProductId}:{sizeDictionary.Id}";
-            if (!stockMap.TryGetValue(stockKey, out var row))
-            {
-                row = new ProductSizeStock
-                {
-                    ProductId = item.ProductId,
-                    SizeId = sizeDictionary.Id,
-                    Stock = 0
-                };
-                _db.ProductSizeStocks.Add(row);
-                stockMap[stockKey] = row;
-            }
-
-            var oldValue = row.Stock;
-            row.Stock += item.Quantity;
-
-            _db.StockChangeHistories.Add(new StockChangeHistory
-            {
-                ProductId = item.ProductId,
-                SizeId = sizeDictionary.Id,
-                ChangedByUserId = changedByUserId,
-                Reason = reason,
-                OrderId = order.Id,
-                OldValue = oldValue,
-                NewValue = row.Stock,
-                ChangedAt = changedAt
-            });
-        }
-    }
-
-    private static List<NormalizedOrderItem> ParseOrderItems(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return [];
-
-        try
-        {
-            var items = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(raw) ?? [];
-            return items
-                .Select(item =>
-                {
-                    var productId = AsString(item.TryGetValue("productId", out var productValue) ? productValue : null).Trim();
-                    var size = AsString(item.TryGetValue("size", out var sizeValue) ? sizeValue : null).Trim();
-                    var quantity = AsInt(item.TryGetValue("quantity", out var quantityValue) ? quantityValue : null);
-                    return new NormalizedOrderItem(productId, size, size.ToLowerInvariant(), quantity);
-                })
-                .Where(item => !string.IsNullOrWhiteSpace(item.ProductId) && !string.IsNullOrWhiteSpace(item.Size) && item.Quantity > 0)
-                .GroupBy(x => $"{x.ProductId}\u001f{x.LookupSize}", StringComparer.Ordinal)
-                .Select(group =>
-                {
-                    var first = group.First();
-                    return new NormalizedOrderItem(first.ProductId, first.Size, first.LookupSize, group.Sum(x => x.Quantity));
-                })
-                .ToList();
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static string AsString(object? value)
-    {
-        return value switch
-        {
-            null => string.Empty,
-            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString() ?? string.Empty,
-            JsonElement element => element.ToString(),
-            _ => value.ToString() ?? string.Empty
-        };
-    }
-
-    private static int AsInt(object? value)
-    {
-        return value switch
-        {
-            null => 0,
-            JsonElement element when element.ValueKind == JsonValueKind.Number => element.GetInt32(),
-            JsonElement element when element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsed) => parsed,
-            int intValue => intValue,
-            long longValue => (int)longValue,
-            double doubleValue => (int)doubleValue,
-            decimal decimalValue => (int)decimalValue,
-            _ when int.TryParse(value.ToString(), out var parsed) => parsed,
-            _ => 0
-        };
     }
 
     private static bool TryParseOrderFilterDate(string? value, bool isEndOfDay, out long timestamp)

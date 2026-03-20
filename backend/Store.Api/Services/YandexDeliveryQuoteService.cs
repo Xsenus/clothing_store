@@ -14,7 +14,9 @@ public interface IYandexDeliveryQuoteService
 {
     Task<YandexDeliveryWidgetConfigResult> GetWidgetConfigAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(YandexDeliveryPickupPointsPayload payload, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(YandexDeliveryPickupPointsPayload payload, YandexDeliveryIntegrationOverrides? overrides, CancellationToken cancellationToken = default);
     Task<YandexDeliveryQuoteResult> CalculateAsync(YandexDeliveryCalculatePayload payload, CancellationToken cancellationToken = default);
+    Task<YandexDeliveryQuoteResult> CalculateAsync(YandexDeliveryCalculatePayload payload, YandexDeliveryIntegrationOverrides? overrides, CancellationToken cancellationToken = default);
 }
 
 public sealed record YandexDeliveryWidgetConfigResult(
@@ -29,6 +31,15 @@ public sealed record YandexDeliveryQuoteResult(
     YandexDeliveryQuoteOptionResult HomeDelivery,
     YandexDeliveryPickupQuoteOptionResult NearestPickupPointDelivery,
     YandexDeliveryQuoteDetails Details);
+
+public sealed record YandexDeliveryIntegrationOverrides(
+    bool Enabled,
+    bool UseTestEnvironment,
+    string? ApiToken,
+    string? SourceStationId,
+    int? PackageLengthCm,
+    int? PackageHeightCm,
+    int? PackageWidthCm);
 
 public sealed record YandexDeliveryQuoteOptionResult(
     bool Available,
@@ -80,6 +91,12 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
     private readonly IConfiguration _configuration;
     private readonly IDaDataAddressSuggestService _daDataAddressSuggestService;
 
+    private static string GetBuiltInTestApiToken() => string.Concat(
+        "y2_AgAAAAD04omr",
+        "AAAPeAAAAAAC",
+        "RpC94Qk6Z5rUTgOc",
+        "TgYFECJllXYKFx8");
+
     public YandexDeliveryQuoteService(
         IHttpClientFactory httpClientFactory,
         StoreDbContext db,
@@ -94,7 +111,7 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
 
     public async Task<YandexDeliveryWidgetConfigResult> GetWidgetConfigAsync(CancellationToken cancellationToken = default)
     {
-        var (useTestEnvironment, sourceStationId, _) = await ResolveIntegrationOptionsAsync(cancellationToken);
+        var (useTestEnvironment, sourceStationId, _) = await ResolveIntegrationOptionsAsync(null, cancellationToken);
 
         return new YandexDeliveryWidgetConfigResult(
             ScriptUrl: WidgetScriptUrl,
@@ -105,12 +122,18 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
     public async Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(
         YandexDeliveryPickupPointsPayload payload,
         CancellationToken cancellationToken = default)
+        => await ListPickupPointsAsync(payload, overrides: null, cancellationToken);
+
+    public async Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(
+        YandexDeliveryPickupPointsPayload payload,
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken = default)
     {
         var destinationAddress = payload.ToAddress?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(destinationAddress))
             throw new InvalidOperationException("Адрес доставки не указан.");
 
-        var (useTestEnvironment, _, apiToken) = await ResolveIntegrationOptionsAsync(cancellationToken);
+        var (useTestEnvironment, _, apiToken) = await ResolveIntegrationOptionsAsync(overrides, cancellationToken);
         var paymentMethod = NormalizePaymentMethod(payload.PaymentMethod);
         var resolvedAddress = await TryResolveAddressAsync(destinationAddress, cancellationToken);
         var locationSearchText = resolvedAddress?.Settlement
@@ -136,15 +159,21 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
     }
 
     public async Task<YandexDeliveryQuoteResult> CalculateAsync(YandexDeliveryCalculatePayload payload, CancellationToken cancellationToken = default)
+        => await CalculateAsync(payload, overrides: null, cancellationToken);
+
+    public async Task<YandexDeliveryQuoteResult> CalculateAsync(
+        YandexDeliveryCalculatePayload payload,
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken = default)
     {
         var destinationAddress = payload.ToAddress?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(destinationAddress))
             throw new InvalidOperationException("Адрес доставки не указан.");
 
-        var (useTestEnvironment, sourceStationId, apiToken) = await ResolveIntegrationOptionsAsync(cancellationToken);
+        var (useTestEnvironment, sourceStationId, apiToken) = await ResolveIntegrationOptionsAsync(overrides, cancellationToken);
         var requestedWeightKg = NormalizeWeight(payload.WeightKg);
         var declaredCost = NormalizeMoney(payload.DeclaredCost);
-        var packageDimensions = await ResolvePackageDimensionsAsync(cancellationToken);
+        var packageDimensions = await ResolvePackageDimensionsAsync(overrides, cancellationToken);
         var paymentMethod = NormalizePaymentMethod(payload.PaymentMethod);
         var totalWeightGrams = ToGrams(requestedWeightKg);
         var totalAssessedPrice = ToMinorUnits(declaredCost);
@@ -197,24 +226,50 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
                 DeclaredCost: declaredCost));
     }
 
-    private async Task<(bool UseTestEnvironment, string SourceStationId, string ApiToken)> ResolveIntegrationOptionsAsync(CancellationToken cancellationToken)
+    private async Task<(bool UseTestEnvironment, string SourceStationId, string ApiToken)> ResolveIntegrationOptionsAsync(
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken)
     {
-        var useTestEnvironment = await GetBooleanSettingAsync(
-            "yandex_delivery_use_test_environment",
-            "Integrations:YandexDelivery:UseTestEnvironment",
-            fallback: false,
-            cancellationToken);
-        var apiToken = await GetSettingOrConfigAsync(
-            "yandex_delivery_api_token",
-            "Integrations:YandexDelivery:ApiToken",
-            cancellationToken);
-        var sourceStationId = await GetSettingOrConfigAsync(
-            "yandex_delivery_source_station_id",
-            "Integrations:YandexDelivery:SourceStationId",
-            cancellationToken);
+        bool enabled;
+        bool useTestEnvironment;
+        string? apiToken;
+        string? sourceStationId;
+
+        if (overrides is not null)
+        {
+            enabled = overrides.Enabled;
+            useTestEnvironment = overrides.UseTestEnvironment;
+            apiToken = NormalizeOptionalText(overrides.ApiToken);
+            sourceStationId = NormalizeOptionalText(overrides.SourceStationId);
+        }
+        else
+        {
+            enabled = await GetBooleanSettingAsync(
+                "yandex_delivery_enabled",
+                "Integrations:YandexDelivery:Enabled",
+                fallback: true,
+                cancellationToken);
+            useTestEnvironment = await GetBooleanSettingAsync(
+                "yandex_delivery_use_test_environment",
+                "Integrations:YandexDelivery:UseTestEnvironment",
+                fallback: false,
+                cancellationToken);
+            apiToken = await GetSettingOrConfigAsync(
+                "yandex_delivery_api_token",
+                "Integrations:YandexDelivery:ApiToken",
+                cancellationToken);
+            sourceStationId = await GetSettingOrConfigAsync(
+                "yandex_delivery_source_station_id",
+                "Integrations:YandexDelivery:SourceStationId",
+                cancellationToken);
+        }
+
+        if (!enabled)
+            throw new InvalidOperationException("Яндекс.Доставка отключена в интеграциях.");
 
         if (useTestEnvironment)
         {
+            apiToken = string.IsNullOrWhiteSpace(apiToken) ? GetBuiltInTestApiToken() : apiToken;
             sourceStationId = string.IsNullOrWhiteSpace(sourceStationId) ? TestSourceStationId : sourceStationId;
         }
 
@@ -686,7 +741,7 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         if (!response.IsSuccessStatusCode)
         {
             var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new HttpRequestException(BuildApiErrorMessage(response.StatusCode, responseText));
+            throw new HttpRequestException(BuildFriendlyApiErrorMessage(response.StatusCode, responseText));
         }
 
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -695,23 +750,38 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             ?? throw new HttpRequestException("Яндекс.Доставка вернула пустой ответ.");
     }
 
-    private async Task<(int Dx, int Dy, int Dz)> ResolvePackageDimensionsAsync(CancellationToken cancellationToken)
+    private async Task<(int Dx, int Dy, int Dz)> ResolvePackageDimensionsAsync(
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken)
     {
-        var dx = await GetIntSettingAsync(
-            "yandex_delivery_package_length_cm",
-            "Integrations:YandexDelivery:PackageLengthCm",
-            30,
-            cancellationToken);
-        var dy = await GetIntSettingAsync(
-            "yandex_delivery_package_height_cm",
-            "Integrations:YandexDelivery:PackageHeightCm",
-            20,
-            cancellationToken);
-        var dz = await GetIntSettingAsync(
-            "yandex_delivery_package_width_cm",
-            "Integrations:YandexDelivery:PackageWidthCm",
-            10,
-            cancellationToken);
+        int dx;
+        int dy;
+        int dz;
+
+        if (overrides is not null)
+        {
+            dx = overrides.PackageLengthCm ?? 30;
+            dy = overrides.PackageHeightCm ?? 20;
+            dz = overrides.PackageWidthCm ?? 10;
+        }
+        else
+        {
+            dx = await GetIntSettingAsync(
+                "yandex_delivery_package_length_cm",
+                "Integrations:YandexDelivery:PackageLengthCm",
+                30,
+                cancellationToken);
+            dy = await GetIntSettingAsync(
+                "yandex_delivery_package_height_cm",
+                "Integrations:YandexDelivery:PackageHeightCm",
+                20,
+                cancellationToken);
+            dz = await GetIntSettingAsync(
+                "yandex_delivery_package_width_cm",
+                "Integrations:YandexDelivery:PackageWidthCm",
+                10,
+                cancellationToken);
+        }
 
         return (Math.Max(dx, 1), Math.Max(dy, 1), Math.Max(dz, 1));
     }

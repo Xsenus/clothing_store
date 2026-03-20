@@ -6,3 +6,24 @@ ASPNETCORE_ENVIRONMENT=Production
 ConnectionStrings__DefaultConnection=Host=127.0.0.1;Port=5432;Database=clothing_store;Username=store_user;Password=CHANGE_ME_STRONG_PASSWORD
 AdminUser__Email=admin@your-domain.com
 AdminUser__Password=CHANGE_ME_ADMIN_PASSWORD
+
+# Optional YooMoney defaults. The same values can also be configured from the admin panel.
+Integrations__YooMoney__Enabled=false
+Integrations__YooMoney__WalletNumber=
+Integrations__YooMoney__NotificationSecret=
+Integrations__YooMoney__AccessToken=
+Integrations__YooMoney__LabelPrefix=store
+Integrations__YooMoney__PaymentTimeoutMinutes=30
+Integrations__YooMoney__AllowBankCards=true
+Integrations__YooMoney__AllowWallet=false
+
+# Optional YooKassa defaults. Use your test shop credentials first, then switch to live credentials for production.
+Integrations__YooKassa__Enabled=false
+Integrations__YooKassa__ShopId=
+Integrations__YooKassa__SecretKey=
+Integrations__YooKassa__TestMode=true
+Integrations__YooKassa__LabelPrefix=store
+Integrations__YooKassa__PaymentTimeoutMinutes=60
+Integrations__YooKassa__AllowBankCards=true
+Integrations__YooKassa__AllowSbp=true
+Integrations__YooKassa__AllowYooMoney=true

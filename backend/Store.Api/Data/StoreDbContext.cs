@@ -65,6 +65,7 @@ public class StoreDbContext : DbContext
     /// Возвращает набор заказов.
     /// </summary>
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderPayment> OrderPayments => Set<OrderPayment>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<TelegramBot> TelegramBots => Set<TelegramBot>();
     public DbSet<TelegramBotSubscriber> TelegramBotSubscribers => Set<TelegramBotSubscriber>();
@@ -108,6 +109,11 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
         modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
         modelBuilder.Entity<Order>().HasIndex(x => x.YandexRequestId);
+        modelBuilder.Entity<OrderPayment>().HasIndex(x => x.OrderId);
+        modelBuilder.Entity<OrderPayment>().HasIndex(x => x.Label).IsUnique();
+        modelBuilder.Entity<OrderPayment>().HasIndex(x => x.OperationId).IsUnique();
+        modelBuilder.Entity<OrderPayment>().HasIndex(x => x.Status);
+        modelBuilder.Entity<OrderPayment>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<Order>()
             .Property(x => x.OrderNumber)
             .HasDefaultValueSql("nextval('orders_order_number_seq')")
@@ -135,6 +141,12 @@ public class StoreDbContext : DbContext
             .HasOne<User>()
             .WithMany()
             .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<OrderPayment>()
+            .HasOne<Order>()
+            .WithMany()
+            .HasForeignKey(x => x.OrderId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<CartItem>()

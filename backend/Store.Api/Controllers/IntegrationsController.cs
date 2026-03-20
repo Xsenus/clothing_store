@@ -11,15 +11,21 @@ public class IntegrationsController : ControllerBase
 {
     private readonly ITelegramBotManager _telegramBotManager;
     private readonly IDaDataAddressSuggestService _daDataAddressSuggestService;
+    private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
+    private readonly IYooKassaPaymentService _yooKassaPaymentService;
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
 
     public IntegrationsController(
         ITelegramBotManager telegramBotManager,
         IDaDataAddressSuggestService daDataAddressSuggestService,
+        IYooMoneyPaymentService yooMoneyPaymentService,
+        IYooKassaPaymentService yooKassaPaymentService,
         IYandexDeliveryQuoteService yandexDeliveryQuoteService)
     {
         _telegramBotManager = telegramBotManager;
         _daDataAddressSuggestService = daDataAddressSuggestService;
+        _yooMoneyPaymentService = yooMoneyPaymentService;
+        _yooKassaPaymentService = yooKassaPaymentService;
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
     }
 
@@ -41,6 +47,44 @@ public class IntegrationsController : ControllerBase
         {
             var suggestions = await _daDataAddressSuggestService.SuggestAsync(payload, cancellationToken);
             return Results.Ok(new { suggestions });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("yoomoney/notifications")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public async Task<IResult> YooMoneyNotifications([FromForm] YooMoneyNotificationPayload payload, CancellationToken cancellationToken)
+    {
+        var result = await _yooMoneyPaymentService.HandleNotificationAsync(payload, cancellationToken);
+        if (!result.Accepted)
+            return Results.BadRequest(new { detail = result.Detail });
+
+        return Results.Ok(new
+        {
+            ok = true,
+            ignored = result.Ignored,
+            detail = result.Detail
+        });
+    }
+
+    [HttpPost("yookassa/notifications")]
+    public async Task<IResult> YooKassaNotifications([FromBody] YooKassaNotificationPayload payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _yooKassaPaymentService.HandleNotificationAsync(payload, cancellationToken);
+            if (!result.Accepted)
+                return Results.BadRequest(new { detail = result.Detail });
+
+            return Results.Ok(new
+            {
+                ok = true,
+                ignored = result.Ignored,
+                detail = result.Detail
+            });
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
         {

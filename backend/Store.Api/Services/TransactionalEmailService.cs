@@ -676,7 +676,21 @@ public class TransactionalEmailService
     private static string GetDictionaryValue(IReadOnlyDictionary<string, string> dictionary, string? key)
     {
         var normalized = NormalizeKey(key);
-        return dictionary.TryGetValue(normalized, out var label) ? label : normalized;
+        if (dictionary.TryGetValue(normalized, out var label))
+            return label;
+
+        return normalized switch
+        {
+            "pending_payment" => "Ожидает оплаты",
+            "yoomoney" => "ЮMoney",
+            "yoomoney_card" => "ЮMoney: банковская карта",
+            "yoomoney_wallet" => "ЮMoney: кошелек",
+            "yookassa" => "YooKassa",
+            "yookassa_card" => "YooKassa: банковская карта",
+            "yookassa_sbp" => "YooKassa: СБП",
+            "yookassa_yoomoney" => "YooKassa: ЮMoney",
+            _ => normalized
+        };
     }
 
     private static bool ParseBoolean(string? value, bool fallback)

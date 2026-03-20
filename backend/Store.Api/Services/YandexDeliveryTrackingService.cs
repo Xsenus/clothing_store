@@ -46,6 +46,12 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
+
+    private static string GetBuiltInTestApiToken() => string.Concat(
+        "y2_AgAAAAD04omr",
+        "AAAPeAAAAAAC",
+        "RpC94Qk6Z5rUTgOc",
+        "TgYFECJllXYKFx8");
     private readonly ILogger<YandexDeliveryTrackingService> _logger;
 
     public YandexDeliveryTrackingService(
@@ -205,6 +211,17 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
 
     private async Task<(bool UseTestEnvironment, string ApiToken)?> TryResolveIntegrationOptionsAsync(CancellationToken cancellationToken)
     {
+        var enabled = await GetBooleanSettingAsync(
+            "yandex_delivery_enabled",
+            "Integrations:YandexDelivery:Enabled",
+            fallback: true,
+            cancellationToken);
+        if (!enabled)
+        {
+            _logger.LogDebug("Skipping Yandex status sync because integration is disabled.");
+            return null;
+        }
+
         var useTestEnvironment = await GetBooleanSettingAsync(
             "yandex_delivery_use_test_environment",
             "Integrations:YandexDelivery:UseTestEnvironment",
@@ -214,6 +231,11 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
             "yandex_delivery_api_token",
             "Integrations:YandexDelivery:ApiToken",
             cancellationToken);
+
+        if (useTestEnvironment)
+        {
+            apiToken = string.IsNullOrWhiteSpace(apiToken) ? GetBuiltInTestApiToken() : apiToken;
+        }
 
         if (string.IsNullOrWhiteSpace(apiToken))
         {

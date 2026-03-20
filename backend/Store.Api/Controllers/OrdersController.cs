@@ -21,6 +21,7 @@ public class OrdersController : ControllerBase
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
     private readonly IOrderEmailQueue _orderEmailQueue;
+    private readonly IOrderPaymentService _orderPaymentService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
@@ -32,11 +33,13 @@ public class OrdersController : ControllerBase
         StoreDbContext db,
         AuthService auth,
         IOrderEmailQueue orderEmailQueue,
+        IOrderPaymentService orderPaymentService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService)
     {
         _db = db;
         _auth = auth;
         _orderEmailQueue = orderEmailQueue;
+        _orderPaymentService = orderPaymentService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
     }
 
@@ -75,6 +78,11 @@ public class OrdersController : ControllerBase
                 .ToListAsync())
                 .Select(OrderPresentation.BuildProductSnapshot)
                 .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
+        var latestPaymentsByOrderId = await _orderPaymentService.GetLatestPaymentsByOrderIdAsync(
+            orders.Select(order => order.Id),
+            HttpContext.RequestAborted);
+        var manualRefreshProviders = await _orderPaymentService.GetManualRefreshAvailableProvidersAsync(HttpContext.RequestAborted);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         return Results.Json(orders.Select(order =>
         {
@@ -115,7 +123,12 @@ public class OrdersController : ControllerBase
                 order.YandexPickupCode,
                 order.YandexDeliveryLastSyncError,
                 order.ShippingAddress,
-                order.CreatedAt
+                order.CreatedAt,
+                payment = OrderPaymentPresentation.BuildSummary(
+                    latestPaymentsByOrderId.GetValueOrDefault(order.Id),
+                    manualRefreshProviders,
+                    now,
+                    order.Status)
             };
         }).ToList());
     }
@@ -220,19 +233,26 @@ public class OrdersController : ControllerBase
             var resolvedShippingAmount = Math.Max(0d, Math.Round(payload.ShippingAmount ?? 0d, 2, MidpointRounding.AwayFromZero));
             var resolvedTotalAmount = Math.Round(computedItemsAmount + resolvedShippingAmount, 2, MidpointRounding.AwayFromZero);
 
-            var resolvedStatus = string.IsNullOrWhiteSpace(payload.Status)
-                ? "processing"
-                : payload.Status.Trim().ToLowerInvariant();
             var resolvedPaymentMethod = string.IsNullOrWhiteSpace(payload.PaymentMethod)
                 ? "cod"
                 : payload.PaymentMethod.Trim().ToLowerInvariant();
+            var usesOnlinePayment = _orderPaymentService.IsOnlinePaymentMethod(resolvedPaymentMethod);
+            var resolvedStatus = usesOnlinePayment
+                ? "pending_payment"
+                : string.IsNullOrWhiteSpace(payload.Status)
+                    ? "processing"
+                    : payload.Status.Trim().ToLowerInvariant();
             var resolvedPurchaseChannel = string.IsNullOrWhiteSpace(payload.PurchaseChannel)
                 ? "web"
                 : payload.PurchaseChannel.Trim().ToLowerInvariant();
-            var resolvedShippingMethod = string.Equals(payload.ShippingMethod?.Trim(), "pickup", StringComparison.OrdinalIgnoreCase)
-                ? "pickup"
-                : "home";
-            var resolvedPickupPointId = string.IsNullOrWhiteSpace(payload.PickupPointId)
+            var normalizedShippingMethod = payload.ShippingMethod?.Trim().ToLowerInvariant();
+            var resolvedShippingMethod = normalizedShippingMethod switch
+            {
+                "pickup" => "pickup",
+                "self_pickup" => "self_pickup",
+                _ => "home"
+            };
+            var resolvedPickupPointId = resolvedShippingMethod != "pickup" || string.IsNullOrWhiteSpace(payload.PickupPointId)
                 ? null
                 : payload.PickupPointId.Trim();
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
@@ -240,7 +260,9 @@ public class OrdersController : ControllerBase
                 ? user.Email
                 : payload.CustomerEmail.Trim();
             var resolvedCustomerPhone = payload.CustomerPhone?.Trim() ?? string.Empty;
-            var resolvedShippingAddress = payload.ShippingAddress?.Trim() ?? string.Empty;
+            var resolvedShippingAddress = resolvedShippingMethod == "self_pickup"
+                ? (string.IsNullOrWhiteSpace(payload.ShippingAddress) ? "Самовывоз" : payload.ShippingAddress.Trim())
+                : payload.ShippingAddress?.Trim() ?? string.Empty;
             var initialHistory = new[]
             {
                 new Dictionary<string, object?>
@@ -279,13 +301,44 @@ public class OrdersController : ControllerBase
                 _db.CartItems.RemoveRange(cartItems);
 
             await _db.SaveChangesAsync();
+            OrderPaymentCheckoutResult? paymentCheckout = null;
+            if (usesOnlinePayment)
+            {
+                paymentCheckout = await _orderPaymentService.CreatePaymentAsync(
+                    order,
+                    resolvedPaymentMethod,
+                    payload.PaymentReturnUrl,
+                    HttpContext.RequestAborted);
+            }
+
             await tx.CommitAsync();
             _orderEmailQueue.QueueOrderCreatedEmail(order);
             return Results.Ok(new
             {
                 id = order.Id,
                 orderNumber = order.OrderNumber,
-                displayOrderNumber = OrderPresentation.FormatOrderNumber(order.OrderNumber)
+                displayOrderNumber = OrderPresentation.FormatOrderNumber(order.OrderNumber),
+                payment = paymentCheckout is null
+                    ? null
+                    : new
+                    {
+                        paymentCheckout.Payment.Id,
+                        paymentCheckout.Payment.Provider,
+                        paymentCheckout.Payment.PaymentMethod,
+                        paymentCheckout.Payment.PaymentType,
+                        paymentCheckout.Payment.Status,
+                        paymentCheckout.Payment.Currency,
+                        paymentCheckout.Payment.RequestedAmount,
+                        paymentCheckout.Payment.ChargeAmount,
+                        paymentCheckout.Payment.ExpectedReceivedAmount,
+                        paymentCheckout.Payment.ExpiresAt,
+                        checkout = new
+                        {
+                            action = paymentCheckout.Action,
+                            method = paymentCheckout.Method,
+                            fields = paymentCheckout.Fields
+                        }
+                    }
             });
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
@@ -295,6 +348,69 @@ public class OrdersController : ControllerBase
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
         {
             return Results.Conflict(new { detail = "Остатки изменились во время оформления заказа. Обновите корзину и попробуйте снова." });
+        }
+    }
+
+    [HttpPost("{orderId}/payment/checkout")]
+    public async Task<IResult> GetPaymentCheckout(
+        string orderId,
+        [FromBody] OrderPaymentCheckoutPayload? payload,
+        CancellationToken cancellationToken)
+    {
+        var user = await _auth.RequireUserAsync(Request);
+        if (user is null) return Results.Unauthorized();
+
+        var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId && x.UserId == user.Id, cancellationToken);
+        if (order is null) return Results.NotFound(new { detail = "Order not found" });
+
+        try
+        {
+            var checkout = await _orderPaymentService.GetCheckoutAsync(order, payload?.ReturnUrl, cancellationToken);
+            return Results.Ok(new
+            {
+                payment = OrderPaymentPresentation.BuildSummary(
+                    checkout.Payment,
+                    await _orderPaymentService.GetManualRefreshAvailableProvidersAsync(cancellationToken),
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    order.Status),
+                checkout = new
+                {
+                    action = checkout.Action,
+                    method = checkout.Method,
+                    fields = checkout.Fields
+                }
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("{orderId}/payment/refresh")]
+    public async Task<IResult> RefreshPayment(string orderId, CancellationToken cancellationToken)
+    {
+        var user = await _auth.RequireUserAsync(Request);
+        if (user is null) return Results.Unauthorized();
+
+        var order = await _db.Orders.FirstOrDefaultAsync(x => x.Id == orderId && x.UserId == user.Id, cancellationToken);
+        if (order is null) return Results.NotFound(new { detail = "Order not found" });
+
+        try
+        {
+            var payment = await _orderPaymentService.RefreshOrderPaymentAsync(order, cancellationToken);
+            return Results.Ok(new
+            {
+                payment = OrderPaymentPresentation.BuildSummary(
+                    payment,
+                    await _orderPaymentService.GetManualRefreshAvailableProvidersAsync(cancellationToken),
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    order.Status)
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
         }
     }
 
@@ -355,4 +471,5 @@ public class OrdersController : ControllerBase
             _ => 0
         };
     }
+
 }

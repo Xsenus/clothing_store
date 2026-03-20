@@ -690,6 +690,23 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "smtp_from_name", "Fashion Demon");
         await EnsureAppSettingExistsAsync(db, "smtp_security_mode", "auto");
         await EnsureAppSettingExistsAsync(db, "smtp_use_ssl", "true");
+        await EnsureAppSettingExistsAsync(db, "payments_yoomoney_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_wallet_number", "");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_notification_secret", "");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_access_token", "");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_label_prefix", "FD");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_payment_timeout_minutes", "30");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_allow_bank_cards", "true");
+        await EnsureAppSettingExistsAsync(db, "yoomoney_allow_wallet", "true");
+        await EnsureAppSettingExistsAsync(db, "payments_yookassa_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "yookassa_shop_id", "");
+        await EnsureAppSettingExistsAsync(db, "yookassa_secret_key", "");
+        await EnsureAppSettingExistsAsync(db, "yookassa_test_mode", "true");
+        await EnsureAppSettingExistsAsync(db, "yookassa_label_prefix", "YK");
+        await EnsureAppSettingExistsAsync(db, "yookassa_payment_timeout_minutes", "60");
+        await EnsureAppSettingExistsAsync(db, "yookassa_allow_bank_cards", "true");
+        await EnsureAppSettingExistsAsync(db, "yookassa_allow_sbp", "true");
+        await EnsureAppSettingExistsAsync(db, "yookassa_allow_yoomoney", "true");
         foreach (var (key, value) in EmailTemplateCatalog.BuildDefaultSettings())
         {
             await EnsureAppSettingExistsAsync(db, key, value);
@@ -706,6 +723,13 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "image_upload_review_media_max_width", "2000");
         await EnsureAppSettingExistsAsync(db, "image_upload_review_media_max_height", "2000");
         await EnsureAppSettingExistsAsync(db, "image_upload_review_media_quality", "90");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_use_test_environment", "false");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_api_token", "");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_source_station_id", "");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_package_length_cm", "30");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_package_height_cm", "20");
+        await EnsureAppSettingExistsAsync(db, "yandex_delivery_package_width_cm", "10");
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_width", "1600");
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_height", "1600");

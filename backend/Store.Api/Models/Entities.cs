@@ -991,3 +991,86 @@ public class Order
     [Column("updated_at")]
     public long UpdatedAt { get; set; }
 }
+
+[Table("order_payments")]
+public class OrderPayment
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("order_id")]
+    public string OrderId { get; set; } = string.Empty;
+
+    [Column("provider")]
+    public string Provider { get; set; } = "yoomoney";
+
+    [Column("payment_method")]
+    public string PaymentMethod { get; set; } = "yoomoney_card";
+
+    [Column("payment_type")]
+    public string PaymentType { get; set; } = "AC";
+
+    [Column("status")]
+    public string Status { get; set; } = "pending";
+
+    [Column("currency")]
+    public string Currency { get; set; } = "RUB";
+
+    [Column("requested_amount")]
+    public double RequestedAmount { get; set; }
+
+    [Column("charge_amount")]
+    public double ChargeAmount { get; set; }
+
+    [Column("expected_received_amount")]
+    public double ExpectedReceivedAmount { get; set; }
+
+    [Column("received_amount")]
+    public double? ReceivedAmount { get; set; }
+
+    [Column("actual_withdraw_amount")]
+    public double? ActualWithdrawAmount { get; set; }
+
+    [Column("receiver_account")]
+    public string ReceiverAccount { get; set; } = string.Empty;
+
+    [Column("label")]
+    public string Label { get; set; } = string.Empty;
+
+    [Column("operation_id")]
+    public string? OperationId { get; set; }
+
+    [Column("notification_type")]
+    public string? NotificationType { get; set; }
+
+    [Column("sender")]
+    public string? Sender { get; set; }
+
+    [Column("return_url")]
+    public string? ReturnUrl { get; set; }
+
+    [Column("expires_at")]
+    public long? ExpiresAt { get; set; }
+
+    [Column("paid_at")]
+    public long? PaidAt { get; set; }
+
+    [Column("last_checked_at")]
+    public long? LastCheckedAt { get; set; }
+
+    [Column("last_error")]
+    public string? LastError { get; set; }
+
+    [Column("last_payload_json", TypeName = "jsonb")]
+    public string? LastPayloadJson { get; set; }
+
+    [Column("verification_source")]
+    public string? VerificationSource { get; set; }
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
+}
