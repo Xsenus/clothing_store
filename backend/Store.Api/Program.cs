@@ -25,6 +25,7 @@ var storeRuntimePaths = StoreRuntimePaths.Resolve(
     builder.Environment.ContentRootPath,
     AppContext.BaseDirectory);
 Directory.CreateDirectory(storeRuntimePaths.UploadsDir);
+Directory.CreateDirectory(storeRuntimePaths.DatabaseBackupsDir);
 
 var databaseUrl = builder.Configuration.GetConnectionString("DefaultConnection");
 
@@ -47,6 +48,7 @@ builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl))
 builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<UserIdentityService>();
 builder.Services.AddScoped<IOrderInventoryService, OrderInventoryService>();
 builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestService>();
 builder.Services.AddScoped<IOrderPaymentService, OrderPaymentService>();
@@ -55,6 +57,8 @@ builder.Services.AddScoped<IYooKassaPaymentService, YooKassaPaymentService>();
 builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
 builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
 builder.Services.AddScoped<TransactionalEmailService>();
+builder.Services.AddScoped<TelegramNotificationService>();
+builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<OrderEmailQueue>();
 builder.Services.AddSingleton<IOrderEmailQueue>(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHttpClient();
@@ -66,6 +70,8 @@ builder.Services.AddSingleton<ITelegramBotManager>(sp => sp.GetRequiredService<T
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotManager>());
 builder.Services.AddHostedService<OrderPaymentMonitorService>();
+builder.Services.AddHostedService<YandexDeliveryStatusMonitorService>();
+builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -99,9 +105,10 @@ app.Logger.LogInformation(
     "Database provider: {Provider}",
     app.Configuration["ResolvedDatabase:Provider"] ?? "unknown");
 app.Logger.LogInformation(
-    "Resolved runtime paths: seed={SeedProductsPath}, uploads={UploadsDir}",
+    "Resolved runtime paths: seed={SeedProductsPath}, uploads={UploadsDir}, dbBackups={DatabaseBackupsDir}",
     storeRuntimePaths.SeedProductsPath,
-    storeRuntimePaths.UploadsDir);
+    storeRuntimePaths.UploadsDir,
+    storeRuntimePaths.DatabaseBackupsDir);
 
 await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(storeRuntimePaths.SeedProductsPath);
 var restoredGalleryImages = await app.Services.GetRequiredService<GalleryStorageService>().RestoreMissingImagesAsync();

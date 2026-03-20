@@ -32,6 +32,7 @@ public class AdminController : ControllerBase
     private readonly IYooKassaPaymentService _yooKassaPaymentService;
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
+    private readonly DatabaseBackupService _databaseBackupService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
@@ -48,7 +49,8 @@ public class AdminController : ControllerBase
         IYooMoneyPaymentService yooMoneyPaymentService,
         IYooKassaPaymentService yooKassaPaymentService,
         IYandexDeliveryQuoteService yandexDeliveryQuoteService,
-        IYandexDeliveryTrackingService yandexDeliveryTrackingService)
+        IYandexDeliveryTrackingService yandexDeliveryTrackingService,
+        DatabaseBackupService databaseBackupService)
     {
         _configuration = configuration;
         _db = db;
@@ -62,6 +64,7 @@ public class AdminController : ControllerBase
         _yooKassaPaymentService = yooKassaPaymentService;
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
+        _databaseBackupService = databaseBackupService;
     }
 
     /// <summary>
@@ -465,7 +468,9 @@ public class AdminController : ControllerBase
         return Results.Ok(users.Select(u => new
         {
             u.Id,
-            u.Email,
+            Email = TechnicalEmailHelper.HideIfTechnical(profiles.GetValueOrDefault(u.Id)?.Email) is { Length: > 0 } visibleProfileEmail
+                ? visibleProfileEmail
+                : TechnicalEmailHelper.HideIfTechnical(u.Email),
             u.Verified,
             u.IsAdmin,
             u.IsBlocked,
@@ -473,7 +478,7 @@ public class AdminController : ControllerBase
             u.CreatedAt,
             ordersCount = orderCounts.GetValueOrDefault(u.Id),
             profile = profiles.TryGetValue(u.Id, out var p)
-                ? new { p.Name, p.Phone, p.Nickname, p.ShippingAddress, p.PhoneVerified }
+                ? new { p.Name, p.Phone, p.Nickname, p.ShippingAddress, p.PhoneVerified, p.EmailVerified }
                 : null
         }));
     }
@@ -501,7 +506,8 @@ public class AdminController : ControllerBase
             profile = new Profile
             {
                 UserId = userId,
-                Email = user.Email
+                Email = TechnicalEmailHelper.IsTechnicalEmail(user.Email) ? string.Empty : user.Email,
+                EmailVerified = user.Verified && TechnicalEmailHelper.IsValidRealEmail(user.Email)
             };
             _db.Profiles.Add(profile);
         }
@@ -521,6 +527,7 @@ public class AdminController : ControllerBase
                 user.Email = normalizedEmail;
                 user.Verified = true;
                 profile.Email = normalizedEmail;
+                profile.EmailVerified = true;
             }
         }
 
@@ -757,6 +764,76 @@ public class AdminController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
+    }
+
+    [HttpGet("database-backups")]
+    public async Task<IResult> GetDatabaseBackups(CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
+        return Results.Ok(new
+        {
+            automaticEnabled = overview.AutomaticEnabled,
+            scheduleLocal = overview.ScheduleLocal,
+            retentionDays = overview.RetentionDays,
+            rootDirectory = overview.RootDirectory,
+            timeZone = overview.TimeZone,
+            pgDumpCommand = overview.PgDumpCommand,
+            items = overview.Items.Select(item => new
+            {
+                item.FileName,
+                item.RelativePath,
+                item.SizeBytes,
+                item.CreatedAt,
+                item.Trigger,
+                downloadUrl = $"/admin/database-backups/download?relativePath={Uri.EscapeDataString(item.RelativePath)}"
+            })
+        });
+    }
+
+    [HttpPost("database-backups")]
+    public async Task<IResult> CreateDatabaseBackup(CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var createdBackup = await _databaseBackupService.CreateManualBackupAsync(cancellationToken);
+            return Results.Ok(new
+            {
+                backup = new
+                {
+                    createdBackup.Backup.FileName,
+                    createdBackup.Backup.RelativePath,
+                    createdBackup.Backup.SizeBytes,
+                    createdBackup.Backup.CreatedAt,
+                    createdBackup.Backup.Trigger
+                },
+                downloadUrl = createdBackup.DownloadPath
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpGet("database-backups/download")]
+    public async Task<IResult> DownloadDatabaseBackup([FromQuery] string? relativePath)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        var resolvedPath = _databaseBackupService.ResolveBackupPath(relativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+            return Results.NotFound(new { detail = "Backup file not found" });
+
+        var fileName = Path.GetFileName(resolvedPath);
+        return Results.File(
+            resolvedPath,
+            "application/octet-stream",
+            fileName,
+            enableRangeProcessing: true);
     }
 
     [HttpPost("settings/smtp/test-email")]

@@ -45,16 +45,19 @@ public sealed class OrderPaymentService : IOrderPaymentService
     private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
     private readonly IYooKassaPaymentService _yooKassaPaymentService;
     private readonly IOrderInventoryService _orderInventoryService;
+    private readonly IOrderEmailQueue _orderEmailQueue;
     public OrderPaymentService(
         StoreDbContext db,
         IYooMoneyPaymentService yooMoneyPaymentService,
         IYooKassaPaymentService yooKassaPaymentService,
-        IOrderInventoryService orderInventoryService)
+        IOrderInventoryService orderInventoryService,
+        IOrderEmailQueue orderEmailQueue)
     {
         _db = db;
         _yooMoneyPaymentService = yooMoneyPaymentService;
         _yooKassaPaymentService = yooKassaPaymentService;
         _orderInventoryService = orderInventoryService;
+        _orderEmailQueue = orderEmailQueue;
     }
 
     public bool IsOnlinePaymentMethod(string? paymentMethod)
@@ -235,6 +238,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
             .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal, cancellationToken);
 
         var updatedCount = 0;
+        var notifications = new List<Order>();
         foreach (var (orderId, payment) in latestPaymentsByOrderId)
         {
             if (!ordersById.TryGetValue(orderId, out var order))
@@ -271,6 +275,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
                     ["comment"] = "Срок ожидания онлайн-оплаты истек, резерв товара снят автоматически"
                 });
 
+            notifications.Add(order);
             updatedCount++;
         }
 
@@ -278,6 +283,9 @@ public sealed class OrderPaymentService : IOrderPaymentService
         {
             await _db.SaveChangesAsync(cancellationToken);
         }
+
+        foreach (var order in notifications)
+            _orderEmailQueue.QueueOrderStatusChangedEmail(order, PendingOrderStatus, "Срок ожидания онлайн-оплаты истек");
 
         return updatedCount;
     }

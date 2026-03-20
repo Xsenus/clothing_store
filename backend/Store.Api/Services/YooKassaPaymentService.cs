@@ -80,6 +80,7 @@ public sealed class YooKassaPaymentService : IYooKassaPaymentService
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly IOrderInventoryService _orderInventoryService;
+    private readonly IOrderEmailQueue _orderEmailQueue;
     private readonly ILogger<YooKassaPaymentService> _logger;
 
     public YooKassaPaymentService(
@@ -87,12 +88,14 @@ public sealed class YooKassaPaymentService : IYooKassaPaymentService
         StoreDbContext db,
         IConfiguration configuration,
         IOrderInventoryService orderInventoryService,
+        IOrderEmailQueue orderEmailQueue,
         ILogger<YooKassaPaymentService> logger)
     {
         _httpClientFactory = httpClientFactory;
         _db = db;
         _configuration = configuration;
         _orderInventoryService = orderInventoryService;
+        _orderEmailQueue = orderEmailQueue;
         _logger = logger;
     }
 
@@ -505,6 +508,7 @@ public sealed class YooKassaPaymentService : IYooKassaPaymentService
 
         if (string.Equals(normalizedStatus, "succeeded", StringComparison.Ordinal))
         {
+            var previousOrderStatus = NormalizeOrderStatus(order.Status);
             await ApplySuccessfulPaymentAsync(
                 payment,
                 order,
@@ -516,6 +520,14 @@ public sealed class YooKassaPaymentService : IYooKassaPaymentService
                     ?? ParseDateTimeToUnixMilliseconds(response.CapturedAt)
                     ?? now,
                 cancellationToken);
+            if (!string.Equals(previousOrderStatus, "paid", StringComparison.Ordinal)
+                && string.Equals(NormalizeOrderStatus(order.Status), "paid", StringComparison.Ordinal))
+            {
+                _orderEmailQueue.QueueOrderStatusChangedEmail(
+                    order,
+                    previousOrderStatus ?? string.Empty,
+                    "Оплата YooKassa подтверждена автоматически");
+            }
             return;
         }
 

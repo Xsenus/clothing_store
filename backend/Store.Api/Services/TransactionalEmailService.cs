@@ -30,6 +30,7 @@ public static class EmailTemplateCatalog
     public const string OrderCreated = "order_created";
     public const string OrderShipped = "order_shipped";
     public const string OrderStatusChanged = "order_status_changed";
+    public const string OrderDeliveryUpdated = "order_delivery_updated";
     public const string EmailConfirmation = "email_confirmation";
     public const string TelegramConnected = "telegram_connected";
 
@@ -67,6 +68,14 @@ public static class EmailTemplateCatalog
             "Статус заказа {{order_number}} обновлён",
             "Здравствуйте, {{customer_name}}!\n\nСтатус заказа {{order_number}} изменён.\n\nБыло: {{previous_order_status_label}}\nСтало: {{order_status_label}}\nКомментарий менеджера: {{manager_comment}}\n\nАктуальный состав заказа:\n{{order_items}}",
             ["order_number", "customer_name", "previous_order_status_label", "order_status_label", "manager_comment", "order_items", "current_date_time"]),
+        new(
+            OrderDeliveryUpdated,
+            "Статус доставки заказа",
+            "Письмо с обновлением статуса доставки через внешнюю службу.",
+            true,
+            "Доставка заказа {{order_number}} обновлена",
+            "Здравствуйте, {{customer_name}}!\n\nСтатус доставки заказа {{order_number}} обновился.\n\nБыло: {{previous_delivery_status_label}}\nСтало: {{delivery_status_label}}\nСсылка для отслеживания: {{delivery_tracking_url}}\nКод получения: {{pickup_code}}\n\nАдрес доставки: {{shipping_address}}",
+            ["order_number", "customer_name", "previous_delivery_status_label", "delivery_status_label", "delivery_tracking_url", "pickup_code", "shipping_address", "current_date_time"]),
         new(
             EmailConfirmation,
             "Подтверждение email",
@@ -145,6 +154,7 @@ public class TransactionalEmailService
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TransactionalEmailService> _logger;
+    private readonly UserIdentityService _userIdentityService;
 
     private sealed record LoadedTemplate(bool Enabled, string Subject, string Body);
 
@@ -162,11 +172,16 @@ public class TransactionalEmailService
 
     private sealed record ParsedOrderItem(string ProductId, string Size, int Quantity);
 
-    public TransactionalEmailService(StoreDbContext db, IConfiguration configuration, ILogger<TransactionalEmailService> logger)
+    public TransactionalEmailService(
+        StoreDbContext db,
+        IConfiguration configuration,
+        ILogger<TransactionalEmailService> logger,
+        UserIdentityService userIdentityService)
     {
         _db = db;
         _configuration = configuration;
         _logger = logger;
+        _userIdentityService = userIdentityService;
     }
 
     public async Task<EmailSendResult> SendTestEmailAsync(SmtpTestEmailPayload payload, CancellationToken cancellationToken = default)
@@ -249,6 +264,27 @@ public class TransactionalEmailService
 
         var variables = await BuildOrderVariablesAsync(order, previousStatus, managerComment, cancellationToken);
         await TrySendTemplateEmailAsync(templateKey, recipientEmail, variables, cancellationToken);
+    }
+
+    public async Task TrySendOrderDeliveryUpdatedEmailAsync(
+        Order order,
+        string? previousDeliveryStatus,
+        string? previousDeliveryDescription,
+        CancellationToken cancellationToken = default)
+    {
+        var recipientEmail = await ResolveNotificationEmailAsync(order.UserId, order.CustomerEmail, cancellationToken);
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+            return;
+
+        var variables = await BuildOrderVariablesAsync(order, previousStatus: null, managerComment: null, cancellationToken);
+        variables["previous_delivery_status"] = NormalizeKey(previousDeliveryStatus);
+        variables["previous_delivery_status_label"] = ResolveDeliveryStatusLabel(previousDeliveryStatus, previousDeliveryDescription);
+        variables["delivery_status"] = NormalizeKey(order.YandexDeliveryStatus);
+        variables["delivery_status_label"] = ResolveDeliveryStatusLabel(order.YandexDeliveryStatus, order.YandexDeliveryStatusDescription);
+        variables["delivery_tracking_url"] = string.IsNullOrWhiteSpace(order.YandexDeliveryTrackingUrl) ? "не указана" : order.YandexDeliveryTrackingUrl.Trim();
+        variables["pickup_code"] = string.IsNullOrWhiteSpace(order.YandexPickupCode) ? "не указан" : order.YandexPickupCode.Trim();
+
+        await TrySendTemplateEmailAsync(EmailTemplateCatalog.OrderDeliveryUpdated, recipientEmail, variables, cancellationToken);
     }
 
     public async Task TrySendTelegramConnectedEmailAsync(string userId, string? telegramId, string? telegramUsername, CancellationToken cancellationToken = default)
@@ -488,34 +524,7 @@ public class TransactionalEmailService
 
     private async Task<string?> ResolveNotificationEmailAsync(string? userId, string? fallbackEmail, CancellationToken cancellationToken)
     {
-        User? user = null;
-        Profile? profile = null;
-
-        if (!string.IsNullOrWhiteSpace(userId))
-        {
-            user = await _db.Users
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
-            profile = await _db.Profiles
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
-        }
-
-        var candidates = new[]
-        {
-            profile?.Email,
-            user?.Email,
-            fallbackEmail
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var normalized = NormalizeEmail(candidate);
-            if (IsValidEmail(normalized) && !IsTelegramTechnicalEmail(normalized))
-                return normalized;
-        }
-
-        return null;
+        return await _userIdentityService.GetConfirmedEmailAsync(userId, fallbackEmail, cancellationToken);
     }
 
     private async Task<EmailSendResult> SendEmailAsync(
@@ -693,6 +702,19 @@ public class TransactionalEmailService
         };
     }
 
+    private static string ResolveDeliveryStatusLabel(string? statusCode, string? description)
+    {
+        var normalizedDescription = NormalizeOptionalText(description);
+        if (!string.IsNullOrWhiteSpace(normalizedDescription))
+            return normalizedDescription!;
+
+        var normalizedStatusCode = NormalizeOptionalText(statusCode);
+        if (!string.IsNullOrWhiteSpace(normalizedStatusCode))
+            return normalizedStatusCode!;
+
+        return "статус уточняется";
+    }
+
     private static bool ParseBoolean(string? value, bool fallback)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -789,5 +811,11 @@ public class TransactionalEmailService
         return !string.IsNullOrWhiteSpace(email)
                && email.EndsWith("@telegram.local", StringComparison.OrdinalIgnoreCase)
                && email.StartsWith("telegram_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 }

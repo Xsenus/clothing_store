@@ -21,7 +21,10 @@ public class PublicSettingsController : ControllerBase
         "metrics_vk_pixel_enabled",
         "metrics_vk_pixel_code",
         "telegram_login_enabled",
+        "telegram_widget_enabled",
         "telegram_bot_username",
+        "google_login_enabled",
+        "yandex_login_enabled",
         "payments_yoomoney_enabled",
         "yoomoney_allow_bank_cards",
         "yoomoney_allow_wallet",
@@ -98,6 +101,22 @@ public class PublicSettingsController : ControllerBase
                 result["telegram_bot_username"] = fallbackUsername!;
         }
 
+        result["telegram_login_enabled"] = await IsTelegramLoginReadyAsync() ? "true" : "false";
+        result["telegram_widget_enabled"] = await IsTelegramWidgetReadyAsync() ? "true" : "false";
+        result["google_login_enabled"] = await IsExternalProviderReadyAsync(
+            "google_login_enabled",
+            "Auth:Google:Enabled",
+            "google_auth_client_id",
+            "Auth:Google:ClientId",
+            "google_auth_client_secret",
+            "Auth:Google:ClientSecret") ? "true" : "false";
+        result["yandex_login_enabled"] = await IsExternalProviderReadyAsync(
+            "yandex_login_enabled",
+            "Auth:Yandex:Enabled",
+            "yandex_auth_client_id",
+            "Auth:Yandex:ClientId",
+            "yandex_auth_client_secret",
+            "Auth:Yandex:ClientSecret") ? "true" : "false";
         result["payments_yoomoney_enabled"] = await GetBooleanSettingAsync(
             "payments_yoomoney_enabled",
             "Integrations:YooMoney:Enabled",
@@ -201,6 +220,53 @@ public class PublicSettingsController : ControllerBase
         return !string.IsNullOrWhiteSpace(shopId)
             && !string.IsNullOrWhiteSpace(secretKey)
             && (allowBankCards || allowSbp || allowYooMoney);
+    }
+
+    private async Task<bool> IsTelegramLoginReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "telegram_login_enabled",
+            "Auth:Telegram:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var username = await _db.TelegramBots
+            .AsNoTracking()
+            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Username))
+            .OrderByDescending(x => x.UpdatedAt)
+            .Select(x => x.Username)
+            .FirstOrDefaultAsync();
+
+        return !string.IsNullOrWhiteSpace(username);
+    }
+
+    private async Task<bool> IsTelegramWidgetReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "telegram_widget_enabled",
+            "Auth:Telegram:WidgetEnabled",
+            fallback: false);
+
+        return enabled && await IsTelegramLoginReadyAsync();
+    }
+
+    private async Task<bool> IsExternalProviderReadyAsync(
+        string enabledSettingKey,
+        string enabledConfigPath,
+        string clientIdSettingKey,
+        string clientIdConfigPath,
+        string clientSecretSettingKey,
+        string clientSecretConfigPath)
+    {
+        var enabled = await GetBooleanSettingAsync(enabledSettingKey, enabledConfigPath, fallback: false);
+        if (!enabled)
+            return false;
+
+        var clientId = await GetSettingOrConfigAsync(clientIdSettingKey, clientIdConfigPath);
+        var clientSecret = await GetSettingOrConfigAsync(clientSecretSettingKey, clientSecretConfigPath);
+
+        return !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret);
     }
 
     private async Task<string?> GetSettingOrConfigAsync(string key, string configPath)

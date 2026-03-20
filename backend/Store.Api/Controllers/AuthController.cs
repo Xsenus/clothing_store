@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.WebUtilities;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Store.Api.Contracts;
 using Store.Api.Data;
 using Store.Api.Models;
@@ -22,16 +24,26 @@ public class AuthController : ControllerBase
     private readonly AuthService _authService;
     private readonly IConfiguration _configuration;
     private readonly TransactionalEmailService _emailService;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly UserIdentityService _userIdentityService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AuthController"/>.
     /// </summary>
-    public AuthController(StoreDbContext db, AuthService authService, IConfiguration configuration, TransactionalEmailService emailService)
+    public AuthController(
+        StoreDbContext db,
+        AuthService authService,
+        IConfiguration configuration,
+        TransactionalEmailService emailService,
+        IHttpClientFactory httpClientFactory,
+        UserIdentityService userIdentityService)
     {
         _db = db;
         _authService = authService;
         _configuration = configuration;
         _emailService = emailService;
+        _httpClientFactory = httpClientFactory;
+        _userIdentityService = userIdentityService;
     }
 
     /// <summary>
@@ -70,6 +82,7 @@ public class AuthController : ControllerBase
             {
                 UserId = user.Id,
                 Email = email,
+                EmailVerified = false,
                 Name = email.Split('@')[0]
             });
         }
@@ -107,17 +120,19 @@ public class AuthController : ControllerBase
         if (code is null || code.Code != payload.Code || code.ExpiresAt < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Results.BadRequest(new { detail = "Invalid code" });
         var user = await _db.Users.FirstAsync(x => x.Email == email);
         user.Verified = true;
+        var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
+        if (profile is not null)
+        {
+            profile.Email = email;
+            profile.EmailVerified = true;
+        }
         _db.VerificationCodes.Remove(code);
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
         return Results.Ok(new
         {
             token,
             refreshToken,
-            user = new
-            {
-                id = user.Id,
-                email = user.Email
-            }
+            user = await BuildAuthUserPayloadAsync(user)
         });
     }
 
@@ -134,13 +149,17 @@ public class AuthController : ControllerBase
         if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
-        return Results.Ok(new { token, refreshToken });
+        return Results.Ok(new { token, refreshToken, user = await BuildAuthUserPayloadAsync(user) });
     }
 
 
     [HttpPost("telegram/login")]
     public async Task<IResult> TelegramLogin([FromBody] TelegramAuthPayload payload)
     {
+        var loginBot = await _db.TelegramBots
+            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Token))
+            .OrderByDescending(x => x.UpdatedAt)
+            .FirstOrDefaultAsync();
         var botToken = await GetSettingOrConfigAsync("telegram_bot_token", "Integrations:Telegram:BotToken");
         if (string.IsNullOrWhiteSpace(botToken))
             return Results.BadRequest(new { detail = "Telegram bot token is not configured" });
@@ -148,52 +167,47 @@ public class AuthController : ControllerBase
         if (!ValidateTelegramPayload(payload, botToken))
             return Results.BadRequest(new { detail = "Invalid telegram auth payload" });
 
-        var email = $"telegram_{payload.Id}@telegram.local";
-        var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
-        var isNewTelegramUser = user is null;
-
-        if (user is null)
-        {
-            user = new User
-            {
-                Id = Guid.NewGuid().ToString("N"),
-                Email = email,
-                PasswordHash = string.Empty,
-                Salt = string.Empty,
-                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                Verified = true
-            };
-            _db.Users.Add(user);
-            _db.Profiles.Add(new Profile
-            {
-                UserId = user.Id,
-                Email = email,
-                Name = string.Join(" ", new[] { payload.FirstName, payload.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim(),
-                Nickname = payload.Username
-            });
-        }
-        else if (!user.Verified)
-        {
-            user.Verified = true;
-        }
+        var existingIdentity = await _userIdentityService.FindExternalIdentityAsync("telegram", payload.Id);
+        var fullName = string.Join(" ", new[] { payload.FirstName, payload.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+        var parsedChatId = long.TryParse(payload.Id, out var chatId) ? chatId : (long?)null;
+        var user = await _userIdentityService.ResolveOrCreateExternalUserAsync(
+            new ExternalIdentityProfile(
+                Provider: "telegram",
+                ProviderUserId: payload.Id,
+                Email: null,
+                EmailVerified: false,
+                Username: payload.Username,
+                DisplayName: fullName,
+                AvatarUrl: payload.PhotoUrl,
+                BotId: loginBot?.Id,
+                ChatId: parsedChatId),
+            HttpContext.RequestAborted);
 
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
-        await _db.SaveChangesAsync();
 
-        if (isNewTelegramUser)
+        if (existingIdentity is null)
             await _emailService.TrySendTelegramConnectedEmailAsync(user.Id, payload.Id, payload.Username);
 
         return Results.Ok(new
         {
             token,
             refreshToken,
-            user = new { id = user.Id, email = user.Email }
+            user = await BuildAuthUserPayloadAsync(user)
         });
     }
 
     [HttpPost("telegram/start")]
     public async Task<IResult> StartTelegramAuth([FromBody] TelegramStartAuthPayload? payload)
     {
+        var intent = NormalizeExternalAuthIntent(payload?.Intent);
+        User? currentUser = null;
+        if (intent == "link")
+        {
+            currentUser = await _authService.RequireUserAsync(Request);
+            if (currentUser is null)
+                return Results.Unauthorized();
+        }
+
         var bot = await _db.TelegramBots
             .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Token) && !string.IsNullOrWhiteSpace(x.Username))
             .OrderByDescending(x => x.UpdatedAt)
@@ -209,6 +223,8 @@ public class AuthController : ControllerBase
             Id = Guid.NewGuid().ToString("N"),
             State = state,
             BotId = bot.Id,
+            UserId = intent == "link" ? currentUser!.Id : null,
+            Intent = intent,
             Status = "pending",
             CreatedAt = now,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()
@@ -217,11 +233,14 @@ public class AuthController : ControllerBase
         _db.TelegramAuthRequests.Add(request);
         await _db.SaveChangesAsync();
 
-        var safeReturnUrl = string.IsNullOrWhiteSpace(payload?.ReturnUrl) ? "/profile" : payload!.ReturnUrl!.Trim();
+        var safeReturnUrl = string.IsNullOrWhiteSpace(payload?.ReturnUrl)
+            ? intent == "link" ? "/profile?tab=settings" : "/profile"
+            : payload!.ReturnUrl!.Trim();
         return Results.Ok(new
         {
             state,
             authUrl = $"https://t.me/{bot.Username}?start=login_{state}",
+            intent,
             returnUrl = safeReturnUrl,
             expiresAt = request.ExpiresAt,
             pollIntervalMs = 2000
@@ -258,6 +277,21 @@ public class AuthController : ControllerBase
         if (request.ConsumedAt.HasValue)
             return Results.Ok(new { status = "consumed", completed = false });
 
+        if (string.Equals(request.Intent, "link", StringComparison.Ordinal))
+        {
+            request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            request.Status = "consumed";
+            await _db.SaveChangesAsync();
+
+            return Results.Ok(new
+            {
+                status = "completed",
+                completed = true,
+                linked = true,
+                provider = "telegram"
+            });
+        }
+
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId);
         if (user is null || user.IsBlocked)
             return Results.BadRequest(new { detail = "User is not available for login" });
@@ -283,8 +317,258 @@ public class AuthController : ControllerBase
             completed = true,
             token,
             refreshToken,
-            user = new { id = user.Id, email = user.Email }
+            user = await BuildAuthUserPayloadAsync(user)
         });
+    }
+
+    [HttpPost("external/start")]
+    public async Task<IResult> StartExternalAuth([FromBody] ExternalAuthStartPayload payload)
+    {
+        var provider = NormalizeExternalProvider(payload.Provider);
+        if (string.IsNullOrWhiteSpace(provider))
+            return Results.BadRequest(new { detail = "Unsupported external auth provider" });
+
+        var intent = NormalizeExternalAuthIntent(payload.Intent);
+        User? currentUser = null;
+        if (intent == "link")
+        {
+            currentUser = await _authService.RequireUserAsync(Request);
+            if (currentUser is null)
+                return Results.Unauthorized();
+        }
+
+        var providerConfiguration = await ResolveExternalProviderConfigurationAsync(provider);
+        if (providerConfiguration is null)
+            return Results.BadRequest(new { detail = $"External auth provider '{provider}' is not configured" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var state = AuthService.GenerateToken()[..24].ToLowerInvariant();
+        var safeReturnUrl = string.IsNullOrWhiteSpace(payload.ReturnUrl)
+            ? intent == "link" ? "/profile?tab=settings" : "/profile"
+            : payload.ReturnUrl.Trim();
+        var request = new ExternalAuthRequest
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Provider = provider,
+            State = state,
+            ReturnUrl = safeReturnUrl,
+            Intent = intent,
+            UserId = intent == "link" ? currentUser!.Id : null,
+            Status = "pending",
+            CreatedAt = now,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()
+        };
+
+        _db.ExternalAuthRequests.Add(request);
+        await _db.SaveChangesAsync();
+
+        var redirectUri = BuildAbsoluteUrl($"/auth/external/callback/{provider}");
+        var authUrl = BuildExternalAuthorizationUrl(providerConfiguration, state, redirectUri);
+
+        return Results.Ok(new
+        {
+            provider,
+            state,
+            authUrl,
+            intent,
+            returnUrl = safeReturnUrl,
+            expiresAt = request.ExpiresAt,
+            pollIntervalMs = 2000
+        });
+    }
+
+    [HttpGet("external/status/{state}")]
+    public async Task<IResult> GetExternalAuthStatus([FromRoute] string state)
+    {
+        var normalizedState = state?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedState))
+            return Results.BadRequest(new { detail = "Invalid state" });
+
+        var request = await _db.ExternalAuthRequests
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(x => x.State == normalizedState);
+        if (request is null)
+            return Results.NotFound(new { detail = "Authorization request not found" });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (request.ExpiresAt <= now
+            && request.Status != "completed"
+            && request.Status != "consumed"
+            && request.Status != "failed")
+        {
+            request.Status = "expired";
+            await _db.SaveChangesAsync();
+        }
+
+        if (!string.Equals(request.Status, "completed", StringComparison.Ordinal))
+        {
+            return Results.Ok(new
+            {
+                status = request.Status,
+                completed = false,
+                detail = request.Error
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UserId))
+            return Results.Ok(new { status = "pending", completed = false });
+
+        if (request.ConsumedAt.HasValue)
+            return Results.Ok(new { status = "consumed", completed = false });
+
+        if (string.Equals(request.Intent, "link", StringComparison.Ordinal))
+        {
+            request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            request.Status = "consumed";
+            await _db.SaveChangesAsync();
+
+            return Results.Ok(new
+            {
+                status = "completed",
+                completed = true,
+                linked = true,
+                provider = request.Provider,
+                returnUrl = request.ReturnUrl
+            });
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId);
+        if (user is null || user.IsBlocked)
+            return Results.BadRequest(new { detail = "User is not available for login" });
+
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        request.Status = "consumed";
+        await _db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            status = "completed",
+            completed = true,
+            provider = request.Provider,
+            token,
+            refreshToken,
+            returnUrl = request.ReturnUrl,
+            user = await BuildAuthUserPayloadAsync(user)
+        });
+    }
+
+    [HttpGet("external/callback/{provider}")]
+    public async Task<IResult> HandleExternalAuthCallback(
+        [FromRoute] string provider,
+        [FromQuery] string? state,
+        [FromQuery] string? code,
+        [FromQuery] string? error,
+        [FromQuery(Name = "error_description")] string? errorDescription)
+    {
+        var normalizedProvider = NormalizeExternalProvider(provider);
+        if (string.IsNullOrWhiteSpace(normalizedProvider))
+            return Results.Content(BuildExternalAuthPopupHtml(false, "Неизвестный провайдер авторизации."), "text/html", Encoding.UTF8);
+
+        var providerConfiguration = await ResolveExternalProviderConfigurationAsync(normalizedProvider);
+        if (providerConfiguration is null)
+            return Results.Content(BuildExternalAuthPopupHtml(false, $"Провайдер '{normalizedProvider}' не настроен."), "text/html", Encoding.UTF8);
+
+        var normalizedState = state?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedState))
+            return Results.Content(BuildExternalAuthPopupHtml(false, "Не передан state внешней авторизации."), "text/html", Encoding.UTF8);
+
+        var request = await _db.ExternalAuthRequests
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(x => x.Provider == normalizedProvider && x.State == normalizedState);
+        if (request is null)
+            return Results.Content(BuildExternalAuthPopupHtml(false, "Запрос внешней авторизации не найден."), "text/html", Encoding.UTF8);
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (request.ExpiresAt <= now)
+        {
+            request.Status = "expired";
+            request.Error = "Срок действия запроса внешней авторизации истёк.";
+            await _db.SaveChangesAsync();
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            request.Status = "failed";
+            request.Error = string.IsNullOrWhiteSpace(errorDescription) ? error.Trim() : errorDescription.Trim();
+            request.CompletedAt = now;
+            await _db.SaveChangesAsync();
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            request.Status = "failed";
+            request.Error = "Провайдер не вернул код авторизации.";
+            request.CompletedAt = now;
+            await _db.SaveChangesAsync();
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+        }
+
+        try
+        {
+            var redirectUri = BuildAbsoluteUrl($"/auth/external/callback/{normalizedProvider}");
+            var accessToken = await ExchangeExternalAccessTokenAsync(
+                providerConfiguration,
+                code.Trim(),
+                redirectUri,
+                HttpContext.RequestAborted);
+            var externalProfile = normalizedProvider switch
+            {
+                "google" => await LoadGoogleProfileAsync(accessToken, HttpContext.RequestAborted),
+                "yandex" => await LoadYandexProfileAsync(accessToken, HttpContext.RequestAborted),
+                _ => throw new InvalidOperationException("Unsupported external auth provider")
+            };
+
+            if (string.Equals(request.Intent, "link", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(request.UserId))
+                    throw new InvalidOperationException("Пользователь для привязки аккаунта не найден.");
+
+                var targetUser = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId, HttpContext.RequestAborted);
+                if (targetUser is null || targetUser.IsBlocked)
+                    throw new InvalidOperationException("Пользователь недоступен для привязки аккаунта.");
+
+                await _userIdentityService.AttachExternalIdentityAsync(
+                    request.UserId,
+                    externalProfile,
+                    HttpContext.RequestAborted);
+
+                request.Status = "completed";
+                request.Error = null;
+                request.CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                await _db.SaveChangesAsync();
+
+                return Results.Content(
+                    BuildExternalAuthPopupHtml(true, $"Аккаунт {providerConfiguration.DisplayName} привязан. Вернитесь на сайт."),
+                    "text/html",
+                    Encoding.UTF8);
+            }
+
+            var user = await _userIdentityService.ResolveOrCreateExternalUserAsync(
+                externalProfile,
+                HttpContext.RequestAborted);
+
+            request.UserId = user.Id;
+            request.Status = "completed";
+            request.Error = null;
+            request.CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await _db.SaveChangesAsync();
+
+            return Results.Content(
+                BuildExternalAuthPopupHtml(true, $"Вход через {providerConfiguration.DisplayName} завершён. Вернитесь на сайт."),
+                "text/html",
+                Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            request.Status = "failed";
+            request.Error = ex.Message;
+            request.CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await _db.SaveChangesAsync();
+            return Results.Content(BuildExternalAuthPopupHtml(false, ex.Message), "text/html", Encoding.UTF8);
+        }
     }
 
     /// <summary>
@@ -342,7 +626,11 @@ public class AuthController : ControllerBase
         var user = await _authService.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
-        return Results.Ok(new { user = new { id = user.Id, email = user.Email }, profile });
+        return Results.Ok(new
+        {
+            user = await BuildAuthUserPayloadAsync(user, profile),
+            profile
+        });
     }
 
     /// <summary>
@@ -409,6 +697,317 @@ public class AuthController : ControllerBase
 
 
 
+    private async Task<object> BuildAuthUserPayloadAsync(User user, Profile? profile = null)
+    {
+        profile ??= await _db.Profiles.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == user.Id);
+
+        var visibleEmail = profile is not null
+            && profile.EmailVerified
+            && TechnicalEmailHelper.IsValidRealEmail(profile.Email)
+                ? TechnicalEmailHelper.NormalizeRealEmail(profile.Email)
+                : profile is null && TechnicalEmailHelper.IsValidRealEmail(user.Email)
+                    ? TechnicalEmailHelper.NormalizeRealEmail(user.Email)
+                    : string.Empty;
+
+        return new
+        {
+            id = user.Id,
+            email = visibleEmail
+        };
+    }
+
+    private async Task<ExternalProviderConfiguration?> ResolveExternalProviderConfigurationAsync(string provider)
+    {
+        return NormalizeExternalProvider(provider) switch
+        {
+            "google" => await ResolveExternalProviderConfigurationAsync(
+                provider: "google",
+                displayName: "Google",
+                enabledSettingKey: "google_login_enabled",
+                enabledConfigPath: "Auth:Google:Enabled",
+                clientIdSettingKey: "google_auth_client_id",
+                clientIdConfigPath: "Auth:Google:ClientId",
+                clientSecretSettingKey: "google_auth_client_secret",
+                clientSecretConfigPath: "Auth:Google:ClientSecret",
+                authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+                tokenEndpoint: "https://oauth2.googleapis.com/token",
+                userInfoEndpoint: "https://openidconnect.googleapis.com/v1/userinfo",
+                defaultScope: "openid email profile"),
+            "yandex" => await ResolveExternalProviderConfigurationAsync(
+                provider: "yandex",
+                displayName: "Yandex",
+                enabledSettingKey: "yandex_login_enabled",
+                enabledConfigPath: "Auth:Yandex:Enabled",
+                clientIdSettingKey: "yandex_auth_client_id",
+                clientIdConfigPath: "Auth:Yandex:ClientId",
+                clientSecretSettingKey: "yandex_auth_client_secret",
+                clientSecretConfigPath: "Auth:Yandex:ClientSecret",
+                authorizationEndpoint: "https://oauth.yandex.com/authorize",
+                tokenEndpoint: "https://oauth.yandex.com/token",
+                userInfoEndpoint: "https://login.yandex.ru/info?format=json",
+                defaultScope: "login:info login:email login:avatar"),
+            _ => null
+        };
+    }
+
+    private async Task<ExternalProviderConfiguration?> ResolveExternalProviderConfigurationAsync(
+        string provider,
+        string displayName,
+        string enabledSettingKey,
+        string enabledConfigPath,
+        string clientIdSettingKey,
+        string clientIdConfigPath,
+        string clientSecretSettingKey,
+        string clientSecretConfigPath,
+        string authorizationEndpoint,
+        string tokenEndpoint,
+        string userInfoEndpoint,
+        string defaultScope)
+    {
+        var enabled = await GetBooleanSettingOrConfigAsync(enabledSettingKey, enabledConfigPath, false);
+        if (!enabled)
+            return null;
+
+        var clientId = await GetSettingOrConfigAsync(clientIdSettingKey, clientIdConfigPath);
+        var clientSecret = await GetSettingOrConfigAsync(clientSecretSettingKey, clientSecretConfigPath);
+        if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            return null;
+
+        return new ExternalProviderConfiguration(
+            Provider: provider,
+            DisplayName: displayName,
+            ClientId: clientId.Trim(),
+            ClientSecret: clientSecret.Trim(),
+            AuthorizationEndpoint: authorizationEndpoint,
+            TokenEndpoint: tokenEndpoint,
+            UserInfoEndpoint: userInfoEndpoint,
+            Scope: defaultScope);
+    }
+
+    private string BuildExternalAuthorizationUrl(
+        ExternalProviderConfiguration configuration,
+        string state,
+        string redirectUri)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["client_id"] = configuration.ClientId,
+            ["redirect_uri"] = redirectUri,
+            ["response_type"] = "code",
+            ["state"] = state
+        };
+
+        if (!string.IsNullOrWhiteSpace(configuration.Scope))
+            query["scope"] = configuration.Scope;
+
+        if (string.Equals(configuration.Provider, "google", StringComparison.Ordinal))
+        {
+            query["access_type"] = "online";
+            query["include_granted_scopes"] = "true";
+            query["prompt"] = "select_account";
+        }
+
+        return QueryHelpers.AddQueryString(configuration.AuthorizationEndpoint, query!);
+    }
+
+    private string BuildAbsoluteUrl(string relativePath)
+    {
+        var normalizedPath = relativePath.StartsWith("/", StringComparison.Ordinal)
+            ? relativePath
+            : "/" + relativePath;
+
+        return $"{Request.Scheme}://{Request.Host}{Request.PathBase}{normalizedPath}";
+    }
+
+    private async Task<string> ExchangeExternalAccessTokenAsync(
+        ExternalProviderConfiguration configuration,
+        string code,
+        string redirectUri,
+        CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, configuration.TokenEndpoint)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = configuration.ClientId,
+                ["client_secret"] = configuration.ClientSecret,
+                ["redirect_uri"] = redirectUri
+            })
+        };
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(GetExternalProviderErrorDetail(content, response.ReasonPhrase)
+                ?? $"Не удалось получить токен {configuration.DisplayName}.");
+
+        using var document = JsonDocument.Parse(content);
+        var accessToken = document.RootElement.TryGetProperty("access_token", out var accessTokenEl)
+            ? accessTokenEl.GetString()?.Trim()
+            : null;
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new InvalidOperationException($"{configuration.DisplayName} не вернул access token.");
+
+        return accessToken!;
+    }
+
+    private async Task<ExternalIdentityProfile> LoadGoogleProfileAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(GetExternalProviderErrorDetail(content, response.ReasonPhrase)
+                ?? "Google не вернул данные профиля.");
+
+        using var document = JsonDocument.Parse(content);
+        var providerUserId = document.RootElement.TryGetProperty("sub", out var subEl) ? subEl.GetString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(providerUserId))
+            throw new InvalidOperationException("Google не вернул идентификатор пользователя.");
+
+        var email = document.RootElement.TryGetProperty("email", out var emailEl) ? emailEl.GetString() : null;
+        var emailVerified = document.RootElement.TryGetProperty("email_verified", out var emailVerifiedEl)
+            && emailVerifiedEl.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && emailVerifiedEl.GetBoolean();
+        var displayName = document.RootElement.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+        var avatarUrl = document.RootElement.TryGetProperty("picture", out var pictureEl) ? pictureEl.GetString() : null;
+
+        return new ExternalIdentityProfile(
+            Provider: "google",
+            ProviderUserId: providerUserId!,
+            Email: email,
+            EmailVerified: emailVerified,
+            Username: null,
+            DisplayName: displayName,
+            AvatarUrl: avatarUrl);
+    }
+
+    private async Task<ExternalIdentityProfile> LoadYandexProfileAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://login.yandex.ru/info?format=json");
+        request.Headers.TryAddWithoutValidation("Authorization", $"OAuth {accessToken}");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(GetExternalProviderErrorDetail(content, response.ReasonPhrase)
+                ?? "Yandex не вернул данные профиля.");
+
+        using var document = JsonDocument.Parse(content);
+        var providerUserId = document.RootElement.TryGetProperty("id", out var idEl) ? idEl.GetString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(providerUserId))
+            throw new InvalidOperationException("Yandex не вернул идентификатор пользователя.");
+
+        var email = document.RootElement.TryGetProperty("default_email", out var emailEl) ? emailEl.GetString() : null;
+        var username = document.RootElement.TryGetProperty("login", out var loginEl) ? loginEl.GetString() : null;
+        var displayName = document.RootElement.TryGetProperty("real_name", out var realNameEl) ? realNameEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(displayName) && document.RootElement.TryGetProperty("display_name", out var displayNameEl))
+            displayName = displayNameEl.GetString();
+
+        string? avatarUrl = null;
+        var isAvatarEmpty = document.RootElement.TryGetProperty("is_avatar_empty", out var avatarEmptyEl)
+            && avatarEmptyEl.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && avatarEmptyEl.GetBoolean();
+        if (!isAvatarEmpty
+            && document.RootElement.TryGetProperty("default_avatar_id", out var avatarIdEl))
+        {
+            var avatarId = avatarIdEl.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(avatarId))
+                avatarUrl = $"https://avatars.yandex.net/get-yapic/{avatarId}/islands-200";
+        }
+
+        return new ExternalIdentityProfile(
+            Provider: "yandex",
+            ProviderUserId: providerUserId!,
+            Email: email,
+            EmailVerified: TechnicalEmailHelper.IsValidRealEmail(email),
+            Username: username,
+            DisplayName: displayName,
+            AvatarUrl: avatarUrl);
+    }
+
+    private static string? GetExternalProviderErrorDetail(string? responseBody, string? fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(responseBody))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(responseBody);
+                if (document.RootElement.TryGetProperty("error_description", out var descriptionEl))
+                    return descriptionEl.GetString();
+                if (document.RootElement.TryGetProperty("error", out var errorEl))
+                    return errorEl.GetString();
+                if (document.RootElement.TryGetProperty("message", out var messageEl))
+                    return messageEl.GetString();
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(fallback) ? null : fallback.Trim();
+    }
+
+    private static string NormalizeExternalProvider(string? provider)
+    {
+        return provider?.Trim().ToLowerInvariant() switch
+        {
+            "google" => "google",
+            "yandex" => "yandex",
+            _ => string.Empty
+        };
+    }
+
+    private static string NormalizeExternalAuthIntent(string? intent)
+    {
+        return string.Equals(intent?.Trim(), "link", StringComparison.OrdinalIgnoreCase)
+            ? "link"
+            : "signin";
+    }
+
+    private static string BuildExternalAuthPopupHtml(bool success, string? message)
+    {
+        var title = success ? "Авторизация завершена" : "Ошибка авторизации";
+        var safeTitle = WebUtility.HtmlEncode(title);
+        var safeMessage = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(message) ? "Вернитесь на сайт." : message.Trim());
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{safeTitle}}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; color: #111827; background: #f8fafc; }
+    .card { max-width: 420px; margin: 10vh auto; background: white; border-radius: 16px; padding: 24px; box-shadow: 0 12px 32px rgba(15,23,42,.08); }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    p { margin: 0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{safeTitle}}</h1>
+    <p>{{safeMessage}}</p>
+  </div>
+  <script>
+    setTimeout(function () {
+      if (window.opener && !window.opener.closed) {
+        window.close();
+      }
+    }, 1200);
+  </script>
+</body>
+</html>
+""";
+    }
+
     private async Task<string?> GetSettingOrConfigAsync(string key, string configPath)
     {
         if (key == "telegram_bot_token")
@@ -439,6 +1038,20 @@ public class AuthController : ControllerBase
         }
 
         return _configuration[configPath];
+    }
+
+    private async Task<bool> GetBooleanSettingOrConfigAsync(string key, string configPath, bool fallback)
+    {
+        var raw = await GetSettingOrConfigAsync(key, configPath);
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback
+        };
     }
 
     private static bool ValidateTelegramPayload(TelegramAuthPayload payload, string botToken)
@@ -621,4 +1234,14 @@ public class AuthController : ControllerBase
         var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
         return row?.Value;
     }
+
+    private sealed record ExternalProviderConfiguration(
+        string Provider,
+        string DisplayName,
+        string ClientId,
+        string ClientSecret,
+        string AuthorizationEndpoint,
+        string TokenEndpoint,
+        string UserInfoEndpoint,
+        string Scope);
 }

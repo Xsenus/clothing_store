@@ -23,6 +23,7 @@ public class OrdersController : ControllerBase
     private readonly IOrderEmailQueue _orderEmailQueue;
     private readonly IOrderPaymentService _orderPaymentService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
+    private readonly UserIdentityService _userIdentityService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
@@ -34,13 +35,15 @@ public class OrdersController : ControllerBase
         AuthService auth,
         IOrderEmailQueue orderEmailQueue,
         IOrderPaymentService orderPaymentService,
-        IYandexDeliveryTrackingService yandexDeliveryTrackingService)
+        IYandexDeliveryTrackingService yandexDeliveryTrackingService,
+        UserIdentityService userIdentityService)
     {
         _db = db;
         _auth = auth;
         _orderEmailQueue = orderEmailQueue;
         _orderPaymentService = orderPaymentService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
+        _userIdentityService = userIdentityService;
     }
 
     /// <summary>
@@ -256,8 +259,9 @@ public class OrdersController : ControllerBase
                 ? null
                 : payload.PickupPointId.Trim();
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
+            var confirmedUserEmail = await _userIdentityService.GetConfirmedEmailAsync(user.Id, null, HttpContext.RequestAborted);
             var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
-                ? user.Email
+                ? confirmedUserEmail ?? string.Empty
                 : payload.CustomerEmail.Trim();
             var resolvedCustomerPhone = payload.CustomerPhone?.Trim() ?? string.Empty;
             var resolvedShippingAddress = resolvedShippingMethod == "self_pickup"

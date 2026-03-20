@@ -24,16 +24,23 @@ public class ProfileController : ControllerBase
     private readonly AuthService _auth;
     private readonly IConfiguration _configuration;
     private readonly TransactionalEmailService _emailService;
+    private readonly UserIdentityService _userIdentityService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="ProfileController"/>.
     /// </summary>
-    public ProfileController(StoreDbContext db, AuthService auth, IConfiguration configuration, TransactionalEmailService emailService)
+    public ProfileController(
+        StoreDbContext db,
+        AuthService auth,
+        IConfiguration configuration,
+        TransactionalEmailService emailService,
+        UserIdentityService userIdentityService)
     {
         _db = db;
         _auth = auth;
         _configuration = configuration;
         _emailService = emailService;
+        _userIdentityService = userIdentityService;
     }
 
     /// <summary>
@@ -47,10 +54,11 @@ public class ProfileController : ControllerBase
 
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         var rawEmail = string.IsNullOrWhiteSpace(profile?.Email) ? user.Email : profile!.Email;
-        var telegramTechnicalEmail = IsTelegramTechnicalEmail(rawEmail);
+        var technicalEmail = TechnicalEmailHelper.IsTechnicalEmail(rawEmail);
         var shippingAddresses = profile is not null
             ? ProfileAddressBook.Parse(profile.ShippingAddressesJson, profile.ShippingAddress)
             : [];
+        var externalIdentities = await BuildExternalIdentityPayloadAsync(user.Id);
 
         return profile is not null
             ? Results.Ok(new
@@ -64,10 +72,11 @@ public class ProfileController : ControllerBase
                     value = address.Value,
                     isDefault = address.IsDefault
                 }),
-                email = telegramTechnicalEmail ? string.Empty : rawEmail,
+                email = technicalEmail ? string.Empty : rawEmail,
                 nickname = profile.Nickname,
                 phoneVerified = profile.PhoneVerified,
-                emailVerified = !telegramTechnicalEmail && user.Verified,
+                emailVerified = profile.EmailVerified,
+                externalIdentities,
                 isAdmin = user.IsAdmin,
                 isBlocked = user.IsBlocked
             })
@@ -77,10 +86,11 @@ public class ProfileController : ControllerBase
                 phone = "",
                 shippingAddress = "",
                 shippingAddresses = Array.Empty<object>(),
-                email = telegramTechnicalEmail ? string.Empty : rawEmail,
+                email = technicalEmail ? string.Empty : rawEmail,
                 nickname = $"user{user.Id[..6]}",
                 phoneVerified = false,
-                emailVerified = !telegramTechnicalEmail && user.Verified,
+                emailVerified = false,
+                externalIdentities,
                 isAdmin = user.IsAdmin,
                 isBlocked = user.IsBlocked
             });
@@ -193,10 +203,11 @@ public class ProfileController : ControllerBase
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         if (profile is null)
         {
-            profile = new Profile { UserId = user.Id, Email = nextEmail };
+            profile = new Profile { UserId = user.Id, Email = nextEmail, EmailVerified = true };
             _db.Profiles.Add(profile);
         }
         profile.Email = nextEmail;
+        profile.EmailVerified = true;
 
         request.Status = "consumed";
         request.VerifiedAt = now;
@@ -282,7 +293,12 @@ public class ProfileController : ControllerBase
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         if (profile is null)
         {
-            profile = new Profile { UserId = user.Id, Email = user.Email };
+            profile = new Profile
+            {
+                UserId = user.Id,
+                Email = TechnicalEmailHelper.IsTechnicalEmail(user.Email) ? string.Empty : user.Email,
+                EmailVerified = user.Verified && TechnicalEmailHelper.IsValidRealEmail(user.Email)
+            };
             _db.Profiles.Add(profile);
         }
 
@@ -301,6 +317,30 @@ public class ProfileController : ControllerBase
     /// <summary>
     /// Обновляет профиль текущего пользователя.
     /// </summary>
+    [HttpDelete("external/{provider}")]
+    public async Task<IResult> DetachExternalIdentity([FromRoute] string provider)
+    {
+        var user = await _auth.RequireUserAsync(Request);
+        if (user is null) return Results.Unauthorized();
+
+        try
+        {
+            var detached = await _userIdentityService.DetachExternalIdentityAsync(user.Id, provider, HttpContext.RequestAborted);
+            if (!detached)
+                return Results.NotFound(new { detail = "Внешний аккаунт не найден" });
+
+            return Results.Ok(new
+            {
+                ok = true,
+                externalIdentities = await BuildExternalIdentityPayloadAsync(user.Id)
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
     [HttpPost]
     public async Task<IResult> Upsert([FromBody] ProfilePayload payload)
     {
@@ -314,7 +354,12 @@ public class ProfileController : ControllerBase
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id);
         if (profile is null)
         {
-            profile = new Profile { UserId = user.Id, Email = user.Email };
+            profile = new Profile
+            {
+                UserId = user.Id,
+                Email = TechnicalEmailHelper.IsTechnicalEmail(user.Email) ? string.Empty : user.Email,
+                EmailVerified = user.Verified && TechnicalEmailHelper.IsValidRealEmail(user.Email)
+            };
             _db.Profiles.Add(profile);
         }
 
@@ -368,10 +413,51 @@ public class ProfileController : ControllerBase
             email = profile.Email,
             nickname = profile.Nickname,
             phoneVerified = profile.PhoneVerified,
-            emailVerified = user.Verified,
+            emailVerified = profile.EmailVerified,
+            externalIdentities = await BuildExternalIdentityPayloadAsync(user.Id),
             isAdmin = user.IsAdmin,
             isBlocked = user.IsBlocked
         });
+    }
+
+    private async Task<IReadOnlyList<object>> BuildExternalIdentityPayloadAsync(string userId)
+    {
+        var identities = await _db.UserExternalIdentities
+            .AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .ToListAsync();
+
+        if (!identities.Any(x => x.Provider == "telegram"))
+        {
+            var fallbackTelegramIdentity = await _userIdentityService.GetVerifiedTelegramIdentityAsync(userId);
+            if (fallbackTelegramIdentity is not null)
+            {
+                identities.Add(fallbackTelegramIdentity);
+            }
+        }
+
+        return identities
+            .Where(x => x.Provider == "telegram" || x.Provider == "google" || x.Provider == "yandex")
+            .GroupBy(x => x.Provider)
+            .Select(group => group
+                .OrderByDescending(x => x.VerifiedAt ?? x.LastUsedAt ?? x.UpdatedAt)
+                .ThenByDescending(x => x.UpdatedAt)
+                .First())
+            .OrderBy(x => x.Provider == "telegram" ? 0 : x.Provider == "google" ? 1 : 2)
+            .Select(identity => (object)new
+            {
+                provider = identity.Provider,
+                providerEmail = identity.ProviderEmail,
+                providerUsername = identity.ProviderUsername,
+                displayName = identity.DisplayName,
+                avatarUrl = identity.AvatarUrl,
+                verified = identity.VerifiedAt.HasValue,
+                linkedAt = identity.VerifiedAt ?? identity.CreatedAt,
+                lastUsedAt = identity.LastUsedAt ?? identity.UpdatedAt,
+                hasChat = identity.ChatId.HasValue,
+                hasBot = !string.IsNullOrWhiteSpace(identity.BotId)
+            })
+            .ToList();
     }
 
     private async Task TrySendVerificationEmailAsync(string email, string code)
@@ -453,13 +539,6 @@ public class ProfileController : ControllerBase
         {
             return false;
         }
-    }
-
-    private static bool IsTelegramTechnicalEmail(string? email)
-    {
-        return !string.IsNullOrWhiteSpace(email)
-               && email.EndsWith("@telegram.local", StringComparison.OrdinalIgnoreCase)
-               && email.StartsWith("telegram_", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizePhone(string? phone)

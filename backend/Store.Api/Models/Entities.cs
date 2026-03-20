@@ -321,6 +321,9 @@ public class Profile
     [Column("email")]
     public string Email { get; set; } = string.Empty;
 
+    [Column("email_verified")]
+    public bool EmailVerified { get; set; }
+
     /// <summary>
     /// Получает или задаёт имя пользователя.
     /// </summary>
@@ -379,6 +382,9 @@ public class TelegramAuthRequest
 
     [Column("phone_number")]
     public string? PhoneNumber { get; set; }
+
+    [Column("intent")]
+    public string Intent { get; set; } = "signin";
 
     [Column("status")]
     public string Status { get; set; } = "pending";
@@ -448,6 +454,94 @@ public class ContactChangeRequest
 
     [Column("resend_window_started_at")]
     public long? ResendWindowStartedAt { get; set; }
+}
+
+[Table("user_external_identities")]
+public class UserExternalIdentity
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Column("provider")]
+    public string Provider { get; set; } = string.Empty;
+
+    [Column("provider_user_id")]
+    public string ProviderUserId { get; set; } = string.Empty;
+
+    [Column("provider_email")]
+    public string? ProviderEmail { get; set; }
+
+    [Column("provider_username")]
+    public string? ProviderUsername { get; set; }
+
+    [Column("display_name")]
+    public string? DisplayName { get; set; }
+
+    [Column("avatar_url")]
+    public string? AvatarUrl { get; set; }
+
+    [Column("bot_id")]
+    public string? BotId { get; set; }
+
+    [Column("chat_id")]
+    public long? ChatId { get; set; }
+
+    [Column("verified_at")]
+    public long? VerifiedAt { get; set; }
+
+    [Column("last_used_at")]
+    public long? LastUsedAt { get; set; }
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public long UpdatedAt { get; set; }
+}
+
+[Table("external_auth_requests")]
+public class ExternalAuthRequest
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("provider")]
+    public string Provider { get; set; } = string.Empty;
+
+    [Column("state")]
+    public string State { get; set; } = string.Empty;
+
+    [Column("return_url")]
+    public string ReturnUrl { get; set; } = "/profile";
+
+    [Column("intent")]
+    public string Intent { get; set; } = "signin";
+
+    [Column("status")]
+    public string Status { get; set; } = "pending";
+
+    [Column("error")]
+    public string? Error { get; set; }
+
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+
+    [Column("expires_at")]
+    public long ExpiresAt { get; set; }
+
+    [Column("completed_at")]
+    public long? CompletedAt { get; set; }
+
+    [Column("consumed_at")]
+    public long? ConsumedAt { get; set; }
 }
 
 /// <summary>

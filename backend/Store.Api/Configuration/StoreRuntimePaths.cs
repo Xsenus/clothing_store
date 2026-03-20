@@ -7,12 +7,14 @@ public sealed class StoreRuntimePaths
     public string RepositoryRoot { get; }
     public string SeedProductsPath { get; }
     public string UploadsDir { get; }
+    public string DatabaseBackupsDir { get; }
 
-    private StoreRuntimePaths(string repositoryRoot, string seedProductsPath, string uploadsDir)
+    private StoreRuntimePaths(string repositoryRoot, string seedProductsPath, string uploadsDir, string databaseBackupsDir)
     {
         RepositoryRoot = repositoryRoot;
         SeedProductsPath = seedProductsPath;
         UploadsDir = uploadsDir;
+        DatabaseBackupsDir = databaseBackupsDir;
     }
 
     public static StoreRuntimePaths Resolve(
@@ -29,8 +31,12 @@ public sealed class StoreRuntimePaths
             configuration["Storage:UploadsDir"],
             repositoryRoot,
             Path.Combine("backend", "uploads"));
+        var databaseBackupsDir = ResolveAbsolutePath(
+            configuration["DatabaseBackup:Directory"],
+            repositoryRoot,
+            Path.Combine("backend", "backups", "database"));
 
-        return new StoreRuntimePaths(repositoryRoot, seedProductsPath, uploadsDir);
+        return new StoreRuntimePaths(repositoryRoot, seedProductsPath, uploadsDir, databaseBackupsDir);
     }
 
     private static string ResolveRepositoryRoot(string contentRootPath, string appBaseDirectory)

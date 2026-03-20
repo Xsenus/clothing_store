@@ -27,3 +27,25 @@ Integrations__YooKassa__PaymentTimeoutMinutes=60
 Integrations__YooKassa__AllowBankCards=true
 Integrations__YooKassa__AllowSbp=true
 Integrations__YooKassa__AllowYooMoney=true
+
+# Optional external auth defaults. They can also be duplicated in app settings from the admin panel.
+Auth__Telegram__Enabled=false
+Auth__Telegram__WidgetEnabled=false
+Auth__Google__Enabled=false
+Auth__Google__ClientId=
+Auth__Google__ClientSecret=
+Auth__Yandex__Enabled=false
+Auth__Yandex__ClientId=
+Auth__Yandex__ClientSecret=
+
+# Optional database backup defaults. The admin panel can override schedule/retention,
+# but the server should still provide a stable backup directory and pg_dump path.
+# Linux example for pg_dump: /usr/bin/pg_dump
+# Windows example for pg_dump: C:\Program Files\PostgreSQL\16\bin\pg_dump.exe
+DatabaseBackup__PgDumpPath=
+# Linux example for backup directory: /var/www/clothing_store/backups/database
+# Windows example for backup directory: C:\clothing_store\backups\database
+DatabaseBackup__Directory=
+DatabaseBackup__Enabled=true
+DatabaseBackup__ScheduleLocal=03:00,15:00
+DatabaseBackup__RetentionDays=14

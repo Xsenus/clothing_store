@@ -11,6 +11,7 @@ namespace Store.Api.Services;
 public interface IYandexDeliveryTrackingService
 {
     Task SyncOrderStatusesAsync(IEnumerable<string> orderIds, CancellationToken cancellationToken = default);
+    Task<int> SyncActiveOrderStatusesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingService
@@ -46,23 +47,26 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
+    private readonly IOrderEmailQueue _orderEmailQueue;
+    private readonly ILogger<YandexDeliveryTrackingService> _logger;
 
     private static string GetBuiltInTestApiToken() => string.Concat(
         "y2_AgAAAAD04omr",
         "AAAPeAAAAAAC",
         "RpC94Qk6Z5rUTgOc",
         "TgYFECJllXYKFx8");
-    private readonly ILogger<YandexDeliveryTrackingService> _logger;
 
     public YandexDeliveryTrackingService(
         IHttpClientFactory httpClientFactory,
         StoreDbContext db,
         IConfiguration configuration,
+        IOrderEmailQueue orderEmailQueue,
         ILogger<YandexDeliveryTrackingService> logger)
     {
         _httpClientFactory = httpClientFactory;
         _db = db;
         _configuration = configuration;
+        _orderEmailQueue = orderEmailQueue;
         _logger = logger;
     }
 
@@ -76,45 +80,97 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
         if (ids.Count == 0)
             return;
 
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var orders = await _db.Orders
             .Where(order => ids.Contains(order.Id))
             .ToListAsync(cancellationToken);
 
+        await SyncOrdersInternalAsync(orders, cancellationToken);
+    }
+
+    public async Task<int> SyncActiveOrderStatusesAsync(CancellationToken cancellationToken = default)
+    {
+        var candidateOrders = await _db.Orders
+            .Where(order => !string.IsNullOrEmpty(order.YandexRequestId))
+            .OrderBy(order => order.YandexDeliveryStatusSyncedAt ?? 0)
+            .Take(MaxOrdersPerSync * 10)
+            .ToListAsync(cancellationToken);
+
+        return await SyncOrdersInternalAsync(candidateOrders, cancellationToken);
+    }
+
+    private async Task<int> SyncOrdersInternalAsync(IReadOnlyCollection<Order> orders, CancellationToken cancellationToken)
+    {
+        if (orders.Count == 0)
+            return 0;
+
+        var syncedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var dueOrders = orders
-            .Where(order => ShouldSync(order, now))
+            .Where(order => ShouldSync(order, syncedAt))
             .OrderBy(order => order.YandexDeliveryStatusSyncedAt ?? 0)
             .Take(MaxOrdersPerSync)
             .ToList();
         if (dueOrders.Count == 0)
-            return;
+            return 0;
 
         var integrationOptions = await TryResolveIntegrationOptionsAsync(cancellationToken);
         if (integrationOptions is null)
-            return;
+            return 0;
 
         var client = _httpClientFactory.CreateClient();
         using var semaphore = new SemaphoreSlim(MaxParallelRequests);
 
-        await Task.WhenAll(dueOrders.Select(order => SyncSingleOrderAsync(
+        var fetchResults = await Task.WhenAll(dueOrders.Select(order => FetchTrackingSnapshotAsync(
             order,
             client,
             integrationOptions.Value.ApiToken,
             integrationOptions.Value.UseTestEnvironment,
-            now,
             semaphore,
             cancellationToken)));
 
+        var deliveryStatusChanges = new List<DeliveryStatusChange>();
+        for (var index = 0; index < dueOrders.Count; index++)
+        {
+            var order = dueOrders[index];
+            var fetchResult = fetchResults[index];
+
+            if (fetchResult.Response is not null)
+            {
+                var previousStatus = NormalizeOptionalText(order.YandexDeliveryStatus);
+                var previousDescription = NormalizeOptionalText(order.YandexDeliveryStatusDescription);
+
+                ApplyTrackingSnapshot(order, fetchResult.Response, syncedAt);
+
+                if (HasDeliveryStatusChanged(order, previousStatus, previousDescription))
+                {
+                    deliveryStatusChanges.Add(new DeliveryStatusChange(order, previousStatus, previousDescription));
+                }
+
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(fetchResult.ErrorMessage))
+                MarkSyncFailure(order, fetchResult.ErrorMessage, syncedAt);
+        }
+
         if (_db.ChangeTracker.HasChanges())
             await _db.SaveChangesAsync(cancellationToken);
+
+        foreach (var change in deliveryStatusChanges)
+        {
+            _orderEmailQueue.QueueOrderDeliveryUpdatedNotification(
+                change.Order,
+                change.PreviousStatus,
+                change.PreviousDescription);
+        }
+
+        return dueOrders.Count;
     }
 
-    private async Task SyncSingleOrderAsync(
+    private async Task<OrderTrackingFetchResult> FetchTrackingSnapshotAsync(
         Order order,
         HttpClient client,
         string apiToken,
         bool useTestEnvironment,
-        long syncedAt,
         SemaphoreSlim semaphore,
         CancellationToken cancellationToken)
     {
@@ -124,8 +180,14 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linkedCts.CancelAfter(PerRequestTimeout);
 
-            var response = await GetRequestInfoAsync(order.YandexRequestId!, client, apiToken, useTestEnvironment, linkedCts.Token);
-            ApplyTrackingSnapshot(order, response, syncedAt);
+            var response = await GetRequestInfoAsync(
+                order.YandexRequestId!,
+                client,
+                apiToken,
+                useTestEnvironment,
+                linkedCts.Token);
+
+            return new OrderTrackingFetchResult(response, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -133,12 +195,12 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            MarkSyncFailure(order, "Не удалось вовремя обновить статус Яндекс.Доставки.", syncedAt);
+            return new OrderTrackingFetchResult(null, "Timed out while updating Yandex delivery status.");
         }
         catch (Exception ex)
         {
-            MarkSyncFailure(order, BuildSyncErrorMessage(ex), syncedAt);
             _logger.LogWarning(ex, "Failed to sync Yandex delivery status for order {OrderId}", order.Id);
+            return new OrderTrackingFetchResult(null, BuildSyncErrorMessage(ex));
         }
         finally
         {
@@ -178,6 +240,15 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
         return now - order.YandexDeliveryStatusSyncedAt.Value >= (long)StatusSyncInterval.TotalMilliseconds;
     }
 
+    private static bool HasDeliveryStatusChanged(Order order, string? previousStatus, string? previousDescription)
+    {
+        var currentStatus = NormalizeOptionalText(order.YandexDeliveryStatus);
+        var currentDescription = NormalizeOptionalText(order.YandexDeliveryStatusDescription);
+
+        return !string.Equals(previousStatus, currentStatus, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(previousDescription, currentDescription, StringComparison.Ordinal);
+    }
+
     private void MarkSyncFailure(Order order, string message, long syncedAt)
     {
         order.YandexDeliveryStatusSyncedAt = syncedAt;
@@ -205,8 +276,7 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
 
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var parsedResponse = await JsonSerializer.DeserializeAsync<RequestInfoResponse>(responseStream, JsonOptions, cancellationToken);
-        return parsedResponse
-            ?? throw new HttpRequestException("Яндекс.Доставка вернула пустой ответ по статусу заявки.");
+        return parsedResponse ?? throw new HttpRequestException("Yandex Delivery returned an empty tracking response.");
     }
 
     private async Task<(bool UseTestEnvironment, string ApiToken)?> TryResolveIntegrationOptionsAsync(CancellationToken cancellationToken)
@@ -292,7 +362,7 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
     {
         var message = NormalizeOptionalText(exception.Message);
         if (string.IsNullOrWhiteSpace(message))
-            return "Не удалось обновить статус Яндекс.Доставки.";
+            return "Failed to refresh Yandex delivery status.";
 
         return message!.Length > 500
             ? message[..500]
@@ -303,13 +373,13 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
     {
         var normalizedBody = NormalizeOptionalText(responseBody);
         if (string.IsNullOrWhiteSpace(normalizedBody))
-            return $"Яндекс.Доставка вернула ошибку {(int)statusCode} при обновлении статуса.";
+            return $"Yandex Delivery returned HTTP {(int)statusCode} while refreshing status.";
 
         var compactBody = normalizedBody!.Length > 400
             ? normalizedBody[..400]
             : normalizedBody;
 
-        return $"Яндекс.Доставка вернула ошибку {(int)statusCode}: {compactBody}";
+        return $"Yandex Delivery returned HTTP {(int)statusCode}: {compactBody}";
     }
 
     private static string GetBaseUrl(bool useTestEnvironment)
@@ -350,4 +420,13 @@ public sealed class YandexDeliveryTrackingService : IYandexDeliveryTrackingServi
         string? Type,
         [property: JsonPropertyName("code")]
         string? Code);
+
+    private sealed record OrderTrackingFetchResult(
+        RequestInfoResponse? Response,
+        string? ErrorMessage);
+
+    private sealed record DeliveryStatusChange(
+        Order Order,
+        string? PreviousStatus,
+        string? PreviousDescription);
 }

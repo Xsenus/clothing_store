@@ -123,6 +123,7 @@ public sealed class YooMoneyPaymentService : IYooMoneyPaymentService
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly IOrderInventoryService _orderInventoryService;
+    private readonly IOrderEmailQueue _orderEmailQueue;
     private readonly ILogger<YooMoneyPaymentService> _logger;
 
     public YooMoneyPaymentService(
@@ -130,12 +131,14 @@ public sealed class YooMoneyPaymentService : IYooMoneyPaymentService
         StoreDbContext db,
         IConfiguration configuration,
         IOrderInventoryService orderInventoryService,
+        IOrderEmailQueue orderEmailQueue,
         ILogger<YooMoneyPaymentService> logger)
     {
         _httpClientFactory = httpClientFactory;
         _db = db;
         _configuration = configuration;
         _orderInventoryService = orderInventoryService;
+        _orderEmailQueue = orderEmailQueue;
         _logger = logger;
     }
 
@@ -706,6 +709,7 @@ public sealed class YooMoneyPaymentService : IYooMoneyPaymentService
 
         if (!string.Equals(normalizedOrderStatus, "paid", StringComparison.Ordinal))
         {
+            var previousStatus = normalizedOrderStatus;
             order.Status = "paid";
             order.UpdatedAt = now;
 
@@ -719,6 +723,10 @@ public sealed class YooMoneyPaymentService : IYooMoneyPaymentService
                 ["comment"] = "Оплата ЮMoney подтверждена автоматически"
             });
             order.StatusHistoryJson = JsonSerializer.Serialize(history);
+            _orderEmailQueue.QueueOrderStatusChangedEmail(
+                order,
+                previousStatus ?? string.Empty,
+                "Оплата YooMoney подтверждена автоматически");
         }
     }
 

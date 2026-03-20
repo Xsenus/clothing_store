@@ -10,6 +10,7 @@ public interface IOrderEmailQueue
 {
     void QueueOrderCreatedEmail(Order order);
     void QueueOrderStatusChangedEmail(Order order, string previousStatus, string? managerComment);
+    void QueueOrderDeliveryUpdatedNotification(Order order, string? previousDeliveryStatus, string? previousDeliveryDescription);
 }
 
 public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
@@ -37,6 +38,9 @@ public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
     public void QueueOrderStatusChangedEmail(Order order, string previousStatus, string? managerComment)
         => Enqueue(new OrderEmailWorkItem(OrderEmailWorkItemKind.OrderStatusChanged, CloneOrder(order), previousStatus, managerComment));
 
+    public void QueueOrderDeliveryUpdatedNotification(Order order, string? previousDeliveryStatus, string? previousDeliveryDescription)
+        => Enqueue(new OrderEmailWorkItem(OrderEmailWorkItemKind.OrderDeliveryUpdated, CloneOrder(order), previousDeliveryStatus, previousDeliveryDescription));
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await foreach (var item in _queue.Reader.ReadAllAsync(stoppingToken))
@@ -45,6 +49,7 @@ public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
             {
                 using var scope = _scopeFactory.CreateScope();
                 var emailService = scope.ServiceProvider.GetRequiredService<TransactionalEmailService>();
+                var telegramService = scope.ServiceProvider.GetRequiredService<TelegramNotificationService>();
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 timeoutCts.CancelAfter(EmailSendTimeout);
 
@@ -57,6 +62,23 @@ public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
                         await emailService.TrySendOrderStatusChangedEmailAsync(
                             item.Order,
                             item.PreviousStatus ?? string.Empty,
+                            item.ManagerComment,
+                            timeoutCts.Token);
+                        await telegramService.TrySendOrderStatusChangedAsync(
+                            item.Order,
+                            item.PreviousStatus ?? string.Empty,
+                            item.ManagerComment,
+                            timeoutCts.Token);
+                        break;
+                    case OrderEmailWorkItemKind.OrderDeliveryUpdated:
+                        await emailService.TrySendOrderDeliveryUpdatedEmailAsync(
+                            item.Order,
+                            item.PreviousStatus,
+                            item.ManagerComment,
+                            timeoutCts.Token);
+                        await telegramService.TrySendOrderDeliveryUpdatedAsync(
+                            item.Order,
+                            item.PreviousStatus,
                             item.ManagerComment,
                             timeoutCts.Token);
                         break;
@@ -94,6 +116,15 @@ public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
             ShippingMethod = order.ShippingMethod,
             ShippingAmount = order.ShippingAmount,
             PickupPointId = order.PickupPointId,
+            YandexRequestId = order.YandexRequestId,
+            YandexDeliveryStatus = order.YandexDeliveryStatus,
+            YandexDeliveryStatusDescription = order.YandexDeliveryStatusDescription,
+            YandexDeliveryStatusReason = order.YandexDeliveryStatusReason,
+            YandexDeliveryStatusUpdatedAt = order.YandexDeliveryStatusUpdatedAt,
+            YandexDeliveryStatusSyncedAt = order.YandexDeliveryStatusSyncedAt,
+            YandexDeliveryTrackingUrl = order.YandexDeliveryTrackingUrl,
+            YandexPickupCode = order.YandexPickupCode,
+            YandexDeliveryLastSyncError = order.YandexDeliveryLastSyncError,
             ShippingAddress = order.ShippingAddress,
             CustomerName = order.CustomerName,
             CustomerEmail = order.CustomerEmail,
@@ -107,7 +138,8 @@ public sealed class OrderEmailQueue : BackgroundService, IOrderEmailQueue
     private enum OrderEmailWorkItemKind
     {
         OrderCreated,
-        OrderStatusChanged
+        OrderStatusChanged,
+        OrderDeliveryUpdated
     }
 
     private sealed record OrderEmailWorkItem(

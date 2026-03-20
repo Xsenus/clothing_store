@@ -100,7 +100,9 @@ public record TelegramAuthPayload(
     string AuthDate,
     string Hash);
 
-public record TelegramStartAuthPayload(string? ReturnUrl);
+public record TelegramStartAuthPayload(string? ReturnUrl, string? Intent = null);
+
+public record ExternalAuthStartPayload(string Provider, string? ReturnUrl, string? Intent = null);
 
 public record ContactChangeStartPayload(string Value);
 

@@ -71,6 +71,8 @@ public class StoreDbContext : DbContext
     public DbSet<TelegramBotSubscriber> TelegramBotSubscribers => Set<TelegramBotSubscriber>();
     public DbSet<TelegramAuthRequest> TelegramAuthRequests => Set<TelegramAuthRequest>();
     public DbSet<ContactChangeRequest> ContactChangeRequests => Set<ContactChangeRequest>();
+    public DbSet<UserExternalIdentity> UserExternalIdentities => Set<UserExternalIdentity>();
+    public DbSet<ExternalAuthRequest> ExternalAuthRequests => Set<ExternalAuthRequest>();
     public DbSet<GalleryImage> GalleryImages => Set<GalleryImage>();
 
     /// <inheritdoc />
@@ -106,6 +108,11 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<TelegramAuthRequest>().HasIndex(x => x.State).IsUnique();
         modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => new { x.UserId, x.Kind, x.Status });
         modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => x.State);
+        modelBuilder.Entity<UserExternalIdentity>().HasIndex(x => new { x.Provider, x.ProviderUserId }).IsUnique();
+        modelBuilder.Entity<UserExternalIdentity>().HasIndex(x => new { x.UserId, x.Provider }).IsUnique();
+        modelBuilder.Entity<UserExternalIdentity>().HasIndex(x => x.UserId);
+        modelBuilder.Entity<ExternalAuthRequest>().HasIndex(x => x.State).IsUnique();
+        modelBuilder.Entity<ExternalAuthRequest>().HasIndex(x => new { x.Provider, x.Status });
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
         modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
         modelBuilder.Entity<Order>().HasIndex(x => x.YandexRequestId);
@@ -136,6 +143,18 @@ public class StoreDbContext : DbContext
             .WithOne()
             .HasForeignKey<Profile>(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<UserExternalIdentity>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ExternalAuthRequest>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Order>()
             .HasOne<User>()

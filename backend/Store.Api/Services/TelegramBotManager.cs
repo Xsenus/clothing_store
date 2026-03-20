@@ -274,6 +274,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
+        var userIdentityService = scope.ServiceProvider.GetRequiredService<UserIdentityService>();
         var bot = await db.TelegramBots.FirstOrDefaultAsync(x => x.Id == id, token);
         if (bot is null || !bot.Enabled || !string.Equals(bot.UpdateMode, TelegramBot.UpdateModeWebhook, StringComparison.Ordinal))
             return false;
@@ -286,7 +287,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return true;
 
         var client = _httpClientFactory.CreateClient();
-        await HandleMessageAsync(client, db, bot, messageEl, token);
+        await HandleMessageAsync(client, db, bot, userIdentityService, messageEl, token);
         return true;
     }
 
@@ -354,6 +355,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             {
                 using var scope = _serviceProvider.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<StoreDbContext>();
+                var userIdentityService = scope.ServiceProvider.GetRequiredService<UserIdentityService>();
                 var bot = await db.TelegramBots.FirstOrDefaultAsync(x => x.Id == botId, token);
                 if (bot is null || !bot.Enabled || string.IsNullOrWhiteSpace(bot.Token))
                     return;
@@ -379,7 +381,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
                     if (!update.TryGetProperty("message", out var messageEl))
                         continue;
 
-                    await HandleMessageAsync(client, db, bot, messageEl, token);
+                    await HandleMessageAsync(client, db, bot, userIdentityService, messageEl, token);
                 }
             }
             catch (OperationCanceledException)
@@ -394,7 +396,13 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         }
     }
 
-    private async Task HandleMessageAsync(HttpClient client, StoreDbContext db, TelegramBot bot, JsonElement messageEl, CancellationToken token)
+    private async Task HandleMessageAsync(
+        HttpClient client,
+        StoreDbContext db,
+        TelegramBot bot,
+        UserIdentityService userIdentityService,
+        JsonElement messageEl,
+        CancellationToken token)
     {
         var chatId = TryGetInt64(messageEl, "chat", "id");
         if (chatId == 0)
@@ -408,7 +416,15 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             var handledPhoneVerification = false;
             try
             {
-                handledPhoneVerification = await TryHandlePhoneVerificationMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+                handledPhoneVerification = await TryHandlePhoneVerificationMessageAsync(
+                    client,
+                    db,
+                    bot,
+                    userIdentityService,
+                    messageEl,
+                    chatId,
+                    fromTelegramUserId,
+                    token);
             }
             catch (PostgresException ex) when (ex.SqlState == "42P01")
             {
@@ -421,7 +437,15 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
                 return;
             }
 
-            var handledLogin = await TryHandleLoginFlowMessageAsync(client, db, bot, messageEl, chatId, fromTelegramUserId, token);
+            var handledLogin = await TryHandleLoginFlowMessageAsync(
+                client,
+                db,
+                bot,
+                userIdentityService,
+                messageEl,
+                chatId,
+                fromTelegramUserId,
+                token);
             if (handledLogin)
             {
                 await db.SaveChangesAsync(token);
@@ -483,6 +507,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         HttpClient client,
         StoreDbContext db,
         TelegramBot bot,
+        UserIdentityService userIdentityService,
         JsonElement messageEl,
         long chatId,
         long fromTelegramUserId,
@@ -513,10 +538,18 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
                 return true;
             }
 
-            var linkedUser = fromTelegramUserId > 0
-                ? await db.Users.FirstOrDefaultAsync(x => x.Email == $"telegram_{fromTelegramUserId}@telegram.local", token)
+            var linkedIdentity = fromTelegramUserId > 0
+                ? await userIdentityService.FindExternalIdentityAsync("telegram", fromTelegramUserId.ToString(), token)
                 : null;
-            if (linkedUser is null || !string.Equals(linkedUser.Id, request.UserId, StringComparison.Ordinal))
+            var linkedUserId = linkedIdentity?.UserId;
+            if (string.IsNullOrWhiteSpace(linkedUserId) && fromTelegramUserId > 0)
+            {
+                linkedUserId = await db.Users
+                    .Where(x => x.Email == $"telegram_{fromTelegramUserId}@telegram.local")
+                    .Select(x => x.Id)
+                    .FirstOrDefaultAsync(token);
+            }
+            if (string.IsNullOrWhiteSpace(linkedUserId) || !string.Equals(linkedUserId, request.UserId, StringComparison.Ordinal))
             {
                 await SendMessageAsync(client, bot.Token, chatId, "Этот Telegram-аккаунт не привязан к профилю, для которого запрошено подтверждение.", null, token);
                 return true;
@@ -594,6 +627,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         HttpClient client,
         StoreDbContext db,
         TelegramBot bot,
+        UserIdentityService userIdentityService,
         JsonElement messageEl,
         long chatId,
         long fromTelegramUserId,
@@ -637,9 +671,46 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             authRequest.ChatId = chatId;
             authRequest.TelegramUserId = fromTelegramUserId > 0 ? fromTelegramUserId.ToString() : authRequest.TelegramUserId;
 
-            var user = fromTelegramUserId > 0
-                ? await db.Users.FirstOrDefaultAsync(x => x.Email == $"telegram_{fromTelegramUserId}@telegram.local", token)
-                : null;
+            if (fromTelegramUserId <= 0)
+            {
+                await SendMessageAsync(client, bot.Token, chatId, "Не удалось определить Telegram-аккаунт. Попробуйте открыть вход еще раз из приложения Telegram.", null, token);
+                return true;
+            }
+
+            var fullName = string.Join(" ", new[]
+            {
+                TryGetString(messageEl, "from", "first_name"),
+                TryGetString(messageEl, "from", "last_name")
+            }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+            var externalIdentityProfile = new ExternalIdentityProfile(
+                Provider: "telegram",
+                ProviderUserId: fromTelegramUserId.ToString(),
+                Email: null,
+                EmailVerified: false,
+                Username: TryGetString(messageEl, "from", "username"),
+                DisplayName: fullName,
+                AvatarUrl: null,
+                BotId: bot.Id,
+                ChatId: chatId);
+
+            if (string.Equals(authRequest.Intent, "link", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(authRequest.UserId))
+                {
+                    await SendMessageAsync(client, bot.Token, chatId, "Не удалось определить пользователя для привязки Telegram. Начните привязку заново на сайте.", null, token);
+                    return true;
+                }
+
+                await userIdentityService.AttachExternalIdentityAsync(authRequest.UserId, externalIdentityProfile, token);
+                authRequest.Status = "completed";
+                authRequest.CompletedAt = now;
+                await SendMessageAsync(client, bot.Token, chatId, "Telegram привязан к вашему профилю. Вернитесь на сайт, изменения уже готовы.", new { remove_keyboard = true }, token);
+                return true;
+            }
+
+            var user = await userIdentityService.ResolveOrCreateExternalUserAsync(
+                externalIdentityProfile,
+                token);
 
             if (user is not null)
             {
@@ -705,52 +776,51 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return true;
         }
 
-        var email = $"telegram_{fromTelegramUserId}@telegram.local";
-        var userEntity = await db.Users.FirstOrDefaultAsync(x => x.Email == email, token);
-        if (userEntity is null)
+        var contactFullName = string.Join(" ", new[]
         {
-            userEntity = new User
-            {
-                Id = Guid.NewGuid().ToString("N"),
-                Email = email,
-                PasswordHash = string.Empty,
-                Salt = string.Empty,
-                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                Verified = true
-            };
-            db.Users.Add(userEntity);
+            TryGetString(messageEl, "from", "first_name"),
+            TryGetString(messageEl, "from", "last_name")
+        }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+        var contactIdentityProfile = new ExternalIdentityProfile(
+            Provider: "telegram",
+            ProviderUserId: fromTelegramUserId.ToString(),
+            Email: null,
+            EmailVerified: false,
+            Username: TryGetString(messageEl, "from", "username"),
+            DisplayName: contactFullName,
+            AvatarUrl: null,
+            BotId: bot.Id,
+            ChatId: chatId,
+            Phone: phoneNumber,
+            PhoneVerified: true);
 
-            db.Profiles.Add(new Profile
-            {
-                UserId = userEntity.Id,
-                Email = email,
-                Name = string.Join(" ", new[]
-                {
-                    TryGetString(messageEl, "from", "first_name"),
-                    TryGetString(messageEl, "from", "last_name")
-                }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim(),
-                Nickname = TryGetString(messageEl, "from", "username"),
-                Phone = phoneNumber,
-                PhoneVerified = true
-            });
-        }
-        else
+        if (string.Equals(awaitingRequest.Intent, "link", StringComparison.Ordinal))
         {
-            var profile = await db.Profiles.FirstOrDefaultAsync(x => x.UserId == userEntity.Id, token);
-            if (profile is null)
+            if (string.IsNullOrWhiteSpace(awaitingRequest.UserId))
             {
-                profile = new Profile
-                {
-                    UserId = userEntity.Id,
-                    Email = userEntity.Email
-                };
-                db.Profiles.Add(profile);
+                await SendMessageAsync(client, bot.Token, chatId, "Не удалось определить профиль для привязки Telegram. Начните заново на сайте.", null, token);
+                return true;
             }
 
-            if (string.IsNullOrWhiteSpace(profile.Phone))
-                profile.Phone = phoneNumber;
-            profile.PhoneVerified = true;
+            await userIdentityService.AttachExternalIdentityAsync(awaitingRequest.UserId, contactIdentityProfile, token);
+            awaitingRequest.PhoneNumber = phoneNumber;
+            awaitingRequest.TelegramUserId = fromTelegramUserId.ToString();
+            awaitingRequest.Status = "completed";
+            awaitingRequest.CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            await SendMessageAsync(
+                client,
+                bot.Token,
+                chatId,
+                "Telegram привязан к вашему профилю, номер тоже подтвержден. Возвращайтесь на сайт.",
+                new { remove_keyboard = true },
+                token);
+            return true;
         }
+
+        var userEntity = await userIdentityService.ResolveOrCreateExternalUserAsync(
+            contactIdentityProfile,
+            token);
 
         awaitingRequest.UserId = userEntity.Id;
         awaitingRequest.PhoneNumber = phoneNumber;

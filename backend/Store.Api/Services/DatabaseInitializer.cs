@@ -510,8 +510,13 @@ public class DatabaseInitializer
             {
                 UserId = admin.Id,
                 Email = admin.Email,
+                EmailVerified = true,
                 Name = adminName
             });
+        }
+        else if (admin.Verified && TechnicalEmailHelper.IsValidRealEmail(profile.Email))
+        {
+            profile.EmailVerified = true;
         }
 
         await db.SaveChangesAsync();
@@ -547,6 +552,7 @@ public class DatabaseInitializer
             {
                 UserId = existingUser.Id,
                 Email = defaultUserEmail,
+                EmailVerified = true,
                 Name = string.IsNullOrWhiteSpace(defaultUserName) ? "Default User" : defaultUserName
             });
 
@@ -569,12 +575,17 @@ public class DatabaseInitializer
             {
                 UserId = existingUser.Id,
                 Email = existingUser.Email,
+                EmailVerified = existingUser.Verified && TechnicalEmailHelper.IsValidRealEmail(existingUser.Email),
                 Name = string.IsNullOrWhiteSpace(defaultUserName) ? "Default User" : defaultUserName
             });
         }
         else if (!string.IsNullOrWhiteSpace(defaultUserName) && string.IsNullOrWhiteSpace(profile.Name))
         {
             profile.Name = defaultUserName;
+        }
+        else if (existingUser.Verified && TechnicalEmailHelper.IsValidRealEmail(profile.Email))
+        {
+            profile.EmailVerified = true;
         }
 
         await db.SaveChangesAsync();
@@ -680,6 +691,17 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_title", "Коллекции");
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_description", "");
+        await EnsureAppSettingExistsAsync(db, "telegram_login_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "telegram_widget_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "google_login_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "google_auth_client_id", "");
+        await EnsureAppSettingExistsAsync(db, "google_auth_client_secret", "");
+        await EnsureAppSettingExistsAsync(db, "yandex_login_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "yandex_auth_client_id", "");
+        await EnsureAppSettingExistsAsync(db, "yandex_auth_client_secret", "");
+        await EnsureAppSettingExistsAsync(db, "database_backup_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "database_backup_schedule_local", "03:00,15:00");
+        await EnsureAppSettingExistsAsync(db, "database_backup_retention_days", "14");
         await EnsureAppSettingExistsAsync(db, "site_loading_animation_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "smtp_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "smtp_host", "");
@@ -890,6 +912,7 @@ public class DatabaseInitializer
         db.AdminSessions.RemoveRange(await db.AdminSessions.Where(x => x.CreatedAt < minAdminSessionTime).ToListAsync());
         db.RefreshSessions.RemoveRange(await db.RefreshSessions.Where(x => x.CreatedAt < minRefreshSessionTime).ToListAsync());
         db.VerificationCodes.RemoveRange(await db.VerificationCodes.Where(x => x.ExpiresAt < now).ToListAsync());
+        db.ExternalAuthRequests.RemoveRange(await db.ExternalAuthRequests.Where(x => x.ExpiresAt < now).ToListAsync());
         await db.SaveChangesAsync();
     }
 }
