@@ -63,7 +63,7 @@ import {
 } from '@/lib/yoomoney';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical, CalendarDays } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, Download, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical, CalendarDays } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -137,6 +137,25 @@ interface AdminYandexDeliveryTestResult {
   checkedAtLabel: string;
 }
 
+interface AdminDatabaseBackupItem {
+  fileName: string;
+  relativePath: string;
+  sizeBytes: number;
+  createdAt: number;
+  trigger: string;
+  downloadUrl?: string;
+}
+
+interface AdminDatabaseBackupsOverview {
+  automaticEnabled: boolean;
+  scheduleLocal: string;
+  retentionDays: number;
+  rootDirectory: string;
+  timeZone: string;
+  pgDumpCommand: string;
+  items: AdminDatabaseBackupItem[];
+}
+
 interface AdminYooMoneyTestResult {
   provider?: string;
   paymentMethod?: string;
@@ -176,6 +195,18 @@ interface AdminYooKassaTestResult {
   createdAt?: string | null;
   paid?: boolean | null;
   checkedAtLabel: string;
+}
+
+interface AdminExternalAuthTestStatus {
+  kind: "info" | "running" | "success" | "error";
+  message: string;
+}
+
+interface AdminExternalAuthTestSession {
+  provider: "telegram" | "google" | "yandex";
+  kind: "telegram" | "external";
+  state: string;
+  expiresAt: number;
 }
 
 const TELEGRAM_BOT_LIMITS = {
@@ -904,7 +935,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "orders", "users", "gallery", "dictionaries", "settings"] as const;
-const SETTINGS_GROUP_VALUES = ["orders", "auth", "smtp", "metrics", "integrations", "legal", "general"] as const;
+const SETTINGS_GROUP_VALUES = ["orders", "auth", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "dadata", "yandex"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
@@ -1121,6 +1152,25 @@ const resolveCatalogImageUrl = (
   return imageUrls[0];
 };
 
+const hasConfiguredValue = (value?: string | null) => String(value || "").trim().length > 0;
+
+const getExternalAuthCallbackUrl = (provider: "google" | "yandex") => {
+  if (typeof window === "undefined") {
+    return `/api/auth/external/callback/${provider}`;
+  }
+
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL || "/api";
+    const parsed = new URL(apiUrl, window.location.origin);
+    const normalizedPath = parsed.pathname.endsWith("/")
+      ? parsed.pathname.slice(0, -1)
+      : parsed.pathname;
+    return `${parsed.origin}${normalizedPath}/auth/external/callback/${provider}`;
+  } catch {
+    return `${window.location.origin}/api/auth/external/callback/${provider}`;
+  }
+};
+
 
 const DEFAULT_APP_SETTINGS: Record<string, string> = {
   storeName: "",
@@ -1160,8 +1210,15 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   metrics_vk_pixel_enabled: "false",
   metrics_vk_pixel_code: "",
   telegram_login_enabled: "false",
+  telegram_widget_enabled: "false",
   telegram_bot_username: "",
   telegram_bot_token: "",
+  google_login_enabled: "false",
+  google_auth_client_id: "",
+  google_auth_client_secret: "",
+  yandex_login_enabled: "false",
+  yandex_auth_client_id: "",
+  yandex_auth_client_secret: "",
   payments_yoomoney_enabled: "false",
   yoomoney_wallet_number: "",
   yoomoney_notification_secret: "",
@@ -1214,6 +1271,9 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   yandex_delivery_package_length_cm: "30",
   yandex_delivery_package_height_cm: "20",
   yandex_delivery_package_width_cm: "10",
+  database_backup_enabled: "true",
+  database_backup_schedule_local: "03:00,15:00",
+  database_backup_retention_days: "14",
   ...IMAGE_UPLOAD_SETTING_DEFAULTS
 };
 
@@ -1398,6 +1458,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [yandexDeliveryTestRunning, setYandexDeliveryTestRunning] = useState(false);
   const [yandexDeliveryTestError, setYandexDeliveryTestError] = useState("");
   const [yandexDeliveryTestResult, setYandexDeliveryTestResult] = useState<AdminYandexDeliveryTestResult | null>(null);
+  const [databaseBackupsOverview, setDatabaseBackupsOverview] = useState<AdminDatabaseBackupsOverview | null>(null);
+  const [databaseBackupsLoading, setDatabaseBackupsLoading] = useState(false);
+  const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
+  const [externalAuthTestRunning, setExternalAuthTestRunning] = useState("");
+  const [externalAuthTestSession, setExternalAuthTestSession] = useState<AdminExternalAuthTestSession | null>(null);
+  const [externalAuthTestStatuses, setExternalAuthTestStatuses] = useState<Record<string, AdminExternalAuthTestStatus>>({});
+  const [telegramWidgetTestVisible, setTelegramWidgetTestVisible] = useState(false);
+  const externalAuthTestPopupRef = useRef<Window | null>(null);
+  const telegramWidgetTestRef = useRef<HTMLDivElement | null>(null);
+  const loginTelegramBot = useMemo(
+    () => telegramBots.find((bot) => bot.enabled && bot.useForLogin) ?? null,
+    [telegramBots]
+  );
+  const googleCallbackUrl = useMemo(() => getExternalAuthCallbackUrl("google"), []);
+  const yandexCallbackUrl = useMemo(() => getExternalAuthCallbackUrl("yandex"), []);
+  const telegramWidgetUsername = useMemo(
+    () => String(settings["telegram_bot_username"] || loginTelegramBot?.username || "").trim(),
+    [loginTelegramBot?.username, settings]
+  );
+  const isTelegramLoginTestReady = useMemo(
+    () => !!loginTelegramBot?.enabled
+      && !!loginTelegramBot?.useForLogin
+      && hasConfiguredValue(loginTelegramBot?.username)
+      && (loginTelegramBot?.hasToken || hasConfiguredValue(loginTelegramBot?.tokenMasked)),
+    [loginTelegramBot]
+  );
+  const isTelegramWidgetTestReady = useMemo(
+    () => isTelegramLoginTestReady && hasConfiguredValue(telegramWidgetUsername),
+    [isTelegramLoginTestReady, telegramWidgetUsername]
+  );
   const [dictionaries, setDictionaries] = useState<Record<DictionaryKind, DictionaryItem[]>>({ sizes: [], materials: [], colors: [], categories: [], collections: [] });
   const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, DictionaryDraft>>({});
   const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>(() => readPersistedAdminNavigationState().dictionaryGroup);
@@ -1754,29 +1844,78 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const fetchAdminData = async (sessionUser: AdminSessionUser | null = adminUser) => {
-    try {
-      const [usersRes, settingsRes, preferencesRes, botsRes, dictionariesRes, stockHistoryRes] = await Promise.all([
-        FLOW.adminGetUsers(),
-        FLOW.adminGetSettings(),
-        FLOW.adminGetPreferences(),
-        FLOW.adminGetTelegramBots(),
-        FLOW.adminGetDictionaries(),
-        FLOW.adminGetStockHistory()
-      ]);
+	  const fetchAdminData = async (sessionUser: AdminSessionUser | null = adminUser) => {
+	    try {
+	      const [usersRes, settingsRes, preferencesRes, botsRes, dictionariesRes, stockHistoryRes, backupsRes] = await Promise.all([
+	        FLOW.adminGetUsers(),
+	        FLOW.adminGetSettings(),
+	        FLOW.adminGetPreferences(),
+	        FLOW.adminGetTelegramBots(),
+	        FLOW.adminGetDictionaries(),
+	        FLOW.adminGetStockHistory(),
+	        FLOW.adminGetDatabaseBackups()
+	      ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
       const mergedSettings = mergeSettingsWithDefaults(settingsRes);
       const resolvedPreferences = sanitizeOrderTablePreferences(preferencesRes?.[ADMIN_ORDER_TABLE_PREFERENCE_KEY]);
       setSettings(mergedSettings);
       setOrderTablePreferences(resolvedPreferences);
-      setOrderTableDraft(resolvedPreferences);
-      setOrdersPageSize(resolvedPreferences.pageSize);
-      setOrdersReady(true);
-      setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
-      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [], collections: [] });
-    } catch (error) {
+	      setOrderTableDraft(resolvedPreferences);
+	      setOrdersPageSize(resolvedPreferences.pageSize);
+	      setOrdersReady(true);
+	      setTelegramBots(Array.isArray(botsRes) ? botsRes : []);
+	      setDictionaries(dictionariesRes || { sizes: [], materials: [], colors: [], categories: [], collections: [] });
+	      setDatabaseBackupsOverview(backupsRes || null);
+	    } catch (error) {
       toast.error("Не удалось загрузить раздел пользователей/заказов/настроек");
+    }
+  };
+
+  const refreshDatabaseBackups = async (silent = false) => {
+    if (!silent) {
+      setDatabaseBackupsLoading(true);
+    }
+
+    try {
+      const result = await FLOW.adminGetDatabaseBackups();
+      setDatabaseBackupsOverview(result || null);
+      return result;
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось загрузить список резервных копий"));
+      return null;
+    } finally {
+      if (!silent) {
+        setDatabaseBackupsLoading(false);
+      }
+    }
+  };
+
+  const downloadDatabaseBackup = async (relativePath: string, fallbackFileName?: string) => {
+    const response = await FLOW.adminDownloadDatabaseBackup({ input: { relativePath } });
+    const blobUrl = window.URL.createObjectURL(response.blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = response.fileName || fallbackFileName || "database-backup.dump";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  };
+
+  const createAndDownloadDatabaseBackup = async () => {
+    setDatabaseBackupCreating(true);
+    try {
+      const result = await FLOW.adminCreateDatabaseBackup();
+      if (result?.backup?.relativePath) {
+        await downloadDatabaseBackup(result.backup.relativePath, result.backup.fileName);
+      }
+      await refreshDatabaseBackups(true);
+      toast.success("Резервная копия создана и скачивание началось");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось создать резервную копию"));
+    } finally {
+      setDatabaseBackupCreating(false);
     }
   };
 
@@ -2708,6 +2847,263 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     } catch {
       return `${window.location.origin}/admin`;
     }
+  };
+
+  const buildAdminAuthTestReturnUrl = () => "/profile?tab=admin";
+
+  const getExternalAuthTestLabel = (provider: string) => {
+    if (provider === "google") return "Google";
+    if (provider === "yandex") return "Яндекс";
+    if (provider === "telegram_widget") return "Telegram Widget";
+    return "Telegram";
+  };
+
+  const setExternalAuthTestStatus = (provider: string, kind: AdminExternalAuthTestStatus["kind"], message: string) => {
+    setExternalAuthTestStatuses((prev) => ({
+      ...prev,
+      [provider]: { kind, message },
+    }));
+  };
+
+  const closeExternalAuthTestPopup = () => {
+    if (externalAuthTestPopupRef.current && !externalAuthTestPopupRef.current.closed) {
+      externalAuthTestPopupRef.current.close();
+    }
+    externalAuthTestPopupRef.current = null;
+  };
+
+  const openAuthPageForTesting = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.open("/auth", "_blank", "noopener,noreferrer");
+    setExternalAuthTestStatus(
+      "telegram_widget",
+      "info",
+      "Открыта страница входа. Если виджет виден на /auth, фронтовая часть Telegram Widget работает."
+    );
+    toast.message("Страница входа открыта в новой вкладке для проверки Telegram Widget.");
+  };
+
+  const startTelegramLoginTest = async () => {
+    if (!isSettingEnabled("telegram_login_enabled")) {
+      toast.error("Сначала включите Telegram-вход и сохраните настройки.");
+      return;
+    }
+
+    if (!isTelegramLoginTestReady) {
+      const message = "Для теста нужен включенный login-бот из интеграций Telegram с username и токеном.";
+      setExternalAuthTestStatus("telegram", "error", message);
+      toast.error(message);
+      return;
+    }
+
+    setExternalAuthTestRunning("telegram");
+    setExternalAuthTestStatus("telegram", "running", "Создаем тестовую ссылку Telegram...");
+    try {
+      const started = await FLOW.telegramStartAuth({
+        input: {
+          returnUrl: buildAdminAuthTestReturnUrl(),
+        },
+      });
+
+      if (!started?.authUrl || !started?.state) {
+        throw new Error("Не удалось получить ссылку Telegram-входа");
+      }
+
+      setExternalAuthTestSession({
+        provider: "telegram",
+        kind: "telegram",
+        state: started.state,
+        expiresAt: Number(started.expiresAt || 0),
+      });
+      window.open(started.authUrl, "_blank", "noopener,noreferrer");
+      setExternalAuthTestStatus(
+        "telegram",
+        "running",
+        "Ссылка создана. Telegram-бот открыт. Если подтвердите вход в боте, статус обновится здесь автоматически."
+      );
+      toast.message("Открыт Telegram-бот для проверки входа.");
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось запустить тест Telegram-входа");
+      setExternalAuthTestStatus("telegram", "error", message);
+      toast.error(message);
+    } finally {
+      setExternalAuthTestRunning((current) => (current === "telegram" ? "" : current));
+    }
+  };
+
+  const startExternalOAuthTest = async (provider: "google" | "yandex") => {
+    const settingKey = provider === "google" ? "google_login_enabled" : "yandex_login_enabled";
+    const label = getExternalAuthTestLabel(provider);
+
+    if (!isSettingEnabled(settingKey)) {
+      toast.error(`Сначала включите ${label} и сохраните настройки.`);
+      return;
+    }
+
+    setExternalAuthTestRunning(provider);
+    setExternalAuthTestStatus(provider, "running", `Создаем тестовый OAuth-запуск ${label}...`);
+    try {
+      const started = await FLOW.externalAuthStart({
+        input: {
+          provider,
+          returnUrl: buildAdminAuthTestReturnUrl(),
+        },
+      });
+
+      if (!started?.authUrl || !started?.state) {
+        throw new Error(`Не удалось получить OAuth URL для ${label}`);
+      }
+
+      setExternalAuthTestSession({
+        provider,
+        kind: "external",
+        state: started.state,
+        expiresAt: Number(started.expiresAt || 0),
+      });
+
+      const popup = window.open(started.authUrl, `${provider}-oauth-test`, "width=540,height=720");
+      externalAuthTestPopupRef.current = popup;
+      if (!popup) {
+        window.location.assign(started.authUrl);
+        return;
+      }
+
+      setExternalAuthTestStatus(
+        provider,
+        "running",
+        `Окно ${label} открыто. Если провайдер принимает запрос и вы завершите вход, статус обновится здесь автоматически.`
+      );
+      toast.message(`Открыто окно ${label} OAuth для проверки.`);
+    } catch (error) {
+      closeExternalAuthTestPopup();
+      const message = getErrorMessage(error, `Не удалось запустить тест ${label}`);
+      setExternalAuthTestStatus(provider, "error", message);
+      toast.error(message);
+    } finally {
+      setExternalAuthTestRunning((current) => (current === provider ? "" : current));
+    }
+  };
+
+  useEffect(() => {
+    if (!externalAuthTestSession?.state) {
+      return undefined;
+    }
+
+    const session = externalAuthTestSession;
+    const timer = window.setInterval(async () => {
+      try {
+        const status = session.kind === "telegram"
+          ? await FLOW.telegramAuthStatus({ input: { state: session.state } })
+          : await FLOW.externalAuthStatus({ input: { state: session.state } });
+
+        if (status?.completed) {
+          closeExternalAuthTestPopup();
+          setExternalAuthTestSession(null);
+          setExternalAuthTestStatus(
+            session.provider,
+            "success",
+            session.kind === "telegram"
+              ? "Telegram-вход успешно подтвердился. Тест пройден."
+              : `${getExternalAuthTestLabel(status?.provider || session.provider)} OAuth успешно завершен. Тест пройден.`
+          );
+          toast.success(
+            session.kind === "telegram"
+              ? "Тест Telegram-входа выполнен"
+              : `Тест ${getExternalAuthTestLabel(status?.provider || session.provider)} выполнен`
+          );
+          return;
+        }
+
+        const nextStatus = String(status?.status || "").trim().toLowerCase();
+        if (["failed", "expired", "consumed"].includes(nextStatus)) {
+          closeExternalAuthTestPopup();
+          setExternalAuthTestSession(null);
+          const message = nextStatus === "failed"
+            ? String(status?.detail || `Провайдер вернул ошибку для ${getExternalAuthTestLabel(session.provider)}`)
+            : nextStatus === "expired"
+              ? `Сессия теста ${getExternalAuthTestLabel(session.provider)} истекла. Запустите проверку заново.`
+              : `Сессия теста ${getExternalAuthTestLabel(session.provider)} уже использована.`;
+          setExternalAuthTestStatus(session.provider, nextStatus === "failed" ? "error" : "info", message);
+          if (nextStatus === "failed") {
+            toast.error(message);
+          }
+        }
+      } catch (error) {
+        closeExternalAuthTestPopup();
+        setExternalAuthTestSession(null);
+        const message = getErrorMessage(error, `Не удалось проверить статус теста ${getExternalAuthTestLabel(session.provider)}`);
+        setExternalAuthTestStatus(session.provider, "error", message);
+        toast.error(message);
+      }
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [externalAuthTestSession]);
+
+  useEffect(() => {
+    if (!telegramWidgetTestVisible || !isSettingEnabled("telegram_widget_enabled") || !telegramWidgetUsername || !telegramWidgetTestRef.current) {
+      return undefined;
+    }
+
+    const callbackName = "__fashionDemonAdminTelegramWidgetTest";
+    const container = telegramWidgetTestRef.current;
+    container.innerHTML = "";
+
+    (window as Window & Record<string, unknown>)[callbackName] = (user: unknown) => {
+      const widgetUser = (user && typeof user === "object") ? user as Record<string, unknown> : {};
+      const username = String(widgetUser.username || "").trim();
+      const identifier = String(widgetUser.id || "").trim();
+      const suffix = username ? `@${username}` : identifier ? `ID ${identifier}` : "пользователя";
+      const message = `Виджет отдал данные ${suffix}. Значит фронт Telegram Widget работает. Для полной проверки backend можно пройти обычный вход на странице /auth.`;
+      setExternalAuthTestStatus("telegram_widget", "success", message);
+      toast.success("Telegram Widget вернул данные пользователя. Тест отображения пройден.");
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.async = true;
+    script.setAttribute("data-telegram-login", telegramWidgetUsername);
+    script.setAttribute("data-size", "large");
+    script.setAttribute("data-userpic", "false");
+    script.setAttribute("data-radius", "10");
+    script.setAttribute("data-request-access", "write");
+    script.setAttribute("data-onauth", `${callbackName}(user)`);
+    container.appendChild(script);
+
+    setExternalAuthTestStatus(
+      "telegram_widget",
+      "info",
+      "Тестовый виджет загружен. Если он не появился, проверьте username login-бота и домен, заданный у BotFather через setdomain."
+    );
+
+    return () => {
+      delete (window as Window & Record<string, unknown>)[callbackName];
+      container.innerHTML = "";
+    };
+  }, [telegramWidgetTestVisible, telegramWidgetUsername, settings]);
+
+  const renderExternalAuthTestStatus = (provider: string) => {
+    const status = externalAuthTestStatuses[provider];
+    if (!status?.message) {
+      return null;
+    }
+
+    const className = status.kind === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : status.kind === "error"
+        ? "border-red-200 bg-red-50 text-red-700"
+        : status.kind === "running"
+          ? "border-blue-200 bg-blue-50 text-blue-700"
+          : "border-slate-200 bg-slate-50 text-slate-700";
+
+    return (
+      <div className={`rounded-none border px-3 py-2 text-xs leading-5 ${className}`}>
+        {status.message}
+      </div>
+    );
   };
 
   const applyYandexSourceStationPreset = (presetId: string) => {
@@ -4132,6 +4528,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { id: "legal", label: "Юридические тексты" },
     { id: "general", label: "Общие" }
   ] as const;
+  const settingsGroupsWithBackup = settingsGroups.flatMap((group) =>
+    group.id === "general"
+      ? [{ id: "backup", label: "Резервное копирование" } as const, group]
+      : [group]
+  );
 
   const productCardBackgroundMode = normalizeProductCardBackgroundMode(settings.product_card_background_mode);
   const productCardBackgroundColor = normalizeProductCardBackgroundColor(settings.product_card_background_color);
@@ -7125,6 +7526,93 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </div>
                         </div>
                       </div>
+                      {false && (
+                      <div className="space-y-4 rounded-none border border-gray-200 p-4">
+                        <div className="space-y-1">
+                          <h4 className="font-semibold">Внешние способы входа</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Здесь включаются способы входа для покупателей. Telegram-бот настраивается в разделе интеграций Telegram, а ключи Google и Яндекс задаются на сервере через env.
+                          </p>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-login-enabled" className="text-sm font-semibold">Telegram</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Вход через Telegram-бота с переходом в бот и подтверждением входа.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-telegram-login-enabled"
+                                checked={isSettingEnabled("telegram_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-telegram-bot-username">Username бота</Label>
+                              <Input
+                                id="auth-telegram-bot-username"
+                                value={settings["telegram_bot_username"] || ""}
+                                onChange={(e) => updateSetting("telegram_bot_username", e.target.value)}
+                                placeholder="fashion_demon_bot"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Если оставить пустым, будет использован username активного login-бота из интеграций.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-widget-enabled" className="text-sm font-semibold">Telegram Widget</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Быстрый вход через официальный Telegram Login Widget прямо на странице авторизации.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-telegram-widget-enabled"
+                                checked={isSettingEnabled("telegram_widget_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_widget_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-google-login-enabled" className="text-sm font-semibold">Google</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Кнопка входа через Google появится на сайте, если она включена здесь и на сервере заданы `Auth__Google__ClientId` и `Auth__Google__ClientSecret`.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-google-login-enabled"
+                                checked={isSettingEnabled("google_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("google_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-yandex-login-enabled" className="text-sm font-semibold">Яндекс</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Кнопка входа через Яндекс появится на сайте, если она включена здесь и на сервере заданы `Auth__Yandex__ClientId` и `Auth__Yandex__ClientSecret`.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-yandex-login-enabled"
+                                checked={isSettingEnabled("yandex_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("yandex_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      )}
                     </div>
                   )}
 
@@ -7363,7 +7851,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <div className="border p-3 space-y-2 lg:sticky lg:top-4">
                     <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Группы</p>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                      {settingsGroups.map((group) => (
+                      {settingsGroupsWithBackup.map((group) => (
                         <Button
                           key={group.id}
                           variant={selectedSettingsGroup === group.id ? "default" : "outline"}
@@ -7405,6 +7893,239 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1 md:col-span-2">
                           <Label htmlFor="auth-session-sliding-minutes">Скользящее обновление сессии (минуты)</Label>
                           <Input id="auth-session-sliding-minutes" type="number" min={1} value={settings["auth_session_sliding_update_minutes"] || "5"} onChange={(e) => updateSetting("auth_session_sliding_update_minutes", e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="space-y-4 rounded-none border border-gray-200 p-4">
+                        <div className="space-y-1">
+                          <h4 className="font-semibold">Внешние способы входа</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Здесь собраны все настройки, которых достаточно с нашей стороны для входа через Telegram, Google и Яндекс. Отдельно у провайдеров все равно нужно разрешить callback URL, который показан ниже в карточках Google и Яндекс.
+                          </p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Кнопки проверки ниже используют уже сохраненные настройки сервера. Если вы только что изменили поля в этой форме, сначала нажмите общую кнопку сохранения настроек внизу страницы.
+                          </p>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-login-enabled" className="text-sm font-semibold">Telegram</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: пользователь нажимает кнопку входа, переходит в Telegram-бота, подтверждает аккаунт и возвращается на сайт уже авторизованным.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-telegram-login-enabled"
+                                checked={isSettingEnabled("telegram_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-telegram-bot-username">Username бота</Label>
+                              <Input
+                                id="auth-telegram-bot-username"
+                                value={settings["telegram_bot_username"] || ""}
+                                onChange={(e) => updateSetting("telegram_bot_username", e.target.value)}
+                                placeholder="fashion_demon_bot"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Если оставить пустым, будет использован username активного login-бота из раздела интеграций.
+                              </p>
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: в разделе `Интеграции / Telegram` должен быть включенный бот с токеном и флагом `использовать для входа`.</div>
+                              <div>Сейчас используется: {loginTelegramBot?.username ? `@${loginTelegramBot.username}` : "login-бот пока не выбран"}.</div>
+                              <div>Токен бота: {loginTelegramBot?.hasToken || hasConfiguredValue(loginTelegramBot?.tokenMasked) ? "задан" : "не задан"}.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full rounded-none"
+                                onClick={startTelegramLoginTest}
+                                disabled={externalAuthTestRunning === "telegram"}
+                              >
+                                {externalAuthTestRunning === "telegram" ? "Запускаем тест..." : "Проверить Telegram-вход"}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Тест создаст реальную ссылку входа и откроет Telegram-бота. Можно просто убедиться, что бот открылся, не завершая авторизацию.
+                              </p>
+                              {renderExternalAuthTestStatus("telegram")}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-widget-enabled" className="text-sm font-semibold">Telegram Widget</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: на странице авторизации появляется официальный Telegram Login Widget, и пользователь подтверждает вход прямо в виджете без перехода по кнопке в бота.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-telegram-widget-enabled"
+                                checked={isSettingEnabled("telegram_widget_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_widget_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: тот же login-бот из интеграций должен быть включен и иметь username.</div>
+                              <div>Дополнительно у BotFather для этого бота должен быть настроен домен сайта через `setdomain`.</div>
+                              <div>Если виджет включен, а на странице входа его нет, обычно не хватает username бота, токена или домена у BotFather.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="w-full rounded-none"
+                                  onClick={() => setTelegramWidgetTestVisible((current) => !current)}
+                                  disabled={!isSettingEnabled("telegram_widget_enabled") || !isTelegramWidgetTestReady}
+                                >
+                                  {telegramWidgetTestVisible ? "Скрыть тестовый виджет" : "Показать тестовый виджет"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="w-full rounded-none"
+                                  onClick={openAuthPageForTesting}
+                                  disabled={!isSettingEnabled("telegram_widget_enabled")}
+                                >
+                                  Открыть страницу входа
+                                </Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Тестовый виджет проверяет отрисовку прямо в админке. Для полной проверки боевого сценария откройте страницу `/auth` и убедитесь, что виджет появился там.
+                              </p>
+                              {telegramWidgetTestVisible ? (
+                                <div className="space-y-2 rounded-none border border-dashed border-slate-300 p-3">
+                                  <div className="text-xs text-muted-foreground">
+                                    Тестовый username: {telegramWidgetUsername ? `@${telegramWidgetUsername}` : "не задан"}.
+                                  </div>
+                                  <div ref={telegramWidgetTestRef} className="min-h-[56px]" />
+                                </div>
+                              ) : null}
+                              {renderExternalAuthTestStatus("telegram_widget")}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-google-login-enabled" className="text-sm font-semibold">Google</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: при нажатии открывается окно Google OAuth, пользователь подтверждает доступ, после чего аккаунт создается или привязывается к текущему профилю.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-google-login-enabled"
+                                checked={isSettingEnabled("google_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("google_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-google-client-id">Client ID</Label>
+                              <Input
+                                id="auth-google-client-id"
+                                value={settings["google_auth_client_id"] || ""}
+                                onChange={(e) => updateSetting("google_auth_client_id", e.target.value)}
+                                placeholder="Google OAuth Client ID"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-google-client-secret">Client Secret</Label>
+                              <Input
+                                id="auth-google-client-secret"
+                                type="password"
+                                value={settings["google_auth_client_secret"] || ""}
+                                onChange={(e) => updateSetting("google_auth_client_secret", e.target.value)}
+                                placeholder="Google OAuth Client Secret"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-google-callback-url">Callback URL</Label>
+                              <Input id="auth-google-callback-url" value={googleCallbackUrl} readOnly className="bg-slate-50" />
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: добавить этот callback URL в Google Cloud Console в список разрешенных redirect URI.</div>
+                              <div>Client ID: {hasConfiguredValue(settings["google_auth_client_id"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Google__ClientId"}.</div>
+                              <div>Client Secret: {hasConfiguredValue(settings["google_auth_client_secret"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Google__ClientSecret"}.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full rounded-none"
+                                onClick={() => startExternalOAuthTest("google")}
+                                disabled={externalAuthTestRunning === "google"}
+                              >
+                                {externalAuthTestRunning === "google" ? "Запускаем тест..." : "Проверить Google OAuth"}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Тест откроет реальное окно Google OAuth. Если не хотите создавать или использовать реальный аккаунт, достаточно проверить, что окно провайдера открылось без мгновенной ошибки backend.
+                              </p>
+                              {renderExternalAuthTestStatus("google")}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-yandex-login-enabled" className="text-sm font-semibold">Яндекс</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: открывается окно Яндекс OAuth, пользователь подтверждает доступ, после чего аккаунт Яндекса используется для входа или привязки.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-yandex-login-enabled"
+                                checked={isSettingEnabled("yandex_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("yandex_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-yandex-client-id">Client ID</Label>
+                              <Input
+                                id="auth-yandex-client-id"
+                                value={settings["yandex_auth_client_id"] || ""}
+                                onChange={(e) => updateSetting("yandex_auth_client_id", e.target.value)}
+                                placeholder="Yandex OAuth Client ID"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-yandex-client-secret">Client Secret</Label>
+                              <Input
+                                id="auth-yandex-client-secret"
+                                type="password"
+                                value={settings["yandex_auth_client_secret"] || ""}
+                                onChange={(e) => updateSetting("yandex_auth_client_secret", e.target.value)}
+                                placeholder="Yandex OAuth Client Secret"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-yandex-callback-url">Callback URL</Label>
+                              <Input id="auth-yandex-callback-url" value={yandexCallbackUrl} readOnly className="bg-slate-50" />
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: добавить этот callback URL в настройках приложения Яндекса как адрес возврата.</div>
+                              <div>Client ID: {hasConfiguredValue(settings["yandex_auth_client_id"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Yandex__ClientId"}.</div>
+                              <div>Client Secret: {hasConfiguredValue(settings["yandex_auth_client_secret"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Yandex__ClientSecret"}.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full rounded-none"
+                                onClick={() => startExternalOAuthTest("yandex")}
+                                disabled={externalAuthTestRunning === "yandex"}
+                              >
+                                {externalAuthTestRunning === "yandex" ? "Запускаем тест..." : "Проверить Яндекс OAuth"}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Тест откроет реальное окно Яндекс OAuth. Для первичной проверки достаточно убедиться, что запрос до провайдера стартует и не падает сразу на стороне backend.
+                              </p>
+                              {renderExternalAuthTestStatus("yandex")}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -8725,6 +9446,176 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {selectedSettingsGroup === "backup" && (
+                    <div className="space-y-4 border p-3">
+                      <h3 className="font-semibold">Резервное копирование</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Автоматические копии сохраняются на сервере по локальному времени машины, где запущен backend. Здесь можно настроить расписание, создать копию вручную и сразу скачать готовый файл.
+                      </p>
+                      <div className="space-y-4 rounded-none border border-gray-200 p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-semibold uppercase tracking-[0.12em]">Резервные копии БД</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Поддерживаются и Linux, и Windows. Если `pg_dump` не найден автоматически, укажите полный путь к нему через `DatabaseBackup__PgDumpPath`.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-none"
+                              onClick={() => {
+                                void refreshDatabaseBackups();
+                              }}
+                              disabled={databaseBackupsLoading || databaseBackupCreating}
+                            >
+                              <RefreshCcw className={`mr-2 h-4 w-4 ${databaseBackupsLoading ? "animate-spin" : ""}`} />
+                              {databaseBackupsLoading ? "Обновление..." : "Обновить список"}
+                            </Button>
+                            <Button
+                              type="button"
+                              className="rounded-none"
+                              onClick={() => {
+                                void createAndDownloadDatabaseBackup();
+                              }}
+                              disabled={databaseBackupCreating}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              {databaseBackupCreating ? "Создание..." : "Создать и скачать"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 lg:grid-cols-3">
+                          <div className="rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label className="text-sm font-semibold uppercase tracking-[0.12em]">Автобэкапы</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Если включено, сервис будет создавать новые копии по расписанию и чистить старые `.dump` файлы.
+                                </p>
+                              </div>
+                              <Checkbox
+                                checked={isSettingEnabled("database_backup_enabled", true)}
+                                onCheckedChange={(checked) => updateSetting("database_backup_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 rounded-none border border-gray-200 p-3">
+                            <Label htmlFor="database-backup-schedule">Расписание</Label>
+                            <Input
+                              id="database-backup-schedule"
+                              value={settings["database_backup_schedule_local"] || DEFAULT_APP_SETTINGS.database_backup_schedule_local}
+                              onChange={(e) => updateSetting("database_backup_schedule_local", e.target.value)}
+                              placeholder="03:00,15:00"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Формат: `HH:mm,HH:mm`. По умолчанию выполняются две проверки в сутки: в 03:00 и 15:00.
+                            </p>
+                          </div>
+
+                          <div className="space-y-1 rounded-none border border-gray-200 p-3">
+                            <Label htmlFor="database-backup-retention">Хранить дней</Label>
+                            <Input
+                              id="database-backup-retention"
+                              type="number"
+                              min={1}
+                              max={365}
+                              value={settings["database_backup_retention_days"] || DEFAULT_APP_SETTINGS.database_backup_retention_days}
+                              onChange={(e) => updateSetting("database_backup_retention_days", e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Старые резервные копии удаляются автоматически при очередной проверке расписания.
+                            </p>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-muted-foreground">
+                          После изменения включения, расписания или срока хранения нажмите общую кнопку сохранения настроек внизу страницы. Ручное создание и скачивание работает сразу, без отдельного сохранения.
+                        </p>
+
+                        <div className="grid gap-3 lg:grid-cols-3">
+                          <div className="space-y-1 rounded-none border border-dashed border-gray-300 p-3">
+                            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Папка на сервере</div>
+                            <div className="break-all text-sm">{databaseBackupsOverview?.rootDirectory || "-"}</div>
+                          </div>
+                          <div className="space-y-1 rounded-none border border-dashed border-gray-300 p-3">
+                            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Часовой пояс сервера</div>
+                            <div className="text-sm">{databaseBackupsOverview?.timeZone || "-"}</div>
+                          </div>
+                          <div className="space-y-1 rounded-none border border-dashed border-gray-300 p-3">
+                            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Команда pg_dump</div>
+                            <div className="break-all text-sm">{databaseBackupsOverview?.pgDumpCommand || "pg_dump"}</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <div className="text-sm font-semibold">Последние резервные копии</div>
+                              <p className="text-xs text-muted-foreground">
+                                Показываем до 100 последних `.dump` файлов из директории резервного копирования.
+                              </p>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Всего в списке: {databaseBackupsOverview?.items?.length || 0}
+                            </div>
+                          </div>
+
+                          {databaseBackupsOverview?.items?.length ? (
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Файл</TableHead>
+                                    <TableHead>Создан</TableHead>
+                                    <TableHead>Размер</TableHead>
+                                    <TableHead>Источник</TableHead>
+                                    <TableHead className="text-right">Действие</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {databaseBackupsOverview.items.map((item) => (
+                                    <TableRow key={item.relativePath}>
+                                      <TableCell>
+                                        <div className="font-medium">{item.fileName}</div>
+                                        <div className="text-xs text-muted-foreground">{item.relativePath}</div>
+                                      </TableCell>
+                                      <TableCell>{formatOrderDateTime(item.createdAt)}</TableCell>
+                                      <TableCell>{formatBytes(item.sizeBytes)}</TableCell>
+                                      <TableCell>{item.trigger === "manual" ? "Вручную" : item.trigger === "auto" ? "Автоматически" : item.trigger}</TableCell>
+                                      <TableCell className="text-right">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="rounded-none"
+                                          onClick={() => {
+                                            void downloadDatabaseBackup(item.relativePath, item.fileName).catch((error) => {
+                                              toast.error(getErrorMessage(error, "Не удалось скачать резервную копию"));
+                                            });
+                                          }}
+                                        >
+                                          <Download className="mr-2 h-4 w-4" />
+                                          Скачать
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          ) : (
+                            <div className="rounded-none border border-dashed border-gray-300 p-4 text-sm text-muted-foreground">
+                              Резервных копий пока нет. Создайте первую копию вручную или дождитесь ближайшего времени из расписания.
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
 

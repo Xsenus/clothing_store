@@ -106,8 +106,7 @@ const shouldSkipRefresh = (path) => {
     || path.startsWith("/auth/verify")
     || path.startsWith("/auth/resend")
     || path.startsWith("/auth/reset")
-    || path.startsWith("/auth/refresh")
-    || path.startsWith("/auth/telegram");
+    || path.startsWith("/auth/refresh");
 };
 
 const refreshAuthSession = async () => {
@@ -174,6 +173,37 @@ const request = async (path, options = {}, retry = true) => {
   }
 
   return res.json();
+};
+
+const downloadRequest = async (path) => {
+  const headers = {};
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const adminToken = getAdminToken();
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+  }
+
+  const res = await fetch(buildRequestUrl(path), {
+    method: "GET",
+    headers,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw parseErrorPayload(res.status, text);
+  }
+
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get("Content-Disposition") || "";
+  const fileNameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+  const fileName = fileNameMatch
+    ? decodeURIComponent(fileNameMatch[1].replace(/\"/g, ""))
+    : path.split("/").pop() || "download.bin";
+
+  return { blob, fileName };
 };
 
 const sortProducts = (products, sortBy) => {
@@ -486,6 +516,10 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  unlinkExternalIdentity: async ({ input }) => request(`/profile/external/${encodeURIComponent(input.provider)}`, {
+    method: "DELETE",
+  }),
+
   createProduct: async ({ input }) => normalizeProduct(await request("/products", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -687,10 +721,25 @@ export const FLOW = {
   telegramStartAuth: async ({ input }) => request("/auth/telegram/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input || {}),
+    body: JSON.stringify({
+      returnUrl: input?.returnUrl ?? null,
+      intent: input?.intent ?? null,
+    }),
   }),
 
   telegramAuthStatus: async ({ input }) => request(`/auth/telegram/status/${encodeURIComponent(input.state)}`),
+
+  externalAuthStart: async ({ input }) => request("/auth/external/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: input.provider,
+      returnUrl: input.returnUrl ?? null,
+      intent: input.intent ?? null,
+    }),
+  }),
+
+  externalAuthStatus: async ({ input }) => request(`/auth/external/status/${encodeURIComponent(input.state)}`),
 
   telegramLogin: async ({ input }) => {
     const result = await request("/auth/telegram/login", {
@@ -924,6 +973,14 @@ export const FLOW = {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }),
+
+  adminGetDatabaseBackups: async () => request("/admin/database-backups"),
+
+  adminCreateDatabaseBackup: async () => request("/admin/database-backups", {
+    method: "POST",
+  }),
+
+  adminDownloadDatabaseBackup: async ({ input }) => downloadRequest(`/admin/database-backups/download?relativePath=${encodeURIComponent(input.relativePath)}`),
 
   getPublicSettings: async () => request("/settings/public"),
 

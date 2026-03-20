@@ -15,6 +15,7 @@ import AdminPage from "./admin";
 import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
+import { fetchPublicSettings } from "@/lib/site-settings";
 import {
   YOO_KASSA_PAYMENT_METHOD_LABELS,
   YOO_KASSA_PAYMENT_STATUS_LABELS,
@@ -240,6 +241,14 @@ const formatOrderDisplayNumber = (order) => {
   return order?.id || "вЂ”";
 };
 
+const EXTERNAL_AUTH_PROVIDERS = [
+  { id: "telegram", label: "Telegram" },
+  { id: "google", label: "Google" },
+  { id: "yandex", label: "Яндекс" },
+];
+
+const isPublicSettingEnabled = (value) => ["true", "1", "on", "yes"].includes(String(value || "").toLowerCase());
+
 const normalizeProfileTab = (value, allowAdmin = false) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "wishlist" || normalized === "settings" || normalized === "orders") {
@@ -251,6 +260,12 @@ const normalizeProfileTab = (value, allowAdmin = false) => {
   }
 
   return "orders";
+};
+
+const getExternalProviderLabel = (provider) => {
+  if (provider === "google") return "Google";
+  if (provider === "yandex") return "Яндекс";
+  return "Telegram";
 };
 
 export default function ProfilePage() {
@@ -266,6 +281,15 @@ export default function ProfilePage() {
   const [products, setProducts] = useState([]);
   const [profile, setProfile] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [availableExternalAuthProviders, setAvailableExternalAuthProviders] = useState({
+    telegram: false,
+    google: false,
+    yandex: false,
+  });
+  const [linkingProvider, setLinkingProvider] = useState("");
+  const [unlinkingProvider, setUnlinkingProvider] = useState("");
+  const [telegramLinkState, setTelegramLinkState] = useState("");
+  const [externalLinkSession, setExternalLinkSession] = useState(null);
 
   const [emailDraft, setEmailDraft] = useState("");
   const [phoneDraft, setPhoneDraft] = useState("");
@@ -276,6 +300,7 @@ export default function ProfilePage() {
   const [paymentActionOrderId, setPaymentActionOrderId] = useState("");
   const [paymentRefreshOrderId, setPaymentRefreshOrderId] = useState("");
   const handledPaymentReturnRef = useRef("");
+  const authPopupRef = useRef(null);
 
   useEffect(() => {
     const nextTab = normalizeProfileTab(searchParams.get("tab"), isAdmin);
@@ -351,11 +376,12 @@ export default function ProfilePage() {
 
       setLoading(true);
       try {
-        const [, likesRes, productsRes, profileRes] = await Promise.all([
+        const [, likesRes, productsRes, profileRes, publicSettings] = await Promise.all([
           loadOrders(),
           FLOW.getUserLikes({ input: {} }),
           FLOW.getAllProducts({ input: {} }),
           FLOW.getProfile({ input: {} }),
+          fetchPublicSettings().catch(() => ({})),
         ]);
 
         if (Array.isArray(likesRes)) setLikedProductIds(likesRes.map((like) => like.productId));
@@ -364,6 +390,7 @@ export default function ProfilePage() {
           const shippingAddresses = sanitizeProfileAddresses(profileRes.shippingAddresses, profileRes.shippingAddress);
           setProfile({
             ...profileRes,
+            externalIdentities: Array.isArray(profileRes.externalIdentities) ? profileRes.externalIdentities : [],
             shippingAddresses,
             shippingAddress: getDefaultProfileAddressValue(shippingAddresses, profileRes.shippingAddress),
           });
@@ -371,6 +398,12 @@ export default function ProfilePage() {
           setPhoneDraft(profileRes.phone || "");
           setIsAdmin(!!profileRes.isAdmin);
         }
+
+        setAvailableExternalAuthProviders({
+          telegram: isPublicSettingEnabled(publicSettings?.telegram_login_enabled) || isPublicSettingEnabled(publicSettings?.telegram_widget_enabled),
+          google: isPublicSettingEnabled(publicSettings?.google_login_enabled),
+          yandex: isPublicSettingEnabled(publicSettings?.yandex_login_enabled),
+        });
       } catch (error) {
         const status = typeof error === "object" && error && "status" in error
           ? Number(error.status)
@@ -450,6 +483,56 @@ export default function ProfilePage() {
     () => normalizePhone(phoneDraft) !== normalizePhone(profile?.phone),
     [phoneDraft, profile?.phone]
   );
+  const externalAuthMethods = useMemo(() => {
+    const identities = Array.isArray(profile?.externalIdentities) ? profile.externalIdentities : [];
+
+    return EXTERNAL_AUTH_PROVIDERS.map((provider) => {
+      const identity = identities.find((item) => item?.provider === provider.id) || null;
+      return {
+        ...provider,
+        identity,
+        available: !!availableExternalAuthProviders[provider.id],
+      };
+    });
+  }, [availableExternalAuthProviders, profile?.externalIdentities]);
+  const visibleExternalAuthMethods = useMemo(
+    () => externalAuthMethods.filter((method) => method.available || !!method.identity),
+    [externalAuthMethods]
+  );
+
+  const closeExternalAuthPopup = () => {
+    if (authPopupRef.current && !authPopupRef.current.closed) {
+      authPopupRef.current.close();
+    }
+    authPopupRef.current = null;
+  };
+
+  const refreshExternalIdentityState = async () => {
+    const profileRes = await FLOW.getProfile({ input: {} });
+    const nextIdentities = Array.isArray(profileRes?.externalIdentities) ? profileRes.externalIdentities : [];
+
+    setProfile((prev) => (
+      prev
+        ? {
+            ...prev,
+            email: profileRes?.email || "",
+            phone: profileRes?.phone || "",
+            emailVerified: !!profileRes?.emailVerified,
+            phoneVerified: !!profileRes?.phoneVerified,
+            externalIdentities: nextIdentities,
+          }
+        : profileRes
+    ));
+
+    if (!emailChanged) {
+      setEmailDraft(profileRes?.email || "");
+    }
+    if (!phoneChanged) {
+      setPhoneDraft(profileRes?.phone || "");
+    }
+
+    return profileRes;
+  };
 
   const emailVerifiedForSave = !emailChanged || !!profile?.emailVerified;
   const phoneVerifiedForSave = !phoneChanged || !!profile?.phoneVerified;
@@ -485,6 +568,81 @@ export default function ProfilePage() {
 
     return () => clearInterval(timer);
   }, [phoneVerifyState]);
+
+  useEffect(() => () => closeExternalAuthPopup(), []);
+
+  useEffect(() => {
+    if (!telegramLinkState) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await FLOW.telegramAuthStatus({ input: { state: telegramLinkState } });
+        if (status?.completed && status?.linked) {
+          setTelegramLinkState("");
+          setLinkingProvider("");
+          await refreshExternalIdentityState();
+          toast.success("Telegram привязан к профилю");
+          clearInterval(timer);
+          return;
+        }
+
+        if (["expired", "consumed"].includes(String(status?.status || ""))) {
+          setTelegramLinkState("");
+          setLinkingProvider("");
+          clearInterval(timer);
+          if (status?.status === "expired") {
+            toast.error("Сессия привязки Telegram истекла. Начните заново.");
+          }
+        }
+      } catch (error) {
+        setTelegramLinkState("");
+        setLinkingProvider("");
+        clearInterval(timer);
+        toast.error(error?.message || "Не удалось завершить привязку Telegram");
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [telegramLinkState, emailChanged, phoneChanged]);
+
+  useEffect(() => {
+    if (!externalLinkSession?.state) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await FLOW.externalAuthStatus({ input: { state: externalLinkSession.state } });
+        if (status?.completed && status?.linked) {
+          clearInterval(timer);
+          closeExternalAuthPopup();
+          setExternalLinkSession(null);
+          setLinkingProvider("");
+          await refreshExternalIdentityState();
+          toast.success(`${getExternalProviderLabel(status.provider || externalLinkSession.provider)} привязан к профилю`);
+          return;
+        }
+
+        if (["expired", "consumed", "failed"].includes(String(status?.status || ""))) {
+          clearInterval(timer);
+          closeExternalAuthPopup();
+          setExternalLinkSession(null);
+          setLinkingProvider("");
+          if (status?.status === "failed") {
+            toast.error(status?.detail || `Не удалось привязать ${getExternalProviderLabel(externalLinkSession.provider)}`);
+          } else if (status?.status === "expired") {
+            toast.error(`Сессия привязки ${getExternalProviderLabel(externalLinkSession.provider)} истекла. Начните заново.`);
+          }
+        }
+      } catch (error) {
+        clearInterval(timer);
+        closeExternalAuthPopup();
+        setExternalLinkSession(null);
+        setLinkingProvider("");
+        toast.error(error?.message || `Не удалось завершить привязку ${getExternalProviderLabel(externalLinkSession.provider)}`);
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [externalLinkSession, emailChanged, phoneChanged]);
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
@@ -587,6 +745,87 @@ export default function ProfilePage() {
       toast.error(error?.message || "Не удалось начать подтверждение телефона");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleLinkExternal = async (provider) => {
+    if (!provider || linkingProvider || unlinkingProvider) return;
+
+    setLinkingProvider(provider);
+    try {
+      if (provider === "telegram") {
+        const started = await FLOW.telegramStartAuth({ input: { returnUrl: "/profile?tab=settings", intent: "link" } });
+        if (!started?.state || !started?.authUrl) {
+          throw new Error("Не удалось начать привязку Telegram");
+        }
+
+        setTelegramLinkState(started.state);
+        window.open(started.authUrl, "_blank", "noopener,noreferrer");
+        toast.message("Открылся Telegram-бот. Подтвердите привязку и вернитесь на сайт.");
+        return;
+      }
+
+      const started = await FLOW.externalAuthStart({
+        input: {
+          provider,
+          returnUrl: "/profile?tab=settings",
+          intent: "link",
+        },
+      });
+      if (!started?.authUrl || !started?.state) {
+        throw new Error(`Не удалось начать привязку ${getExternalProviderLabel(provider)}`);
+      }
+
+      setExternalLinkSession({
+        provider,
+        state: started.state,
+        expiresAt: Number(started.expiresAt || 0),
+      });
+
+      const popup = window.open(started.authUrl, `${provider}-link`, "width=540,height=720");
+      authPopupRef.current = popup;
+      if (!popup) {
+        window.location.assign(started.authUrl);
+        return;
+      }
+
+      toast.message(`Открылось окно ${getExternalProviderLabel(provider)}. Подтвердите привязку и вернитесь на сайт.`);
+    } catch (error) {
+      closeExternalAuthPopup();
+      setTelegramLinkState("");
+      setExternalLinkSession(null);
+      setLinkingProvider("");
+      toast.error(error?.message || `Не удалось начать привязку ${getExternalProviderLabel(provider)}`);
+    }
+  };
+
+  const handleUnlinkExternal = async (provider) => {
+    if (!provider || linkingProvider || unlinkingProvider) return;
+
+    const confirmed = await confirmAction({
+      title: `Отвязать ${getExternalProviderLabel(provider)}?`,
+      description: "Этот способ входа перестанет работать для текущего профиля. Если это последний способ входа, система не даст отвязать его без подтвержденного email или другой привязки.",
+      confirmText: "Отвязать",
+    });
+    if (!confirmed) return;
+
+    setUnlinkingProvider(provider);
+    try {
+      const result = await FLOW.unlinkExternalIdentity({ input: { provider } });
+      const nextIdentities = Array.isArray(result?.externalIdentities) ? result.externalIdentities : [];
+      setProfile((prev) => (
+        prev
+          ? {
+              ...prev,
+              externalIdentities: nextIdentities,
+            }
+          : prev
+      ));
+      toast.success(`${getExternalProviderLabel(provider)} отвязан`);
+    } catch (error) {
+      toast.error(error?.message || `Не удалось отвязать ${getExternalProviderLabel(provider)}`);
+    } finally {
+      setUnlinkingProvider("");
     }
   };
 
@@ -967,6 +1206,77 @@ export default function ProfilePage() {
                           {profile?.phoneVerified && !phoneChanged && <p className="text-xs text-emerald-600">Телефон подтвержден</p>}
                           {!!phoneVerifyState && <p className="text-xs text-muted-foreground">Ожидаем подтверждение номера в Telegram…</p>}
                         </div>
+
+                        {visibleExternalAuthMethods.length > 0 ? (
+                          <div className="space-y-4 rounded-none border border-gray-200 p-4">
+                            <div className="text-sm font-semibold uppercase tracking-widest">Связанные способы входа</div>
+
+                          <div className="grid gap-3 md:grid-cols-3">
+                            {visibleExternalAuthMethods.map((method) => {
+                              const connected = !!method.identity;
+                              const isLinking = linkingProvider === method.id;
+                              const isUnlinking = unlinkingProvider === method.id;
+                              const cardClassName = connected
+                                ? "space-y-2 rounded-none border border-emerald-200 bg-emerald-50 p-3"
+                                : method.available
+                                  ? "space-y-2 rounded-none border border-gray-200 bg-white p-3"
+                                  : "space-y-2 rounded-none border border-amber-200 bg-amber-50 p-3";
+                              const statusLabel = connected
+                                ? "Подключен"
+                                : method.available
+                                  ? "Не подключен"
+                                  : "Отключен";
+
+                              return (
+                                <div key={method.id} className={cardClassName}>
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="font-semibold">{method.label}</div>
+                                    <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{statusLabel}</span>
+                                  </div>
+
+                                  {connected ? (
+                                    <div className="space-y-1 text-sm text-gray-700">
+                                      {method.identity.displayName && <div>{method.identity.displayName}</div>}
+                                      {method.identity.providerUsername && <div>@{method.identity.providerUsername}</div>}
+                                      {method.identity.providerEmail && <div className="break-all">{method.identity.providerEmail}</div>}
+                                      {method.identity.lastUsedAt ? (
+                                        <div className="text-xs text-muted-foreground">
+                                          Последний вход: {formatOrderDateTime(method.identity.lastUsedAt)}
+                                        </div>
+                                      ) : (
+                                        <div className="text-xs text-muted-foreground">Аккаунт уже связан с этим профилем.</div>
+                                      )}
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="mt-2 h-10 w-full rounded-none"
+                                        onClick={() => handleUnlinkExternal(method.id)}
+                                        disabled={isUnlinking || !!linkingProvider}
+                                      >
+                                        {isUnlinking ? "Отвязываем..." : "Отвязать"}
+                                      </Button>
+                                    </div>
+                                  ) : method.available ? (
+                                    <>
+                                    <p className="text-sm text-muted-foreground">
+                                      Этот способ входа доступен, но пока не привязан к вашему аккаунту.
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      className="h-10 w-full rounded-none bg-black text-white hover:bg-gray-800"
+                                      onClick={() => handleLinkExternal(method.id)}
+                                      disabled={isLinking || !!unlinkingProvider}
+                                    >
+                                      {isLinking ? "Подключаем..." : "Привязать"}
+                                    </Button>
+                                    </>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          </div>
+                        ) : null}
 
                         <div className="flex flex-col gap-3 pt-2 md:flex-row">
                           <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest px-8 py-6 md:flex-1">СОХРАНИТЬ ИЗМЕНЕНИЯ</Button>

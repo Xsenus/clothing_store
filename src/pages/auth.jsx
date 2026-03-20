@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth, useAuthActions } from "@/context/AuthContext";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
@@ -53,9 +53,15 @@ export default function AuthPage() {
   const [authTab, setAuthTab] = useState("signin");
 
   const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramWidgetEnabled, setTelegramWidgetEnabled] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [yandexEnabled, setYandexEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
   const [telegramAuthState, setTelegramAuthState] = useState("");
   const [telegramAuthExpiresAt, setTelegramAuthExpiresAt] = useState(0);
+  const [externalAuthSession, setExternalAuthSession] = useState(null);
+  const telegramWidgetRef = useRef(null);
+  const authPopupRef = useRef(null);
   const authSeoTitle = pendingEmail ? "Подтверждение email" : "Вход и регистрация";
 
   useEffect(() => {
@@ -65,14 +71,59 @@ export default function AuthPage() {
   }, [authLoading, isAuthenticated, navigate]);
 
   useEffect(() => {
-    const loadTelegram = async () => {
+    const loadAuthProviders = async () => {
       const settings = await fetchPublicSettings();
-      const enabled = ["true", "1", "on"].includes(String(settings?.telegram_login_enabled || "").toLowerCase());
-      setTelegramEnabled(enabled);
+      const isEnabled = (value) => ["true", "1", "on", "yes"].includes(String(value || "").toLowerCase());
+      setTelegramEnabled(isEnabled(settings?.telegram_login_enabled));
+      setTelegramWidgetEnabled(isEnabled(settings?.telegram_widget_enabled));
+      setGoogleEnabled(isEnabled(settings?.google_login_enabled));
+      setYandexEnabled(isEnabled(settings?.yandex_login_enabled));
       setTelegramBotUsername(settings?.telegram_bot_username || "");
     };
-    loadTelegram();
+    loadAuthProviders();
   }, []);
+
+  const closeAuthPopup = () => {
+    if (authPopupRef.current && !authPopupRef.current.closed) {
+      authPopupRef.current.close();
+    }
+    authPopupRef.current = null;
+  };
+
+  const getProviderLabel = (provider) => {
+    if (provider === "google") return "Google";
+    if (provider === "yandex") return "Яндекс";
+    return "Telegram";
+  };
+
+  const handleExternalSignIn = async (provider) => {
+    setLoading(true);
+    try {
+      const started = await FLOW.externalAuthStart({ input: { provider, returnUrl: "/profile" } });
+      if (!started?.authUrl || !started?.state) {
+        throw new Error("External auth start failed");
+      }
+
+      setExternalAuthSession({
+        provider,
+        state: started.state,
+        expiresAt: Number(started.expiresAt || 0),
+      });
+
+      const popup = window.open(started.authUrl, `${provider}-auth`, "width=540,height=720");
+      authPopupRef.current = popup;
+      if (!popup) {
+        window.location.assign(started.authUrl);
+        return;
+      }
+
+      toast.message(`Открылось окно входа через ${getProviderLabel(provider)}.`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, `Не удалось начать вход через ${getProviderLabel(provider)}`));
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   const handleTelegramSignIn = async () => {
@@ -134,6 +185,94 @@ export default function AuthPage() {
 
     return () => clearInterval(timer);
   }, [telegramAuthState, navigate, signIn]);
+
+  useEffect(() => {
+    if (!telegramWidgetEnabled || !telegramBotUsername || !telegramWidgetRef.current) {
+      return undefined;
+    }
+
+    const callbackName = "__fashionDemonTelegramAuth";
+    window[callbackName] = async (payload) => {
+      setLoading(true);
+      try {
+        const result = await FLOW.telegramLogin({ input: payload });
+        const formData = new FormData();
+        formData.append("flow", "telegram-state");
+        formData.append("token", result?.token || "");
+        formData.append("refreshToken", result?.refreshToken || "");
+        formData.append("user", JSON.stringify(result?.user || null));
+        await signIn("telegram", formData);
+        toast.success("Вход через Telegram выполнен");
+        navigate("/profile", { replace: true });
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Не удалось выполнить вход через Telegram"));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const container = telegramWidgetRef.current;
+    container.innerHTML = "";
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.async = true;
+    script.setAttribute("data-telegram-login", telegramBotUsername);
+    script.setAttribute("data-size", "large");
+    script.setAttribute("data-userpic", "false");
+    script.setAttribute("data-radius", "10");
+    script.setAttribute("data-request-access", "write");
+    script.setAttribute("data-onauth", `${callbackName}(user)`);
+    container.appendChild(script);
+
+    return () => {
+      delete window[callbackName];
+      if (container) {
+        container.innerHTML = "";
+      }
+    };
+  }, [telegramBotUsername, telegramWidgetEnabled, navigate, signIn]);
+
+  useEffect(() => {
+    if (!externalAuthSession?.state) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const status = await FLOW.externalAuthStatus({ input: { state: externalAuthSession.state } });
+        if (status?.completed && status?.token) {
+          clearInterval(timer);
+          closeAuthPopup();
+          const formData = new FormData();
+          formData.append("flow", "external-state");
+          formData.append("token", status.token);
+          formData.append("refreshToken", status.refreshToken || "");
+          formData.append("user", JSON.stringify(status.user || null));
+          await signIn(status.provider || externalAuthSession.provider, formData);
+          setExternalAuthSession(null);
+          toast.success(`Вход через ${getProviderLabel(status.provider || externalAuthSession.provider)} выполнен`);
+          navigate(status.returnUrl || "/profile", { replace: true });
+          return;
+        }
+
+        if (["expired", "consumed", "failed"].includes(String(status?.status || ""))) {
+          clearInterval(timer);
+          closeAuthPopup();
+          setExternalAuthSession(null);
+          if (status?.status === "failed") {
+            toast.error(status?.detail || `Не удалось выполнить вход через ${getProviderLabel(externalAuthSession.provider)}`);
+          } else if (status?.status === "expired") {
+            toast.error(`Сессия входа через ${getProviderLabel(externalAuthSession.provider)} истекла. Начните заново.`);
+          }
+        }
+      } catch (error) {
+        clearInterval(timer);
+        closeAuthPopup();
+        setExternalAuthSession(null);
+        toast.error(getErrorMessage(error, `Ошибка проверки входа через ${getProviderLabel(externalAuthSession.provider)}`));
+      }
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [externalAuthSession, navigate, signIn]);
 
   const mapKnownErrorMessage = (rawMessage) => {
     const normalized = (rawMessage || "").toLowerCase();
@@ -463,7 +602,55 @@ export default function AuthPage() {
                 </Button>
               </form>
             ) : (
-              <Tabs value={authTab} onValueChange={setAuthTab} defaultValue="signin" className="w-full">
+              <>
+                {(googleEnabled || yandexEnabled || (telegramEnabled && telegramBotUsername)) && (
+                  <div className="mb-5 space-y-3">
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">Быстрый вход и регистрация</p>
+                      {googleEnabled && (
+                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("google")} disabled={loading}>
+                          Продолжить через Google
+                        </Button>
+                      )}
+                      {yandexEnabled && (
+                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("yandex")} disabled={loading}>
+                          Продолжить через Яндекс
+                        </Button>
+                      )}
+                      {telegramWidgetEnabled && telegramBotUsername && (
+                        <div className="rounded-md border border-dashed px-3 py-3">
+                          <p className="mb-2 text-xs text-muted-foreground">Telegram widget: самый быстрый вход без переходов по боту.</p>
+                          <div ref={telegramWidgetRef} className="flex justify-center" />
+                        </div>
+                      )}
+                      {telegramEnabled && telegramBotUsername && (
+                        <Button type="button" variant="outline" className="w-full h-9" onClick={handleTelegramSignIn} disabled={loading}>
+                          Войти через Telegram в боте
+                        </Button>
+                      )}
+                    </div>
+                    {(telegramAuthState || externalAuthSession) && (
+                      <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                        {telegramAuthState && (
+                          <p>
+                            Ожидаем подтверждение входа в @{telegramBotUsername}. {telegramAuthExpiresAt ? "Ссылка действует 10 минут." : ""}
+                          </p>
+                        )}
+                        {externalAuthSession && (
+                          <p>
+                            Ожидаем завершение входа через {getProviderLabel(externalAuthSession.provider)}.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3">
+                      <div className="h-px flex-1 bg-border" />
+                      <span className="text-xs text-muted-foreground">или по email</span>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+                  </div>
+                )}
+                <Tabs value={authTab} onValueChange={setAuthTab} defaultValue="signin" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-4">
                   <TabsTrigger value="signin">Вход</TabsTrigger>
                   <TabsTrigger value="signup">Регистрация</TabsTrigger>
@@ -507,7 +694,7 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Вход..." : "Войти"}
                     </Button>
-                    {telegramEnabled && telegramBotUsername && (
+                    {false && telegramEnabled && telegramBotUsername && (
                       <div className="pt-1 space-y-2">
                         <p className="text-xs text-muted-foreground">Или войдите через Telegram:</p>
                         <Button type="button" variant="outline" className="w-full h-9" onClick={handleTelegramSignIn} disabled={loading}>
@@ -554,7 +741,8 @@ export default function AuthPage() {
                     </Button>
                   </form>
                 </TabsContent>
-              </Tabs>
+                </Tabs>
+              </>
             )}
           </CardContent>
         </Card>

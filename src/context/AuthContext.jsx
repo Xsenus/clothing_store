@@ -69,7 +69,7 @@ export function AuthProvider({ children }) {
       return { signingIn: true };
     }
 
-    if (flow === "telegram-state") {
+    if (flow === "telegram-state" || flow === "external-state") {
       const token = formData.get ? formData.get("token") : formData.token;
       const refreshToken = formData.get ? formData.get("refreshToken") : formData.refreshToken;
       const rawUser = formData.get ? formData.get("user") : formData.user;
