@@ -13,9 +13,17 @@ import { Authenticated, useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
 import { formatProductPrice } from '@/lib/price-format';
+import { fetchPublicSettings } from '@/lib/site-settings';
+import { cn } from '@/lib/utils';
+import {
+  getYooKassaCapabilities,
+  getYooMoneyCapabilities,
+  isSettingEnabled,
+  submitHostedCheckout,
+} from '@/lib/yoomoney';
 import { toast } from 'sonner';
 
-type DeliveryMethod = 'home' | 'pickup';
+type DeliveryMethod = 'home' | 'pickup' | 'self_pickup';
 
 interface DeliveryQuoteOption {
   available?: boolean;
@@ -91,11 +99,90 @@ const getVisibleDeliveryError = (
 
 const buildPickupQuoteCacheKey = (
   address: string,
-  paymentMethod: string,
   requestedWeightKg: number,
   subtotal: number,
   pickupPointId: string,
-) => [address.trim(), paymentMethod, requestedWeightKg.toFixed(3), subtotal.toFixed(2), pickupPointId].join('|');
+) => [address.trim(), requestedWeightKg.toFixed(3), subtotal.toFixed(2), pickupPointId].join('|');
+
+interface PaymentOptionCardProps {
+  id: string;
+  value: string;
+  currentValue: string;
+  title: string;
+  badge: string;
+  subtitle?: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}
+
+const PaymentOptionCard = ({
+  id,
+  value,
+  currentValue,
+  title,
+  badge,
+  subtitle,
+  disabled = false,
+  onSelect,
+}: PaymentOptionCardProps) => {
+  const isSelected = currentValue === value;
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        'w-full rounded-none border p-4 text-left transition',
+        isSelected
+          ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
+          : disabled
+            ? 'cursor-not-allowed border-gray-200 bg-white opacity-50'
+            : 'cursor-pointer border-black/20 bg-white hover:border-black/50',
+      )}
+      onClick={disabled ? undefined : () => onSelect(value)}
+      disabled={disabled}
+      role="radio"
+      aria-checked={isSelected}
+      aria-disabled={disabled}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          id={id}
+          aria-hidden="true"
+          className={cn(
+            'mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border transition',
+            isSelected ? 'border-black' : 'border-primary',
+            disabled ? 'opacity-50' : '',
+          )}
+        >
+          <span
+            className={cn(
+              'h-2 w-2 rounded-full transition',
+              isSelected ? 'bg-black' : 'bg-transparent',
+            )}
+          />
+        </span>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className={cn('font-bold', isSelected ? 'text-black' : '')}>{title}</span>
+            <span
+              className={cn(
+                'text-xs uppercase tracking-[0.2em]',
+                isSelected
+                  ? 'inline-flex items-center border border-black bg-black px-2 py-1 font-bold text-white'
+                  : 'text-muted-foreground',
+              )}
+            >
+              {isSelected ? 'Выбрано' : badge}
+            </span>
+          </div>
+          {subtitle ? (
+            <p className={cn('text-sm text-muted-foreground', isSelected ? 'text-black/70' : '')}>{subtitle}</p>
+          ) : null}
+        </div>
+      </div>
+    </button>
+  );
+};
 
 export default function CheckoutPage() {
   const { cartItems, totalItems, clearCart } = useCart();
@@ -109,7 +196,21 @@ export default function CheckoutPage() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cod');
-  const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('home');
+  const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('self_pickup');
+  const [yooMoneyCapabilities, setYooMoneyCapabilities] = useState(() => ({
+    enabled: false,
+    allowBankCards: false,
+    allowWallet: false,
+    hasAnyMethod: false,
+  }));
+  const [yooKassaCapabilities, setYooKassaCapabilities] = useState(() => ({
+    enabled: false,
+    allowBankCards: false,
+    allowSbp: false,
+    allowYooMoney: false,
+    hasAnyMethod: false,
+  }));
+  const [isYandexDeliveryEnabled, setIsYandexDeliveryEnabled] = useState(true);
 
   const [homeDeliveryLoading, setHomeDeliveryLoading] = useState(false);
   const [homeDelivery, setHomeDelivery] = useState<DeliveryQuoteOption | null>(null);
@@ -144,6 +245,61 @@ export default function CheckoutPage() {
 
     fetchProducts();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPublicSettings = async () => {
+      try {
+        const settings = await fetchPublicSettings();
+        if (!cancelled) {
+          setYooMoneyCapabilities(getYooMoneyCapabilities(settings));
+          setYooKassaCapabilities(getYooKassaCapabilities(settings));
+          setIsYandexDeliveryEnabled(isSettingEnabled(settings?.yandex_delivery_enabled, true));
+        }
+      } catch {
+        if (!cancelled) {
+          setYooMoneyCapabilities(getYooMoneyCapabilities({}));
+          setYooKassaCapabilities(getYooKassaCapabilities({}));
+          setIsYandexDeliveryEnabled(true);
+        }
+      }
+    };
+
+    loadPublicSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (![
+      'yoomoney',
+      'yoomoney_card',
+      'yoomoney_wallet',
+      'yookassa',
+      'yookassa_card',
+      'yookassa_sbp',
+      'yookassa_yoomoney',
+    ].includes(paymentMethod)) {
+      return;
+    }
+
+    const methodStillAvailable = (
+      (paymentMethod === 'yoomoney_card' && yooMoneyCapabilities.allowBankCards)
+      || (paymentMethod === 'yoomoney_wallet' && yooMoneyCapabilities.allowWallet)
+      || (paymentMethod === 'yoomoney' && yooMoneyCapabilities.hasAnyMethod)
+      || (paymentMethod === 'yookassa_card' && yooKassaCapabilities.allowBankCards)
+      || (paymentMethod === 'yookassa_sbp' && yooKassaCapabilities.allowSbp)
+      || (paymentMethod === 'yookassa_yoomoney' && yooKassaCapabilities.allowYooMoney)
+      || (paymentMethod === 'yookassa' && yooKassaCapabilities.hasAnyMethod)
+    );
+
+    if (!methodStillAvailable) {
+      setPaymentMethod('cod');
+    }
+  }, [paymentMethod, yooKassaCapabilities, yooMoneyCapabilities]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +341,8 @@ export default function CheckoutPage() {
   const requestedWeightKg = Math.max(0.3, Number((totalItems * 0.3).toFixed(3)));
 
   useEffect(() => {
-    if (!address.trim() || subtotal <= 0) {
+    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0) {
+      setHomeDeliveryLoading(false);
       setHomeDelivery(null);
       setHomeDeliveryError('');
       return;
@@ -203,7 +360,6 @@ export default function CheckoutPage() {
             toAddress: address,
             weightKg: requestedWeightKg,
             declaredCost: subtotal,
-            paymentMethod,
           },
         });
 
@@ -234,15 +390,17 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, paymentMethod, requestedWeightKg, subtotal]);
+  }, [address, isYandexDeliveryEnabled, requestedWeightKg, subtotal]);
 
   useEffect(() => {
-    if (!address.trim() || subtotal <= 0) {
+    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0) {
+      setPickupPointsLoading(false);
       setPickupPoints([]);
       setPickupPointsError('');
       setSelectedPickupPointId('');
       setPickupDelivery(null);
       setPickupDeliveryError('');
+      pickupQuoteCacheRef.current.clear();
       return;
     }
 
@@ -261,7 +419,6 @@ export default function CheckoutPage() {
         const response = await FLOW.getYandexDeliveryPickupPoints({
           input: {
             toAddress: address,
-            paymentMethod,
             limit: 8,
           },
         });
@@ -310,19 +467,26 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, paymentMethod, requestedWeightKg, subtotal]);
+  }, [address, isYandexDeliveryEnabled, requestedWeightKg, subtotal]);
 
   const selectedPickupPoint = pickupPoints.find((point) => point.id === selectedPickupPointId) || null;
+  const selfPickupDelivery: DeliveryQuoteOption = {
+    available: true,
+    estimatedCost: 0,
+    deliveryDays: null,
+    tariff: 'self_pickup',
+    error: null,
+  };
 
   useEffect(() => {
-    if (!address.trim() || subtotal <= 0 || !selectedPickupPointId) {
+    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0 || !selectedPickupPointId) {
       setPickupDelivery(null);
       setPickupDeliveryError('');
       setPickupDeliveryLoading(false);
       return;
     }
 
-    const cacheKey = buildPickupQuoteCacheKey(address, paymentMethod, requestedWeightKg, subtotal, selectedPickupPointId);
+    const cacheKey = buildPickupQuoteCacheKey(address, requestedWeightKg, subtotal, selectedPickupPointId);
     const cachedQuote = pickupQuoteCacheRef.current.get(cacheKey);
     if (cachedQuote !== undefined) {
       setPickupDelivery(cachedQuote);
@@ -342,7 +506,6 @@ export default function CheckoutPage() {
             toAddress: address,
             weightKg: requestedWeightKg,
             declaredCost: subtotal,
-            paymentMethod,
             pickupPointId: selectedPickupPointId,
           },
         });
@@ -391,15 +554,26 @@ export default function CheckoutPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [address, paymentMethod, requestedWeightKg, selectedPickupPointId, subtotal]);
+  }, [address, isYandexDeliveryEnabled, requestedWeightKg, selectedPickupPointId, subtotal]);
 
   useEffect(() => {
+    if (!isYandexDeliveryEnabled) {
+      if (selectedDeliveryMethod !== 'self_pickup') {
+        setSelectedDeliveryMethod('self_pickup');
+      }
+      return;
+    }
+
     if (selectedDeliveryMethod === 'home' && !homeDelivery?.available && pickupDelivery?.available) {
       setSelectedDeliveryMethod('pickup');
     }
-  }, [homeDelivery?.available, pickupDelivery?.available, selectedDeliveryMethod]);
+  }, [homeDelivery?.available, isYandexDeliveryEnabled, pickupDelivery?.available, selectedDeliveryMethod]);
 
-  const selectedDeliveryOption = selectedDeliveryMethod === 'pickup' ? pickupDelivery : homeDelivery;
+  const selectedDeliveryOption = selectedDeliveryMethod === 'pickup'
+    ? pickupDelivery
+    : selectedDeliveryMethod === 'self_pickup'
+      ? selfPickupDelivery
+      : homeDelivery;
   const shipping = Number(selectedDeliveryOption?.estimatedCost ?? 0);
   const total = subtotal + shipping;
   const visibleHomeDeliveryError = getVisibleDeliveryError(homeDeliveryError, isAdmin);
@@ -411,23 +585,39 @@ export default function CheckoutPage() {
     : '';
   const isShippingLoading = selectedDeliveryMethod === 'pickup'
     ? pickupPointsLoading || pickupDeliveryLoading
-    : homeDeliveryLoading;
+    : selectedDeliveryMethod === 'home'
+      ? homeDeliveryLoading
+      : false;
   const canSubmit = cartItems.length > 0
     && !hasUnavailableItems
     && !loading
     && !isShippingLoading
     && (
-      selectedDeliveryMethod === 'home'
+      selectedDeliveryMethod === 'self_pickup'
+        ? true
+        : selectedDeliveryMethod === 'home'
         ? Boolean(homeDelivery?.available)
         : Boolean(selectedPickupPoint?.id && pickupDelivery?.available)
     );
 
   const resolveSelectedShippingAddress = () => {
+    if (selectedDeliveryMethod === 'self_pickup') {
+      return 'Самовывоз';
+    }
+
     if (selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address) {
       return `ПВЗ: ${selectedPickupPoint.address}`;
     }
 
     return address.trim();
+  };
+
+  const buildPaymentReturnUrl = () => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return `${window.location.origin}/profile?tab=orders`;
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -440,6 +630,11 @@ export default function CheckoutPage() {
 
     if (hasUnavailableItems) {
       toast.error('В корзине есть товары без достаточного остатка. Обновите количество.');
+      return;
+    }
+
+    if ((selectedDeliveryMethod === 'home' || selectedDeliveryMethod === 'pickup') && !address.trim()) {
+      toast.error('Укажите адрес для расчета доставки.');
       return;
     }
 
@@ -460,7 +655,7 @@ export default function CheckoutPage() {
     setLoading(true);
 
     try {
-      await FLOW.createOrder({
+      const order = await FLOW.createOrder({
         input: {
           customerName: name,
           customerEmail: email,
@@ -472,10 +667,17 @@ export default function CheckoutPage() {
           shippingMethod: selectedDeliveryMethod,
           pickupPointId: selectedPickupPoint?.id || null,
           totalAmount: total,
+          paymentReturnUrl: buildPaymentReturnUrl(),
         },
       });
 
       await clearCart();
+
+      if (order?.payment?.checkout) {
+        toast.success('Заказ создан. Перенаправляем на страницу оплаты.');
+        submitHostedCheckout(order.payment.checkout);
+        return;
+      }
 
       toast.success('Заказ успешно оформлен');
       navigate('/profile');
@@ -548,28 +750,85 @@ export default function CheckoutPage() {
                     <AddressAutocompleteInput
                       value={address}
                       onValueChange={(nextValue) => setAddress(nextValue)}
-                      required
                       inputClassName="rounded-none border-black focus-visible:ring-black"
                       placeholder="Начните вводить адрес"
                     />
                     <p className="text-sm text-muted-foreground">
-                      Доставку до двери считаем по этому адресу. Ниже покажем список ближайших ПВЗ, а тариф и срок посчитаем после выбора точки.
+                      {isYandexDeliveryEnabled
+                        ? 'Для доставки до двери и ПВЗ укажите адрес. Для самовывоза поле можно оставить пустым.'
+                        : 'Яндекс.Доставка сейчас отключена. Для самовывоза адрес можно не указывать.'}
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-4">
                   <h2 className="border-b pb-2 text-xl font-bold uppercase tracking-wider">СПОСОБ ОПЛАТЫ</h2>
-                  <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <div className="flex items-center space-x-2 border border-black p-4 rounded-none">
-                      <RadioGroupItem value="cod" id="cod" />
-                      <Label htmlFor="cod" className="font-bold">Оплата при получении</Label>
-                    </div>
-                    <div className="flex items-center space-x-2 border border-gray-200 p-4 rounded-none opacity-50 cursor-not-allowed">
-                      <RadioGroupItem value="card" id="card" disabled />
-                      <Label htmlFor="card">Банковская карта (скоро)</Label>
-                    </div>
-                  </RadioGroup>
+                  <div className="space-y-3" role="radiogroup" aria-label="Способ оплаты">
+                    <PaymentOptionCard
+                      id="payment-cod"
+                      value="cod"
+                      currentValue={paymentMethod}
+                      onSelect={setPaymentMethod}
+                      title="Оплата при получении"
+                      badge="При получении"
+                      subtitle="Оплатите заказ при получении или примерке."
+                    />
+                    {yooMoneyCapabilities.allowBankCards && (
+                      <PaymentOptionCard
+                        id="payment-yoomoney-card"
+                        value="yoomoney_card"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="ЮMoney: банковская карта"
+                        badge="Онлайн"
+                        subtitle="Откроем защищенную форму ЮMoney и после оплаты вернем вас в личный кабинет."
+                      />
+                    )}
+                    {yooMoneyCapabilities.allowWallet && (
+                      <PaymentOptionCard
+                        id="payment-yoomoney-wallet"
+                        value="yoomoney_wallet"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="ЮMoney: кошелек"
+                        badge="Онлайн"
+                        subtitle="Оплата через кошелек ЮMoney с подтверждением на стороне сервиса."
+                      />
+                    )}
+                    {yooKassaCapabilities.allowBankCards && (
+                      <PaymentOptionCard
+                        id="payment-yookassa-card"
+                        value="yookassa_card"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="YooKassa: банковская карта"
+                        badge="Онлайн"
+                        subtitle="Переход на защищенную страницу YooKassa для оплаты банковской картой."
+                      />
+                    )}
+                    {yooKassaCapabilities.allowSbp && (
+                      <PaymentOptionCard
+                        id="payment-yookassa-sbp"
+                        value="yookassa_sbp"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="YooKassa: СБП"
+                        badge="Онлайн"
+                        subtitle="Оплата через СБП на защищенной странице YooKassa."
+                      />
+                    )}
+                    {yooKassaCapabilities.allowYooMoney && (
+                      <PaymentOptionCard
+                        id="payment-yookassa-yoomoney"
+                        value="yookassa_yoomoney"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="YooKassa: ЮMoney"
+                        badge="Онлайн"
+                        subtitle="Оплата ЮMoney внутри платежной страницы YooKassa."
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -578,173 +837,238 @@ export default function CheckoutPage() {
                     {isShippingLoading && <span className="text-sm text-muted-foreground">Расчет...</span>}
                   </div>
 
-                  {!address.trim() && (
+                  {!isYandexDeliveryEnabled ? (
                     <p className="text-sm text-muted-foreground">
-                      Укажите адрес, чтобы получить стоимость доставки до двери и список доступных ПВЗ.
+                      Яндекс.Доставка отключена в интеграциях, поэтому сейчас доступен только самовывоз.
+                    </p>
+                  ) : !address.trim() && (
+                    <p className="text-sm text-muted-foreground">
+                      Для доставки до двери и ПВЗ сначала укажите адрес. Самовывоз доступен без адреса.
                     </p>
                   )}
 
-                  {address.trim() && (
-                    <RadioGroup value={selectedDeliveryMethod} onValueChange={(value) => setSelectedDeliveryMethod(value as DeliveryMethod)}>
-                      <div className={`space-y-3 border p-4 rounded-none ${selectedDeliveryMethod === 'home' ? 'border-black' : 'border-gray-200'}`}>
-                        <div className="flex items-start gap-3">
-                          <RadioGroupItem value="home" id="delivery-home" disabled={!homeDelivery?.available} />
-                          <div className="flex-1 space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <Label htmlFor="delivery-home" className="font-bold">До двери</Label>
-                              <span className="font-black">
-                                {homeDelivery?.available ? formatProductPrice(homeDelivery.estimatedCost ?? 0) : 'Недоступно'}
-                              </span>
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {homeDelivery?.available
-                                ? `Адрес получателя: ${address}`
-                                : visibleHomeDeliveryError}
-                            </div>
-                            {homeDelivery?.available && formatDeliveryDays(homeDelivery.deliveryDays) && (
-                              <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                                Срок доставки: {formatDeliveryDays(homeDelivery.deliveryDays)}
-                              </div>
-                            )}
+                  <RadioGroup value={selectedDeliveryMethod} onValueChange={(value) => setSelectedDeliveryMethod(value as DeliveryMethod)}>
+                    <div
+                      className={cn(
+                        'space-y-3 rounded-none border p-4 transition',
+                        selectedDeliveryMethod === 'self_pickup'
+                          ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
+                          : 'cursor-pointer border-gray-200 hover:border-black/40',
+                      )}
+                      onClick={() => setSelectedDeliveryMethod('self_pickup')}
+                    >
+                      <div className="flex items-start gap-3">
+                        <RadioGroupItem value="self_pickup" id="delivery-self-pickup" />
+                        <div className="flex-1 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <Label htmlFor="delivery-self-pickup" className="font-bold">Самовывоз</Label>
+                            <span className={cn(
+                              'font-black',
+                              selectedDeliveryMethod === 'self_pickup' ? 'text-black' : '',
+                            )}>0 ₽</span>
+                          </div>
+                          <div className={cn(
+                            'text-sm text-muted-foreground',
+                            selectedDeliveryMethod === 'self_pickup' ? 'text-black/70' : '',
+                          )}>
+                            Заберете заказ самостоятельно. После оформления мы свяжемся с вами и подтвердим детали выдачи.
                           </div>
                         </div>
                       </div>
+                    </div>
 
-                      <div className={`space-y-4 border p-4 rounded-none ${selectedDeliveryMethod === 'pickup' ? 'border-black' : 'border-gray-200'}`}>
-                        <div className="flex items-start gap-3">
-                          <RadioGroupItem value="pickup" id="delivery-pickup" disabled={!pickupPointsLoading && pickupPoints.length === 0} />
-                          <div className="flex-1 space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <Label htmlFor="delivery-pickup" className="font-bold">ПВЗ</Label>
-                              <span className="font-black">
-                                {pickupDelivery?.available
-                                  ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
-                                  : pickupDeliveryLoading
-                                    ? 'Расчет...'
-                                    : pickupPointsLoading
-                                      ? 'Загрузка ПВЗ...'
-                                      : pickupPoints.length > 0
-                                        ? 'Выберите ПВЗ'
-                                        : 'Недоступно'}
-                              </span>
-                            </div>
-
-                            {selectedPickupPoint?.id ? (
-                              <div className="space-y-1 text-sm text-muted-foreground">
-                                <p className="font-medium text-foreground">Выбранный ПВЗ</p>
-                                <p>{selectedPickupPoint.address}</p>
-                                {selectedPickupPoint.instruction && <p>{selectedPickupPoint.instruction}</p>}
-                                <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide">
-                                  {pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
-                                    <span>Срок: {formatDeliveryDays(pickupDelivery.deliveryDays)}</span>
-                                  )}
-                                  {formatPickupDistance(selectedPickupPoint.distanceKm) && (
-                                    <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
-                                  )}
-                                </div>
+                    {isYandexDeliveryEnabled && (
+                      <div
+                        className={cn(
+                          'space-y-3 rounded-none border p-4 transition',
+                          selectedDeliveryMethod === 'home'
+                            ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
+                            : address.trim() && homeDelivery?.available
+                              ? 'cursor-pointer border-gray-200 hover:border-black/40'
+                              : 'border-gray-200',
+                        )}
+                        onClick={address.trim() && homeDelivery?.available ? () => setSelectedDeliveryMethod('home') : undefined}
+                      >
+                          <div className="flex items-start gap-3">
+                            <RadioGroupItem value="home" id="delivery-home" disabled={!address.trim() || !homeDelivery?.available} />
+                            <div className="flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <Label htmlFor="delivery-home" className="font-bold">До двери</Label>
+                                <span className="font-black">
+                                  {!address.trim()
+                                    ? 'Нужен адрес'
+                                    : homeDelivery?.available
+                                      ? formatProductPrice(homeDelivery.estimatedCost ?? 0)
+                                      : 'Недоступно'}
+                                </span>
                               </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground">
-                                Выберите удобный пункт выдачи из списка. Стоимость и срок рассчитаем после выбора точки.
-                              </p>
-                            )}
-
-                            {pickupPointsLoading && (
-                              <p className="text-sm text-muted-foreground">
-                                Подбираем ПВЗ рядом с вашим адресом...
-                              </p>
-                            )}
-
-                            {pickupDeliveryError && selectedPickupPoint?.id && !pickupDeliveryLoading && (
-                              <p className="text-sm text-red-700">
-                                {visiblePickupDeliveryError}
-                              </p>
-                            )}
-
-                            {pickupPointsError && (
-                              <p className="text-sm text-red-700">
-                                {visiblePickupPointsError}
-                              </p>
-                            )}
-
-                            {pickupPoints.length > 0 && (
-                              <div className="space-y-2 border border-black/10 bg-white p-3">
+                              <div className="text-sm text-muted-foreground">
+                                {!address.trim()
+                                  ? 'Укажите адрес, чтобы рассчитать стоимость и срок доставки до двери.'
+                                  : homeDelivery?.available
+                                  ? `Адрес получателя: ${address}`
+                                  : visibleHomeDeliveryError}
+                              </div>
+                              {homeDelivery?.available && formatDeliveryDays(homeDelivery.deliveryDays) && (
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                                  Пункты выдачи для вашего адреса
+                                  Срок доставки: {formatDeliveryDays(homeDelivery.deliveryDays)}
                                 </div>
-                                <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                                  {pickupPoints.map((point) => {
-                                    const isSelected = point.id === selectedPickupPointId;
-
-                                    return (
-                                      <button
-                                        key={point.id}
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedPickupPointId(point.id);
-                                          setSelectedDeliveryMethod('pickup');
-                                        }}
-                                        className={`w-full border p-3 text-left transition ${
-                                          isSelected
-                                            ? 'border-black bg-stone-50 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
-                                            : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
-                                        }`}
-                                      >
-                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                          <div className="space-y-1">
-                                            <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
-                                            <p className="text-sm text-muted-foreground">
-                                              {point.address || 'Адрес не указан'}
-                                            </p>
-                                            {point.instruction && (
-                                              <p className="text-xs text-muted-foreground">
-                                                {point.instruction}
-                                              </p>
-                                            )}
-                                          </div>
-                                          <div className="text-right">
-                                            <p className="font-black">
-                                              {isSelected
-                                                ? pickupDeliveryLoading
-                                                  ? 'Расчет...'
-                                                  : pickupDelivery?.available
-                                                    ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
-                                                    : 'Выбрано'
-                                                : 'Выбрать'}
-                                            </p>
-                                            {isSelected && !pickupDelivery?.available && !pickupDeliveryLoading && (
-                                              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                                                Выбрано
-                                              </p>
-                                            )}
-                                            {isSelected && pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
-                                              <p className="text-xs uppercase text-muted-foreground">
-                                                {formatDeliveryDays(pickupDelivery.deliveryDays)}
-                                              </p>
-                                            )}
-                                            {formatPickupDistance(point.distanceKm) && (
-                                              <p className="text-xs uppercase text-muted-foreground">
-                                                {formatPickupDistance(point.distanceKm)}
-                                              </p>
-                                            )}
-                                          </div>
-                                        </div>
-                                        {isSelected && pickupDeliveryError && !pickupDeliveryLoading && (
-                                          <p className="mt-2 text-xs text-red-700">
-                                            {visiblePickupDeliveryError}
-                                          </p>
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
                       </div>
-                    </RadioGroup>
-                  )}
+                    )}
+
+                    {isYandexDeliveryEnabled && (
+                      <div
+                        className={cn(
+                          'space-y-4 rounded-none border p-4 transition',
+                          selectedDeliveryMethod === 'pickup'
+                            ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
+                            : address.trim() && (pickupPointsLoading || pickupPoints.length > 0)
+                              ? 'cursor-pointer border-gray-200 hover:border-black/40'
+                              : 'border-gray-200',
+                        )}
+                        onClick={address.trim() && (pickupPointsLoading || pickupPoints.length > 0) ? () => setSelectedDeliveryMethod('pickup') : undefined}
+                      >
+                          <div className="flex items-start gap-3">
+                            <RadioGroupItem value="pickup" id="delivery-pickup" disabled={!address.trim() || (!pickupPointsLoading && pickupPoints.length === 0)} />
+                            <div className="flex-1 space-y-3">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <Label htmlFor="delivery-pickup" className="font-bold">ПВЗ</Label>
+                                <span className="font-black">
+                                  {!address.trim()
+                                    ? 'Нужен адрес'
+                                    : pickupDelivery?.available
+                                    ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
+                                    : pickupDeliveryLoading
+                                      ? 'Расчет...'
+                                      : pickupPointsLoading
+                                        ? 'Загрузка ПВЗ...'
+                                        : pickupPoints.length > 0
+                                          ? 'Выберите ПВЗ'
+                                          : 'Недоступно'}
+                                </span>
+                              </div>
+
+                              {selectedPickupPoint?.id ? (
+                                <div className="space-y-1 text-sm text-muted-foreground">
+                                  <p className="font-medium text-foreground">Выбранный ПВЗ</p>
+                                  <p>{selectedPickupPoint.address}</p>
+                                  {selectedPickupPoint.instruction && <p>{selectedPickupPoint.instruction}</p>}
+                                  <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide">
+                                    {pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
+                                      <span>Срок: {formatDeliveryDays(pickupDelivery.deliveryDays)}</span>
+                                    )}
+                                    {formatPickupDistance(selectedPickupPoint.distanceKm) && (
+                                      <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-muted-foreground">
+                                  {!address.trim()
+                                    ? 'Укажите адрес, чтобы мы подобрали ближайшие ПВЗ.'
+                                    : 'Выберите удобный пункт выдачи из списка. Стоимость и срок рассчитаем после выбора точки.'}
+                                </p>
+                              )}
+
+                              {pickupPointsLoading && (
+                                <p className="text-sm text-muted-foreground">
+                                  Подбираем ПВЗ рядом с вашим адресом...
+                                </p>
+                              )}
+
+                              {pickupDeliveryError && selectedPickupPoint?.id && !pickupDeliveryLoading && (
+                                <p className="text-sm text-red-700">
+                                  {visiblePickupDeliveryError}
+                                </p>
+                              )}
+
+                              {pickupPointsError && (
+                                <p className="text-sm text-red-700">
+                                  {visiblePickupPointsError}
+                                </p>
+                              )}
+
+                              {pickupPoints.length > 0 && (
+                                <div className="space-y-2 border border-black/10 bg-white p-3">
+                                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                                    Пункты выдачи для вашего адреса
+                                  </div>
+                                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                                    {pickupPoints.map((point) => {
+                                      const isSelected = point.id === selectedPickupPointId;
+
+                                      return (
+                                        <button
+                                          key={point.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setSelectedPickupPointId(point.id);
+                                            setSelectedDeliveryMethod('pickup');
+                                          }}
+                                          className={`w-full border p-3 text-left transition ${
+                                            isSelected
+                                              ? 'border-black bg-stone-50 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
+                                              : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
+                                          }`}
+                                        >
+                                          <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div className="space-y-1">
+                                              <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
+                                              <p className="text-sm text-muted-foreground">
+                                                {point.address || 'Адрес не указан'}
+                                              </p>
+                                              {point.instruction && (
+                                                <p className="text-xs text-muted-foreground">
+                                                  {point.instruction}
+                                                </p>
+                                              )}
+                                            </div>
+                                            <div className="text-right">
+                                              <p className="font-black">
+                                                {isSelected
+                                                  ? pickupDeliveryLoading
+                                                    ? 'Расчет...'
+                                                    : pickupDelivery?.available
+                                                      ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
+                                                      : 'Выбрано'
+                                                  : 'Выбрать'}
+                                              </p>
+                                              {isSelected && !pickupDelivery?.available && !pickupDeliveryLoading && (
+                                                <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                  Выбрано
+                                                </p>
+                                              )}
+                                              {isSelected && pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
+                                                <p className="text-xs uppercase text-muted-foreground">
+                                                  {formatDeliveryDays(pickupDelivery.deliveryDays)}
+                                                </p>
+                                              )}
+                                              {formatPickupDistance(point.distanceKm) && (
+                                                <p className="text-xs uppercase text-muted-foreground">
+                                                  {formatPickupDistance(point.distanceKm)}
+                                                </p>
+                                              )}
+                                            </div>
+                                          </div>
+                                          {isSelected && pickupDeliveryError && !pickupDeliveryLoading && (
+                                            <p className="mt-2 text-xs text-red-700">
+                                              {visiblePickupDeliveryError}
+                                            </p>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                      </div>
+                    )}
+                  </RadioGroup>
                 </div>
 
                 <Button

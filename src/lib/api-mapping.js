@@ -411,6 +411,16 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  getOrderPaymentCheckout: async ({ input }) => request(`/orders/${encodeURIComponent(input.orderId)}/payment/checkout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ returnUrl: input.returnUrl ?? null }),
+  }),
+
+  refreshOrderPayment: async ({ input }) => request(`/orders/${encodeURIComponent(input.orderId)}/payment/refresh`, {
+    method: "POST",
+  }),
+
   getUserLikes: async () => request("/likes"),
 
   checkLike: async ({ input }) => {
@@ -760,6 +770,10 @@ export const FLOW = {
     body: JSON.stringify(input.payload),
   }),
 
+  adminRefreshOrderPayment: async ({ input }) => request(`/admin/orders/${encodeURIComponent(input.orderId)}/payment/refresh`, {
+    method: "POST",
+  }),
+
   adminDeleteOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {
     method: "DELETE",
   }),
@@ -888,6 +902,24 @@ export const FLOW = {
   }),
 
   adminSendSmtpTestEmail: async ({ input }) => request("/admin/settings/smtp/test-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestYooMoney: async ({ input }) => request("/admin/settings/yoomoney/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestYooKassa: async ({ input }) => request("/admin/settings/yookassa/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestYandexDelivery: async ({ input }) => request("/admin/settings/yandex-delivery/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

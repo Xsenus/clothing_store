@@ -53,6 +53,14 @@ import {
   optimizeFilesForUpload,
 } from '@/lib/image-upload-optimization';
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
+import {
+  getYooKassaConfigurationIssues,
+  getYooMoneyConfigurationIssues,
+  YOO_KASSA_PAYMENT_METHOD_LABELS,
+  YOO_KASSA_PAYMENT_STATUS_LABELS,
+  YOO_MONEY_PAYMENT_METHOD_LABELS,
+  YOO_MONEY_PAYMENT_STATUS_LABELS,
+} from '@/lib/yoomoney';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical, CalendarDays } from 'lucide-react';
@@ -87,6 +95,87 @@ interface TelegramBot {
   commands: TelegramBotCommand[];
   replyTemplates?: TelegramBotReplyTemplate[];
   botInfo?: any;
+}
+
+interface AdminYandexDeliveryTestOption {
+  available?: boolean;
+  estimatedCost?: number | null;
+  deliveryDays?: number | null;
+  tariff?: string | null;
+  error?: string | null;
+}
+
+interface AdminYandexDeliveryTestPickupQuote extends AdminYandexDeliveryTestOption {
+  point?: AdminYandexDeliveryTestPickupPoint | null;
+}
+
+interface AdminYandexDeliveryTestPickupPoint {
+  id?: string;
+  name?: string;
+  address?: string;
+  instruction?: string | null;
+  distanceKm?: number | null;
+  available?: boolean;
+  estimatedCost?: number | null;
+  deliveryDays?: number | null;
+  error?: string | null;
+}
+
+interface AdminYandexDeliveryTestResult {
+  provider?: string;
+  currency?: string;
+  toAddress?: string;
+  homeDelivery?: AdminYandexDeliveryTestOption | null;
+  pickupPointDelivery?: AdminYandexDeliveryTestPickupQuote | null;
+  pickupPoints?: AdminYandexDeliveryTestPickupPoint[] | null;
+  details?: {
+    testEnvironment?: boolean;
+    sourceStationId?: string | null;
+    requestedWeightKg?: number | null;
+    declaredCost?: number | null;
+  } | null;
+  checkedAtLabel: string;
+}
+
+interface AdminYooMoneyTestResult {
+  provider?: string;
+  paymentMethod?: string;
+  paymentType?: string;
+  requestedAmount?: number | null;
+  chargeAmount?: number | null;
+  expectedReceivedAmount?: number | null;
+  walletNumber?: string | null;
+  checkoutAction?: string | null;
+  checkoutMethod?: string | null;
+  checkoutFields?: Record<string, string> | null;
+  tokenValid?: boolean;
+  tokenDetail?: string | null;
+  lastOperation?: {
+    operationId?: string | null;
+    status?: string | null;
+    dateTime?: string | null;
+    amount?: string | null;
+    type?: string | null;
+  } | null;
+  note?: string | null;
+  checkedAtLabel: string;
+}
+
+interface AdminYooKassaTestResult {
+  provider?: string;
+  mode?: string;
+  testMode?: boolean;
+  paymentMethod?: string | null;
+  paymentType?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  detail?: string | null;
+  paymentId?: string | null;
+  confirmationUrl?: string | null;
+  createdAt?: string | null;
+  paid?: boolean | null;
+  checkedAtLabel: string;
 }
 
 const TELEGRAM_BOT_LIMITS = {
@@ -319,6 +408,33 @@ interface AdminUser {
   } | null;
 }
 
+interface AdminOrderPayment {
+  id?: string;
+  provider?: string;
+  paymentMethod?: string;
+  paymentType?: string;
+  status?: string;
+  currency?: string;
+  requestedAmount?: number | null;
+  chargeAmount?: number | null;
+  expectedReceivedAmount?: number | null;
+  receivedAmount?: number | null;
+  actualWithdrawAmount?: number | null;
+  label?: string | null;
+  operationId?: string | null;
+  notificationType?: string | null;
+  sender?: string | null;
+  expiresAt?: number | string | null;
+  paidAt?: number | string | null;
+  lastCheckedAt?: number | string | null;
+  lastError?: string | null;
+  receiverMasked?: string | null;
+  canPay?: boolean;
+  canRefresh?: boolean;
+  needsAttention?: boolean;
+  isExpired?: boolean;
+}
+
 interface AdminOrder {
   id: string;
   orderNumber?: number;
@@ -365,6 +481,7 @@ interface AdminOrder {
   customerPhone?: string;
   statusHistoryJson?: string;
   updatedAt?: string | number;
+  payment?: AdminOrderPayment | null;
 }
 
 interface OrderHistoryFieldChange {
@@ -468,7 +585,7 @@ interface GalleryUploadItem {
   error?: string;
 }
 
-const ORDER_STATUS_OPTIONS = [
+const ORDER_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "processing", label: "В обработке" },
   { value: "created", label: "Оформлен" },
   { value: "paid", label: "Оплачен" },
@@ -477,7 +594,9 @@ const ORDER_STATUS_OPTIONS = [
   { value: "completed", label: "Завершен" },
   { value: "canceled", label: "Отменен" },
   { value: "returned", label: "Возврат" },
-] as const;
+];
+
+ORDER_STATUS_OPTIONS.splice(1, 0, { value: "pending_payment", label: "Ожидает оплаты" });
 
 const ORDER_STATUS_LABELS = Object.fromEntries(
   [...ORDER_STATUS_OPTIONS, { value: "cancelled", label: "Отменен" }].map((item) => [item.value, item.label])
@@ -492,9 +611,13 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Наличные",
 };
 
+Object.assign(PAYMENT_METHOD_LABELS, YOO_MONEY_PAYMENT_METHOD_LABELS);
+Object.assign(PAYMENT_METHOD_LABELS, YOO_KASSA_PAYMENT_METHOD_LABELS);
+
 const SHIPPING_METHOD_LABELS: Record<string, string> = {
   home: "До двери",
   pickup: "ПВЗ",
+  self_pickup: "Самовывоз",
 };
 
 const PURCHASE_CHANNEL_LABELS: Record<string, string> = {
@@ -779,6 +902,67 @@ const EMAIL_TEMPLATE_SETTING_DEFAULTS = Object.fromEntries(
 
 type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collections";
 
+const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
+const ADMIN_TAB_VALUES = ["products", "orders", "users", "gallery", "dictionaries", "settings"] as const;
+const SETTINGS_GROUP_VALUES = ["orders", "auth", "smtp", "metrics", "integrations", "legal", "general"] as const;
+const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
+const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "dadata", "yandex"] as const;
+const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
+
+const DEFAULT_ADMIN_NAVIGATION_STATE = {
+  adminTab: "products",
+  settingsGroup: "auth",
+  generalSettingsCatalog: "branding",
+  integrationCatalog: "telegram",
+  dictionaryGroup: "sizes" as DictionaryKind,
+} as const;
+
+const normalizeAdminNavigationValue = (
+  value: unknown,
+  allowedValues: readonly string[],
+  fallback: string,
+) => {
+  const normalized = String(value ?? "").trim();
+  return allowedValues.includes(normalized) ? normalized : fallback;
+};
+
+const readPersistedAdminNavigationState = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_ADMIN_NAVIGATION_STATE;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ADMIN_NAVIGATION_STORAGE_KEY);
+    if (!rawValue) {
+      return DEFAULT_ADMIN_NAVIGATION_STATE;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as Record<string, unknown>;
+    return {
+      adminTab: normalizeAdminNavigationValue(parsedValue?.adminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab),
+      settingsGroup: normalizeAdminNavigationValue(parsedValue?.settingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup),
+      generalSettingsCatalog: normalizeAdminNavigationValue(parsedValue?.generalSettingsCatalog, GENERAL_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.generalSettingsCatalog),
+      integrationCatalog: normalizeAdminNavigationValue(parsedValue?.integrationCatalog, INTEGRATION_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.integrationCatalog),
+      dictionaryGroup: normalizeAdminNavigationValue(parsedValue?.dictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
+    };
+  } catch {
+    window.localStorage.removeItem(ADMIN_NAVIGATION_STORAGE_KEY);
+    return DEFAULT_ADMIN_NAVIGATION_STATE;
+  }
+};
+
+const persistAdminNavigationState = (state: typeof DEFAULT_ADMIN_NAVIGATION_STATE) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(ADMIN_NAVIGATION_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage write failures and keep admin usable.
+  }
+};
+
 interface DictionaryItem {
   id: string;
   name: string;
@@ -978,6 +1162,23 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_login_enabled: "false",
   telegram_bot_username: "",
   telegram_bot_token: "",
+  payments_yoomoney_enabled: "false",
+  yoomoney_wallet_number: "",
+  yoomoney_notification_secret: "",
+  yoomoney_access_token: "",
+  yoomoney_label_prefix: "FD",
+  yoomoney_payment_timeout_minutes: "30",
+  yoomoney_allow_bank_cards: "true",
+  yoomoney_allow_wallet: "true",
+  payments_yookassa_enabled: "false",
+  yookassa_shop_id: "",
+  yookassa_secret_key: "",
+  yookassa_test_mode: "true",
+  yookassa_label_prefix: "YK",
+  yookassa_payment_timeout_minutes: "60",
+  yookassa_allow_bank_cards: "true",
+  yookassa_allow_sbp: "true",
+  yookassa_allow_yoomoney: "true",
   catalog_filter_categories_enabled: "true",
   catalog_filter_sizes_enabled: "true",
   catalog_filter_materials_enabled: "true",
@@ -997,6 +1198,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   catalog_collections_slider_title: "Коллекции",
   catalog_collections_slider_description: "",
   admin_orders_row_color_processing: "#e5e7eb",
+  admin_orders_row_color_pending_payment: "#fef3c7",
   admin_orders_row_color_created: "#e0f2fe",
   admin_orders_row_color_paid: "#dbeafe",
   admin_orders_row_color_in_transit: "#dbeafe",
@@ -1005,6 +1207,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   admin_orders_row_color_canceled: "#fee2e2",
   admin_orders_row_color_returned: "#ffedd5",
   dadata_api_key: "",
+  yandex_delivery_enabled: "true",
   yandex_delivery_use_test_environment: "false",
   yandex_delivery_api_token: "",
   yandex_delivery_source_station_id: "",
@@ -1179,9 +1382,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [smtpTestEmail, setSmtpTestEmail] = useState("");
   const [smtpTestSending, setSmtpTestSending] = useState(false);
+  const [yoomoneyTestAmount, setYoomoneyTestAmount] = useState("100");
+  const [yoomoneyTestMethod, setYoomoneyTestMethod] = useState("yoomoney_card");
+  const [yoomoneyTestRunning, setYoomoneyTestRunning] = useState(false);
+  const [yoomoneyTestError, setYoomoneyTestError] = useState("");
+  const [yoomoneyTestResult, setYoomoneyTestResult] = useState<AdminYooMoneyTestResult | null>(null);
+  const [yookassaTestAmount, setYookassaTestAmount] = useState("100");
+  const [yookassaTestMethod, setYookassaTestMethod] = useState("yookassa_card");
+  const [yookassaTestRunning, setYookassaTestRunning] = useState(false);
+  const [yookassaTestError, setYookassaTestError] = useState("");
+  const [yookassaTestResult, setYookassaTestResult] = useState<AdminYooKassaTestResult | null>(null);
+  const [yandexDeliveryTestAddress, setYandexDeliveryTestAddress] = useState("630099, Новосибирск, Красный проспект, 25");
+  const [yandexDeliveryTestWeightKg, setYandexDeliveryTestWeightKg] = useState("0.300");
+  const [yandexDeliveryTestDeclaredCost, setYandexDeliveryTestDeclaredCost] = useState("1000");
+  const [yandexDeliveryTestRunning, setYandexDeliveryTestRunning] = useState(false);
+  const [yandexDeliveryTestError, setYandexDeliveryTestError] = useState("");
+  const [yandexDeliveryTestResult, setYandexDeliveryTestResult] = useState<AdminYandexDeliveryTestResult | null>(null);
   const [dictionaries, setDictionaries] = useState<Record<DictionaryKind, DictionaryItem[]>>({ sizes: [], materials: [], colors: [], categories: [], collections: [] });
   const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, DictionaryDraft>>({});
-  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>("sizes");
+  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>(() => readPersistedAdminNavigationState().dictionaryGroup);
   const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
   const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
     open: false,
@@ -1211,6 +1430,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
+  const [orderPaymentRefreshingId, setOrderPaymentRefreshingId] = useState<string | null>(null);
   const [orderSearch, setOrderSearch] = useState("");
   const [ordersStatusFilter, setOrdersStatusFilter] = useState("all");
   const [ordersDateFrom, setOrdersDateFrom] = useState("");
@@ -1313,9 +1533,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     yandexRequestId: "",
     managerComment: "",
   });
-  const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
-  const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState("branding");
-  const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
+  const [selectedSettingsGroup, setSelectedSettingsGroup] = useState(() => readPersistedAdminNavigationState().settingsGroup);
+  const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState(() => readPersistedAdminNavigationState().generalSettingsCatalog);
+  const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState(() => readPersistedAdminNavigationState().integrationCatalog);
   const [selectedUserOrders, setSelectedUserOrders] = useState<AdminOrder[]>([]);
   const [selectedUserOrdersTotal, setSelectedUserOrdersTotal] = useState(0);
   const [selectedUserOrdersLoading, setSelectedUserOrdersLoading] = useState(false);
@@ -1340,7 +1560,28 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     ? location.pathname.match(/^\/admin\/products\/([^/]+)\/edit$/)
     : null;
   const routeEditingProductId = editProductRouteMatch?.[1] || null;
-  const [selectedAdminTab, setSelectedAdminTab] = useState("products");
+  const [selectedAdminTab, setSelectedAdminTab] = useState(() => readPersistedAdminNavigationState().adminTab);
+
+  useEffect(() => {
+    if (!isStandaloneAdmin) {
+      return;
+    }
+
+    persistAdminNavigationState({
+      adminTab: normalizeAdminNavigationValue(selectedAdminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab),
+      settingsGroup: normalizeAdminNavigationValue(selectedSettingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup),
+      generalSettingsCatalog: normalizeAdminNavigationValue(selectedGeneralSettingsCatalog, GENERAL_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.generalSettingsCatalog),
+      integrationCatalog: normalizeAdminNavigationValue(selectedIntegrationCatalog, INTEGRATION_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.integrationCatalog),
+      dictionaryGroup: normalizeAdminNavigationValue(selectedDictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
+    });
+  }, [
+    isStandaloneAdmin,
+    selectedAdminTab,
+    selectedSettingsGroup,
+    selectedGeneralSettingsCatalog,
+    selectedIntegrationCatalog,
+    selectedDictionaryGroup,
+  ]);
 
   // Form State
   const [isOpen, setIsOpen] = useState(false);
@@ -1807,6 +2048,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       if (typeof response?.page === "number" && response.page !== ordersPage) {
         setOrdersPage(response.page);
       }
+      return responseItems;
     } catch (error) {
       if (requestId !== ordersRequestIdRef.current) return;
       toast.error(getErrorMessage(error, "Не удалось загрузить заказы"));
@@ -1922,8 +2164,66 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return statusCode || "—";
   };
 
+  const formatOrderPaymentStatus = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return YOO_MONEY_PAYMENT_STATUS_LABELS[normalized]
+      || YOO_KASSA_PAYMENT_STATUS_LABELS[normalized]
+      || value
+      || "—";
+  };
+
+  const getOrderPaymentStatusBadgeClassName = (value?: string | null) => {
+    switch (String(value || "").trim().toLowerCase()) {
+      case "paid":
+        return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      case "review_required":
+        return "border-amber-200 bg-amber-50 text-amber-700";
+      case "expired":
+      case "canceled":
+      case "cancelled":
+      case "error":
+        return "border-red-200 bg-red-50 text-red-700";
+      default:
+        return "border-slate-200 bg-slate-50 text-slate-700";
+    }
+  };
+
+  const formatOrderPaymentSummary = (payment?: AdminOrderPayment | null) => {
+    if (!payment) {
+      return "Счет не создан";
+    }
+
+    const normalized = String(payment.status || "").trim().toLowerCase();
+
+    if (normalized === "paid") {
+      return payment.paidAt
+        ? `Оплачен ${formatOrderDateTime(payment.paidAt)}`
+        : "Оплачен";
+    }
+
+    if (normalized === "review_required") {
+      return "Требуется ручная проверка";
+    }
+
+    if (normalized === "expired") {
+      return "Счет истек";
+    }
+
+    if (normalized === "canceled" || normalized === "cancelled") {
+      return "Счет отменен";
+    }
+
+    if (payment.expiresAt) {
+      return `Ожидает оплату до ${formatOrderDateTime(payment.expiresAt)}`;
+    }
+
+    return "Ожидает оплату";
+  };
+
   const getOrderStatusBadgeClassName = (value?: string | null) => {
     switch (normalizeOrderStatusValue(value)) {
+      case "pending_payment":
+        return "border-amber-200 bg-amber-50 text-amber-700";
       case "canceled":
       case "returned":
         return "border-red-200 bg-red-50 text-red-700";
@@ -1966,6 +2266,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(numeric)} ₽`;
+  };
+
+  const formatOptionalRubles = (value?: number | string | null) => {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return "—";
+    }
+
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return "—";
+    }
+
+    return formatRubles(numeric);
+  };
+
+  const formatDeliveryDaysLabel = (value?: number | null) => {
+    const numeric = Number(value ?? 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) return "—";
+    return numeric === 1 ? "1 день" : `${numeric} дн.`;
   };
 
   const formatAdminOrderNumber = (order?: AdminOrder | null) => {
@@ -2206,6 +2525,33 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
+  const refreshOrderPayment = async (orderId: string) => {
+    setOrderPaymentRefreshingId(orderId);
+
+    try {
+      await FLOW.adminRefreshOrderPayment({ input: { orderId } });
+      const refreshedOrders = await loadOrders();
+
+      if (editingOrder?.id === orderId) {
+        const refreshedOrder = (Array.isArray(refreshedOrders) ? refreshedOrders : []).find((order) => order.id === orderId) || null;
+        if (refreshedOrder) {
+          setEditingOrder(refreshedOrder);
+          setOrderForm((prev) => ({
+            ...prev,
+            status: refreshedOrder.status || prev.status,
+            paymentMethod: (refreshedOrder.paymentMethod || prev.paymentMethod).trim().toLowerCase(),
+          }));
+        }
+      }
+
+      toast.success("Статус оплаты обновлен");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось обновить статус оплаты"));
+    } finally {
+      setOrderPaymentRefreshingId((current) => (current === orderId ? null : current));
+    }
+  };
+
   const toggleUserBlock = async (user: AdminUser) => {
     try {
       await FLOW.adminUpdateUser({ input: { userId: user.id, isBlocked: !user.isBlocked } });
@@ -2265,6 +2611,104 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const yandexSourceStationId = settings["yandex_delivery_source_station_id"] || "";
   const selectedYandexSourcePreset = YANDEX_SOURCE_STATION_PRESETS.find((preset) => preset.id === yandexSourceStationId) || null;
   const selectedYandexSourcePresetValue = selectedYandexSourcePreset?.id || "manual";
+  const yoomoneyNotificationUrl = useMemo(() => {
+    if (typeof window === "undefined") {
+      return "/api/integrations/yoomoney/notifications";
+    }
+
+    try {
+      const apiBaseUrl = new URL(import.meta.env.VITE_API_URL || "/api", window.location.origin);
+      return new URL("integrations/yoomoney/notifications", apiBaseUrl.href.endsWith("/") ? apiBaseUrl.href : `${apiBaseUrl.href}/`).toString();
+    } catch {
+      return `${window.location.origin}/api/integrations/yoomoney/notifications`;
+    }
+  }, []);
+  const yookassaNotificationUrl = useMemo(() => {
+    if (typeof window === "undefined") {
+      return "/api/integrations/yookassa/notifications";
+    }
+
+    try {
+      const apiBaseUrl = new URL(import.meta.env.VITE_API_URL || "/api", window.location.origin);
+      return new URL("integrations/yookassa/notifications", apiBaseUrl.href.endsWith("/") ? apiBaseUrl.href : `${apiBaseUrl.href}/`).toString();
+    } catch {
+      return `${window.location.origin}/api/integrations/yookassa/notifications`;
+    }
+  }, []);
+  const yoomoneyConfigurationIssues = useMemo(() => getYooMoneyConfigurationIssues(settings), [settings]);
+  const yookassaConfigurationIssues = useMemo(() => getYooKassaConfigurationIssues(settings), [settings]);
+  const yoomoneyTestMethodOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [];
+    if (isSettingEnabled("yoomoney_allow_bank_cards", true)) {
+      options.push({
+        value: "yoomoney_card",
+        label: YOO_MONEY_PAYMENT_METHOD_LABELS.yoomoney_card,
+      });
+    }
+    if (isSettingEnabled("yoomoney_allow_wallet")) {
+      options.push({
+        value: "yoomoney_wallet",
+        label: YOO_MONEY_PAYMENT_METHOD_LABELS.yoomoney_wallet,
+      });
+    }
+    return options;
+  }, [settings]);
+  const yookassaTestMethodOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [];
+    if (isSettingEnabled("yookassa_allow_bank_cards", true)) {
+      options.push({
+        value: "yookassa_card",
+        label: YOO_KASSA_PAYMENT_METHOD_LABELS.yookassa_card,
+      });
+    }
+    if (isSettingEnabled("yookassa_allow_sbp", true)) {
+      options.push({
+        value: "yookassa_sbp",
+        label: YOO_KASSA_PAYMENT_METHOD_LABELS.yookassa_sbp,
+      });
+    }
+    if (isSettingEnabled("yookassa_allow_yoomoney", true)) {
+      options.push({
+        value: "yookassa_yoomoney",
+        label: YOO_KASSA_PAYMENT_METHOD_LABELS.yookassa_yoomoney,
+      });
+    }
+    return options;
+  }, [settings]);
+
+  useEffect(() => {
+    if (yoomoneyTestMethodOptions.length === 0) {
+      return;
+    }
+
+    if (!yoomoneyTestMethodOptions.some((option) => option.value === yoomoneyTestMethod)) {
+      setYoomoneyTestMethod(yoomoneyTestMethodOptions[0].value);
+    }
+  }, [yoomoneyTestMethod, yoomoneyTestMethodOptions]);
+
+  useEffect(() => {
+    if (yookassaTestMethodOptions.length === 0) {
+      return;
+    }
+
+    if (!yookassaTestMethodOptions.some((option) => option.value === yookassaTestMethod)) {
+      setYookassaTestMethod(yookassaTestMethodOptions[0].value);
+    }
+  }, [yookassaTestMethod, yookassaTestMethodOptions]);
+
+  const buildAdminIntegrationReturnUrl = (provider: string) => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    try {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.set("integrationTest", provider);
+      return currentUrl.toString();
+    } catch {
+      return `${window.location.origin}/admin`;
+    }
+  };
 
   const applyYandexSourceStationPreset = (presetId: string) => {
     if (presetId === "manual") {
@@ -2327,6 +2771,159 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       toast.error(getErrorMessage(error, "Не удалось отправить тестовое письмо"));
     } finally {
       setSmtpTestSending(false);
+    }
+  };
+
+  const runYooMoneyIntegrationTest = async () => {
+    if (!isSettingEnabled("payments_yoomoney_enabled")) {
+      toast.error("Сначала включите YooMoney в интеграциях");
+      return;
+    }
+
+    const normalizedAmount = Number(yoomoneyTestAmount.replace(",", "."));
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      toast.error("Укажите корректную сумму для проверки YooMoney");
+      return;
+    }
+
+    setYoomoneyTestRunning(true);
+    setYoomoneyTestError("");
+    setYoomoneyTestResult(null);
+
+    try {
+      const result = await FLOW.adminTestYooMoney({
+        input: {
+          enabled: isSettingEnabled("payments_yoomoney_enabled"),
+          walletNumber: settings["yoomoney_wallet_number"] || "",
+          notificationSecret: settings["yoomoney_notification_secret"] || "",
+          accessToken: settings["yoomoney_access_token"] || "",
+          labelPrefix: settings["yoomoney_label_prefix"] || "FD",
+          paymentTimeoutMinutes: Number(settings["yoomoney_payment_timeout_minutes"] || 30),
+          allowBankCards: isSettingEnabled("yoomoney_allow_bank_cards", true),
+          allowWallet: isSettingEnabled("yoomoney_allow_wallet"),
+          paymentMethod: yoomoneyTestMethod,
+          amount: normalizedAmount,
+          returnUrl: buildAdminIntegrationReturnUrl("yoomoney"),
+        }
+      });
+
+      setYoomoneyTestResult({
+        ...(result || {}),
+        checkedAtLabel: new Date().toLocaleString("ru-RU"),
+      });
+      toast.success("Проверка YooMoney выполнена");
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось выполнить проверку YooMoney");
+      setYoomoneyTestError(message);
+      toast.error(message);
+    } finally {
+      setYoomoneyTestRunning(false);
+    }
+  };
+
+  const runYooKassaIntegrationTest = async () => {
+    if (!isSettingEnabled("payments_yookassa_enabled")) {
+      toast.error("Сначала включите YooKassa в интеграциях");
+      return;
+    }
+
+    const normalizedAmount = Number(yookassaTestAmount.replace(",", "."));
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      toast.error("Укажите корректную сумму для проверки YooKassa");
+      return;
+    }
+
+    setYookassaTestRunning(true);
+    setYookassaTestError("");
+    setYookassaTestResult(null);
+
+    try {
+      const result = await FLOW.adminTestYooKassa({
+        input: {
+          enabled: isSettingEnabled("payments_yookassa_enabled"),
+          shopId: settings["yookassa_shop_id"] || "",
+          secretKey: settings["yookassa_secret_key"] || "",
+          testMode: isSettingEnabled("yookassa_test_mode"),
+          labelPrefix: settings["yookassa_label_prefix"] || "YK",
+          paymentTimeoutMinutes: Number(settings["yookassa_payment_timeout_minutes"] || 60),
+          allowBankCards: isSettingEnabled("yookassa_allow_bank_cards", true),
+          allowSbp: isSettingEnabled("yookassa_allow_sbp", true),
+          allowYooMoney: isSettingEnabled("yookassa_allow_yoomoney", true),
+          paymentMethod: yookassaTestMethod,
+          amount: normalizedAmount,
+          returnUrl: buildAdminIntegrationReturnUrl("yookassa"),
+        }
+      });
+
+      setYookassaTestResult({
+        ...(result || {}),
+        checkedAtLabel: new Date().toLocaleString("ru-RU"),
+      });
+      toast.success("Проверка YooKassa выполнена");
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось выполнить проверку YooKassa");
+      setYookassaTestError(message);
+      toast.error(message);
+    } finally {
+      setYookassaTestRunning(false);
+    }
+  };
+
+  const runYandexDeliveryIntegrationTest = async () => {
+    if (!isYandexDeliveryEnabled) {
+      toast.error("Сначала включите Яндекс.Доставку в интеграциях");
+      return;
+    }
+
+    const toAddress = yandexDeliveryTestAddress.trim();
+    if (!toAddress) {
+      toast.error("Укажите тестовый адрес для проверки Яндекс.Доставки");
+      return;
+    }
+
+    const normalizedWeight = Number(yandexDeliveryTestWeightKg.replace(",", "."));
+    if (!Number.isFinite(normalizedWeight) || normalizedWeight <= 0) {
+      toast.error("Укажите корректный вес для проверки Яндекс.Доставки");
+      return;
+    }
+
+    const normalizedDeclaredCost = Number(yandexDeliveryTestDeclaredCost.replace(",", "."));
+    if (!Number.isFinite(normalizedDeclaredCost) || normalizedDeclaredCost < 0) {
+      toast.error("Укажите корректную объявленную стоимость для проверки Яндекс.Доставки");
+      return;
+    }
+
+    setYandexDeliveryTestRunning(true);
+    setYandexDeliveryTestError("");
+    setYandexDeliveryTestResult(null);
+
+    try {
+      const result = await FLOW.adminTestYandexDelivery({
+        input: {
+          enabled: isYandexDeliveryEnabled,
+          useTestEnvironment: isSettingEnabled("yandex_delivery_use_test_environment"),
+          apiToken: settings["yandex_delivery_api_token"] || "",
+          sourceStationId: settings["yandex_delivery_source_station_id"] || "",
+          packageLengthCm: Number(settings["yandex_delivery_package_length_cm"] || 30),
+          packageHeightCm: Number(settings["yandex_delivery_package_height_cm"] || 20),
+          packageWidthCm: Number(settings["yandex_delivery_package_width_cm"] || 10),
+          toAddress,
+          weightKg: normalizedWeight,
+          declaredCost: normalizedDeclaredCost,
+        }
+      });
+
+      setYandexDeliveryTestResult({
+        ...(result || {}),
+        checkedAtLabel: new Date().toLocaleString("ru-RU"),
+      });
+      toast.success("Проверка Яндекс.Доставки выполнена");
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось выполнить проверку Яндекс.Доставки");
+      setYandexDeliveryTestError(message);
+      toast.error(message);
+    } finally {
+      setYandexDeliveryTestRunning(false);
     }
   };
 
@@ -2632,9 +3229,77 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const isSettingEnabled = (key: string, fallback = false) => {
+  function isSettingEnabled(key: string, fallback = false) {
     const value = (settings[key] ?? (fallback ? "true" : "false")).toLowerCase();
     return value === "true" || value === "1" || value === "on";
+  }
+
+  const renderPaymentIntegrationStatus = (providerName: string, enabled: boolean, issues: string[]) => {
+    const hasIssues = issues.length > 0;
+    const className = !enabled
+      ? "rounded-none border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+      : hasIssues
+        ? "rounded-none border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+        : "rounded-none border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800";
+    const title = !enabled
+      ? "Статус: выключено"
+      : hasIssues
+        ? "Статус: есть проблемы"
+        : "Статус: готово";
+    const description = !enabled
+      ? `Провайдер ${providerName} отключен, поэтому его способы оплаты не показываются в checkout.`
+      : hasIssues
+        ? `Провайдер ${providerName} включен, но checkout скрывает его способы оплаты, пока не исправлены проблемы ниже.`
+        : `Провайдер ${providerName} настроен, и его способы оплаты могут показываться в checkout.`;
+
+    return (
+      <div className={className}>
+        <div className="font-semibold">{title}</div>
+        <p className="mt-1">{description}</p>
+      </div>
+    );
+  };
+
+  const isYandexDeliveryEnabled = isSettingEnabled("yandex_delivery_enabled", true);
+  const isYandexDeliveryTestMode = isSettingEnabled("yandex_delivery_use_test_environment");
+  const yandexDeliveryConfigurationIssues: string[] = [];
+
+  if (isYandexDeliveryEnabled && !isYandexDeliveryTestMode && !(settings["yandex_delivery_api_token"] || "").trim()) {
+    yandexDeliveryConfigurationIssues.push("Добавьте API token Яндекс.Доставки для боевого контура.");
+  }
+
+  if (isYandexDeliveryEnabled && !isYandexDeliveryTestMode && !yandexSourceStationId.trim()) {
+    yandexDeliveryConfigurationIssues.push("Укажите SourceStationId склада отправки для боевого контура.");
+  }
+
+  const renderYandexDeliveryIntegrationStatus = () => {
+    const hasIssues = yandexDeliveryConfigurationIssues.length > 0;
+    const className = !isYandexDeliveryEnabled
+      ? "rounded-none border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+      : hasIssues
+      ? "rounded-none border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+      : "rounded-none border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800";
+    const title = !isYandexDeliveryEnabled
+      ? "Статус: выключено"
+      : hasIssues
+      ? "Статус: есть проблемы"
+      : isYandexDeliveryTestMode
+        ? "Статус: готово в тестовом контуре"
+        : "Статус: готово в боевом контуре";
+    const description = !isYandexDeliveryEnabled
+      ? "Яндекс.Доставка отключена, поэтому checkout не будет показывать доставку до двери и ПВЗ."
+      : hasIssues
+      ? "Яндекс.Доставка не готова к полноценной работе в боевом контуре, пока не исправлены пункты ниже."
+      : isYandexDeliveryTestMode
+        ? "Тестовый контур активен. Если API token или SourceStationId пусты, backend подставит тестовые значения."
+        : "Боевой контур настроен. Расчет доставки и обновление статусов могут работать с боевыми значениями.";
+
+    return (
+      <div className={className}>
+        <div className="font-semibold">{title}</div>
+        <p className="mt-1">{description}</p>
+      </div>
+    );
   };
 
   const getDictionaryFilterOrderSetting = (kind: DictionaryKind) => {
@@ -5954,9 +6619,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </DialogHeader>
 
                   {editingOrder ? (
-                    <div className="space-y-6">
+                    <div className="space-y-6 min-w-0">
                       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-                        <div className="space-y-4">
+                        <div className="space-y-4 min-w-0">
                           <div className="border border-gray-200 p-4 space-y-3">
                             <h3 className="text-lg font-bold uppercase">Сводка</h3>
                             <div className="grid gap-3 sm:grid-cols-2">
@@ -5981,6 +6646,35 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Оплата</div>
                                 <div>{formatPaymentMethod(editingOrder.paymentMethod)}</div>
+                                {editingOrder.payment ? (
+                                  <div className="mt-2 space-y-2">
+                                    <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderPaymentStatusBadgeClassName(editingOrder.payment.status)}`}>
+                                      {formatOrderPaymentStatus(editingOrder.payment.status)}
+                                    </span>
+                                    <div className="text-xs text-muted-foreground">
+                                      {formatOrderPaymentSummary(editingOrder.payment)}
+                                    </div>
+                                    {Number.isFinite(Number(editingOrder.payment.chargeAmount)) ? (
+                                      <div className="text-xs text-muted-foreground">
+                                        К оплате: {formatRubles(editingOrder.payment.chargeAmount)}
+                                      </div>
+                                    ) : null}
+                                    {editingOrder.payment.lastError ? (
+                                      <div className="text-xs text-red-600">{editingOrder.payment.lastError}</div>
+                                    ) : null}
+                                    {editingOrder.payment.canRefresh ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-9 rounded-none px-3 text-[11px] font-bold uppercase tracking-[0.16em]"
+                                        onClick={() => void refreshOrderPayment(editingOrder.id)}
+                                        disabled={orderPaymentRefreshingId === editingOrder.id}
+                                      >
+                                        {orderPaymentRefreshingId === editingOrder.id ? "Проверяем..." : "Проверить оплату"}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                                 <div className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">Доставка</div>
                                 <div>{formatShippingMethod(editingOrder.shippingMethod)}</div>
                                 <div className="text-xs text-muted-foreground">
@@ -5993,14 +6687,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
                               <div className="sm:col-span-2">
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Яндекс.Доставка</div>
-                                <div className="mt-1 space-y-1 text-sm">
+                                <div className="mt-1 space-y-1 text-sm min-w-0">
                                   <div>Статус: {formatYandexDeliveryStatus(editingOrder)}</div>
-                                  <div className="text-muted-foreground">Request ID: {editingOrder.yandexRequestId || "—"}</div>
+                                  <div className="break-all text-muted-foreground">Request ID: {editingOrder.yandexRequestId || "—"}</div>
                                   {editingOrder.yandexPickupCode ? (
-                                    <div className="text-muted-foreground">Код получения: {editingOrder.yandexPickupCode}</div>
+                                    <div className="break-words text-muted-foreground">Код получения: {editingOrder.yandexPickupCode}</div>
                                   ) : null}
                                   {editingOrder.yandexDeliveryStatusReason ? (
-                                    <div className="text-muted-foreground">Причина: {editingOrder.yandexDeliveryStatusReason}</div>
+                                    <div className="break-words text-muted-foreground">Причина: {editingOrder.yandexDeliveryStatusReason}</div>
                                   ) : null}
                                   {editingOrder.yandexDeliveryStatusUpdatedAt ? (
                                     <div className="text-muted-foreground">Статус обновлен: {formatOrderDateTime(editingOrder.yandexDeliveryStatusUpdatedAt)}</div>
@@ -6031,23 +6725,23 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             <div className="grid gap-3 sm:grid-cols-2">
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Аккаунт</div>
-                                <div>{editingOrder.userEmail || selectedOrderUser?.email || editingOrder.userId}</div>
+                                <div className="break-all">{editingOrder.userEmail || selectedOrderUser?.email || editingOrder.userId}</div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Имя</div>
-                                <div>{orderForm.customerName || selectedOrderUser?.profile?.name || selectedOrderUser?.profile?.nickname || "—"}</div>
+                                <div className="break-words">{orderForm.customerName || selectedOrderUser?.profile?.name || selectedOrderUser?.profile?.nickname || "—"}</div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Телефон</div>
-                                <div>{orderForm.customerPhone || selectedOrderUser?.profile?.phone || "—"}</div>
+                                <div className="break-words">{orderForm.customerPhone || selectedOrderUser?.profile?.phone || "—"}</div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Email заказа</div>
-                                <div>{orderForm.customerEmail || editingOrder.userEmail || "—"}</div>
+                                <div className="break-all">{orderForm.customerEmail || editingOrder.userEmail || "—"}</div>
                               </div>
                               <div className="sm:col-span-2">
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Адрес</div>
-                                <div>{orderForm.shippingAddress || selectedOrderUser?.profile?.shippingAddress || "—"}</div>
+                                <div className="whitespace-pre-wrap break-words">{orderForm.shippingAddress || selectedOrderUser?.profile?.shippingAddress || "—"}</div>
                               </div>
                             </div>
                           </div>
@@ -6086,7 +6780,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </div>
                         </div>
 
-                        <div className="space-y-4">
+                        <div className="space-y-4 min-w-0">
                           <div className="border border-gray-200 p-4 space-y-4">
                             <h3 className="text-lg font-bold uppercase">Данные заказа</h3>
 
@@ -7036,11 +7730,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   {selectedSettingsGroup === "integrations" && (
                     <div className="space-y-3 border p-3">
                       <h3 className="font-semibold">Интеграции</h3>
-                      <p className="text-sm text-muted-foreground">Разделены по каталогам, чтобы Telegram, DaData и Яндекс.Доставка можно было независимо обновлять и настраивать.</p>
+                      <p className="text-sm text-muted-foreground">Интеграции разнесены по вкладкам, чтобы каждый сервис было удобно настраивать отдельно.</p>
 
                       <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="w-full">
                         <TabsList className="w-full justify-start gap-2 rounded-none border-b bg-transparent p-0">
                           <TabsTrigger value="telegram" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Telegram</TabsTrigger>
+                          <TabsTrigger value="yoomoney" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooMoney</TabsTrigger>
+                          <TabsTrigger value="yookassa" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooKassa</TabsTrigger>
                           <TabsTrigger value="dadata" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">DaData</TabsTrigger>
                           <TabsTrigger value="yandex" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Яндекс.Доставка</TabsTrigger>
                         </TabsList>
@@ -7141,6 +7837,578 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </div>
                         </TabsContent>
 
+                        <TabsContent value="yoomoney" className="mt-3">
+                          <div className="space-y-3 border p-3">
+                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                              <Checkbox
+                                id="payments-yoomoney-enabled"
+                                checked={isSettingEnabled("payments_yoomoney_enabled")}
+                                onCheckedChange={(checked) => updateSetting("payments_yoomoney_enabled", checked ? "true" : "false")}
+                              />
+                              <Label htmlFor="payments-yoomoney-enabled">Включить оплату через YooMoney</Label>
+                            </div>
+
+                            {renderPaymentIntegrationStatus(
+                              "YooMoney",
+                              isSettingEnabled("payments_yoomoney_enabled"),
+                              yoomoneyConfigurationIssues,
+                            )}
+
+                            {isSettingEnabled("payments_yoomoney_enabled") && yoomoneyConfigurationIssues.length > 0 && (
+                              <div className="space-y-2 rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                <div className="font-semibold">YooMoney настроен не до конца</div>
+                                <p>
+                                  Пока эти пункты не исправлены, checkout не будет показывать способы оплаты YooMoney.
+                                </p>
+                                <ul className="list-disc space-y-1 pl-5">
+                                  {yoomoneyConfigurationIssues.map((issue) => (
+                                    <li key={issue}>{issue}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="yoomoney-wallet-number">Номер кошелька</Label>
+                                <Input
+                                  id="yoomoney-wallet-number"
+                                  value={settings["yoomoney_wallet_number"] || ""}
+                                  onChange={(e) => updateSetting("yoomoney_wallet_number", e.target.value)}
+                                  placeholder="41001..."
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Кошелек получателя, на который ЮMoney будет выставлять счет.
+                                </p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yoomoney-label-prefix">Префикс метки</Label>
+                                <Input
+                                  id="yoomoney-label-prefix"
+                                  value={settings["yoomoney_label_prefix"] || "FD"}
+                                  onChange={(e) => updateSetting("yoomoney_label_prefix", e.target.value)}
+                                  placeholder="FD"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Используется в `label`, чтобы платеж можно было однозначно связать с заказом.
+                                </p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yoomoney-notification-secret">Секрет для уведомлений</Label>
+                                <Input
+                                  id="yoomoney-notification-secret"
+                                  type="password"
+                                  value={settings["yoomoney_notification_secret"] || ""}
+                                  onChange={(e) => updateSetting("yoomoney_notification_secret", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Нужен для проверки подписи входящих уведомлений от YooMoney.
+                                </p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yoomoney-access-token">Access token</Label>
+                                <Input
+                                  id="yoomoney-access-token"
+                                  type="password"
+                                  value={settings["yoomoney_access_token"] || ""}
+                                  onChange={(e) => updateSetting("yoomoney_access_token", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Используется для ручной проверки и фоновой сверки через `operation-history`.
+                                </p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yoomoney-timeout-minutes">Срок жизни счета, минут</Label>
+                                <Input
+                                  id="yoomoney-timeout-minutes"
+                                  type="number"
+                                  min="5"
+                                  value={settings["yoomoney_payment_timeout_minutes"] || "30"}
+                                  onChange={(e) => updateSetting("yoomoney_payment_timeout_minutes", e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yoomoney-allow-bank-cards"
+                                  checked={isSettingEnabled("yoomoney_allow_bank_cards", true)}
+                                  onCheckedChange={(checked) => updateSetting("yoomoney_allow_bank_cards", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yoomoney-allow-bank-cards">Разрешить банковские карты</Label>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yoomoney-allow-wallet"
+                                  checked={isSettingEnabled("yoomoney_allow_wallet", true)}
+                                  onCheckedChange={(checked) => updateSetting("yoomoney_allow_wallet", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yoomoney-allow-wallet">Разрешить оплату кошельком YooMoney</Label>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-none border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Проверка интеграции</div>
+                                <p className="text-xs text-muted-foreground">
+                                  Проверка использует текущие значения из формы. Для YooMoney мы безопасно проверяем `access token` и собираем реальную форму оплаты без создания боевого платежа.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-[120px_minmax(0,1fr)_auto]">
+                                <div className="space-y-1">
+                                  <Label htmlFor="yoomoney-test-amount">Сумма, ₽</Label>
+                                  <Input
+                                    id="yoomoney-test-amount"
+                                    value={yoomoneyTestAmount}
+                                    onChange={(e) => setYoomoneyTestAmount(e.target.value)}
+                                    inputMode="decimal"
+                                    placeholder="100"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="yoomoney-test-method">Способ оплаты</Label>
+                                  <Select value={yoomoneyTestMethod} onValueChange={setYoomoneyTestMethod}>
+                                    <SelectTrigger id="yoomoney-test-method" className="h-9 rounded-none">
+                                      <SelectValue placeholder="Выберите способ оплаты" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {yoomoneyTestMethodOptions.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-9 rounded-none px-4"
+                                    onClick={runYooMoneyIntegrationTest}
+                                    disabled={yoomoneyTestRunning || !isSettingEnabled("payments_yoomoney_enabled") || yoomoneyTestMethodOptions.length === 0}
+                                  >
+                                    {yoomoneyTestRunning ? "Проверяем..." : "Проверить интеграцию"}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {yoomoneyTestError && (
+                                <div className="rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                  {yoomoneyTestError}
+                                </div>
+                              )}
+
+                              {yoomoneyTestResult && (
+                                <div className="space-y-3 rounded-none border border-black/10 bg-white p-3 text-sm">
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Проверено</div>
+                                      <div className="font-medium">{yoomoneyTestResult.checkedAtLabel}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Способ оплаты</div>
+                                      <div className="font-medium">
+                                        {(yoomoneyTestResult.paymentMethod && YOO_MONEY_PAYMENT_METHOD_LABELS[yoomoneyTestResult.paymentMethod as keyof typeof YOO_MONEY_PAYMENT_METHOD_LABELS])
+                                          || yoomoneyTestResult.paymentMethod
+                                          || "—"}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">API токен</div>
+                                      <div className={yoomoneyTestResult.tokenValid ? "font-medium text-emerald-700" : "font-medium text-red-700"}>
+                                        {yoomoneyTestResult.tokenValid ? "Валиден" : "Ошибка"}
+                                      </div>
+                                      {yoomoneyTestResult.tokenDetail && <div className="mt-1 text-xs text-muted-foreground">{yoomoneyTestResult.tokenDetail}</div>}
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Кошелек</div>
+                                      <div className="break-all font-medium">{yoomoneyTestResult.walletNumber || "—"}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">Форма оплаты</div>
+                                      <div>Action: <span className="break-all">{yoomoneyTestResult.checkoutAction || "—"}</span></div>
+                                      <div>Метод формы: {yoomoneyTestResult.checkoutMethod || "—"}</div>
+                                      <div>Тип платежа: {yoomoneyTestResult.paymentType || "—"}</div>
+                                      <div>Сумма к оплате: {formatOptionalRubles(yoomoneyTestResult.chargeAmount)}</div>
+                                      <div>Ожидаемое поступление: {formatOptionalRubles(yoomoneyTestResult.expectedReceivedAmount)}</div>
+                                    </div>
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">Последняя операция по токену</div>
+                                      {yoomoneyTestResult.lastOperation ? (
+                                        <>
+                                          <div>Статус: {yoomoneyTestResult.lastOperation.status || "—"}</div>
+                                          <div>Сумма: {yoomoneyTestResult.lastOperation.amount || "—"}</div>
+                                          <div>Тип: {yoomoneyTestResult.lastOperation.type || "—"}</div>
+                                          <div>Дата: {yoomoneyTestResult.lastOperation.dateTime ? formatOrderDateTime(yoomoneyTestResult.lastOperation.dateTime) : "—"}</div>
+                                        </>
+                                      ) : (
+                                        <div className="text-muted-foreground">Операции не вернулись, но токен ответил без ошибки.</div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {yoomoneyTestResult.note && (
+                                    <div className="rounded-none border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                                      {yoomoneyTestResult.note}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                <div className="text-sm font-semibold">Что заполнить</div>
+                                <ol className="space-y-1 text-xs text-muted-foreground">
+                                  <li>1. Укажите номер кошелька, на который должны приходить платежи.</li>
+                                  <li>2. Вставьте секрет для HTTP-уведомлений из кабинета YooMoney.</li>
+                                  <li>3. Добавьте access token, чтобы работала ручная и фоновая сверка оплаты.</li>
+                                  <li>4. При необходимости настройте префикс метки и срок жизни счета.</li>
+                                  <li>5. Включите нужные способы оплаты: карта и/или кошелек.</li>
+                                </ol>
+                              </div>
+                              <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                <div className="text-sm font-semibold">Как это работает</div>
+                                <ol className="space-y-1 text-xs text-muted-foreground">
+                                  <li>1. При оформлении заказа создается счет YooMoney, а заказ получает статус `pending_payment`.</li>
+                                  <li>2. Покупатель переходит в форму YooMoney и подтверждает платеж.</li>
+                                  <li>3. YooMoney присылает уведомление на webhook, а backend связывает оплату с заказом по метке `label`.</li>
+                                  <li>4. Если webhook задержался, оплату можно перепроверить вручную через историю операций.</li>
+                                </ol>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-none border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Webhook и проверка платежей</div>
+                                <p className="text-xs text-muted-foreground">
+                                  В кабинете YooMoney укажите этот URL для HTTP-уведомлений. Он нужен для мгновенного подтверждения оплаты.
+                                </p>
+                              </div>
+                              <div className="flex flex-col gap-2 md:flex-row">
+                                <Input value={yoomoneyNotificationUrl} readOnly className="font-mono text-xs" />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="rounded-none"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(yoomoneyNotificationUrl);
+                                      toast.success("URL уведомлений скопирован");
+                                    } catch {
+                                      toast.error("Не удалось скопировать URL уведомлений");
+                                    }
+                                  }}
+                                >
+                                  <Copy className="mr-2 h-4 w-4" />
+                                  Скопировать
+                                </Button>
+                              </div>
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                <p>Что обязательно заполнить: номер кошелька, секрет уведомлений и access token.</p>
+                                <p>Access token должен иметь доступ к истории операций, иначе ручная сверка оплаты работать не будет.</p>
+                              </div>
+                            </div>
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="yookassa" className="mt-3">
+                          <div className="space-y-3 border p-3">
+                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                              <Checkbox
+                                id="payments-yookassa-enabled"
+                                checked={isSettingEnabled("payments_yookassa_enabled")}
+                                onCheckedChange={(checked) => updateSetting("payments_yookassa_enabled", checked ? "true" : "false")}
+                              />
+                              <Label htmlFor="payments-yookassa-enabled">Включить оплату через YooKassa</Label>
+                            </div>
+
+                            {renderPaymentIntegrationStatus(
+                              "YooKassa",
+                              isSettingEnabled("payments_yookassa_enabled"),
+                              yookassaConfigurationIssues,
+                            )}
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              {isSettingEnabled("payments_yookassa_enabled") && yookassaConfigurationIssues.length > 0 && (
+                                <div className="space-y-2 rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700 md:col-span-2">
+                                  <div className="font-semibold">YooKassa настроена не до конца</div>
+                                  <p>
+                                    Пока эти пункты не исправлены, checkout не будет показывать способы оплаты YooKassa.
+                                  </p>
+                                  <ul className="list-disc space-y-1 pl-5">
+                                    {yookassaConfigurationIssues.map((issue) => (
+                                      <li key={issue}>{issue}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yookassa-shop-id">Shop ID</Label>
+                                <Input
+                                  id="yookassa-shop-id"
+                                  name="yookassa-shop-id"
+                                  autoComplete="off"
+                                  autoCorrect="off"
+                                  autoCapitalize="off"
+                                  spellCheck={false}
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  data-form-type="other"
+                                  value={settings["yookassa_shop_id"] || ""}
+                                  onChange={(e) => updateSetting("yookassa_shop_id", e.target.value)}
+                                  placeholder="123456"
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yookassa-secret-key">Secret Key</Label>
+                                <Input
+                                  id="yookassa-secret-key"
+                                  name="yookassa-secret-key"
+                                  type="password"
+                                  autoComplete="new-password"
+                                  autoCorrect="off"
+                                  autoCapitalize="off"
+                                  spellCheck={false}
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  data-form-type="other"
+                                  value={settings["yookassa_secret_key"] || ""}
+                                  onChange={(e) => updateSetting("yookassa_secret_key", e.target.value)}
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yookassa-label-prefix">Префикс метки</Label>
+                                <Input
+                                  id="yookassa-label-prefix"
+                                  value={settings["yookassa_label_prefix"] || "YK"}
+                                  onChange={(e) => updateSetting("yookassa_label_prefix", e.target.value)}
+                                  placeholder="YK"
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="yookassa-timeout-minutes">Окно ожидания оплаты, минут</Label>
+                                <Input
+                                  id="yookassa-timeout-minutes"
+                                  type="number"
+                                  min="60"
+                                  value={settings["yookassa_payment_timeout_minutes"] || "60"}
+                                  onChange={(e) => updateSetting("yookassa_payment_timeout_minutes", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Для карты, СБП и ЮMoney у YooKassa базовый срок оплаты обычно ограничен одним часом, поэтому ниже 60 минут ставить не стоит.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yookassa-test-mode"
+                                  checked={isSettingEnabled("yookassa_test_mode", true)}
+                                  onCheckedChange={(checked) => updateSetting("yookassa_test_mode", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yookassa-test-mode">Тестовый магазин / тестовые ключи</Label>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yookassa-allow-bank-cards"
+                                  checked={isSettingEnabled("yookassa_allow_bank_cards", true)}
+                                  onCheckedChange={(checked) => updateSetting("yookassa_allow_bank_cards", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yookassa-allow-bank-cards">Разрешить банковские карты</Label>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yookassa-allow-sbp"
+                                  checked={isSettingEnabled("yookassa_allow_sbp", true)}
+                                  onCheckedChange={(checked) => updateSetting("yookassa_allow_sbp", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yookassa-allow-sbp">Разрешить СБП</Label>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-none border p-3">
+                                <Checkbox
+                                  id="yookassa-allow-yoomoney"
+                                  checked={isSettingEnabled("yookassa_allow_yoomoney", true)}
+                                  onCheckedChange={(checked) => updateSetting("yookassa_allow_yoomoney", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yookassa-allow-yoomoney">Разрешить ЮMoney внутри YooKassa</Label>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-none border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Проверка интеграции</div>
+                                <p className="text-xs text-muted-foreground">
+                                  В тестовом магазине YooKassa мы создаем реальный тестовый платеж. В боевом режиме выполняется безопасная проверка API-доступа без создания нового платежа.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-[120px_minmax(0,1fr)_auto]">
+                                <div className="space-y-1">
+                                  <Label htmlFor="yookassa-test-amount">Сумма, ₽</Label>
+                                  <Input
+                                    id="yookassa-test-amount"
+                                    value={yookassaTestAmount}
+                                    onChange={(e) => setYookassaTestAmount(e.target.value)}
+                                    inputMode="decimal"
+                                    placeholder="100"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="yookassa-test-method">Способ оплаты</Label>
+                                  <Select value={yookassaTestMethod} onValueChange={setYookassaTestMethod}>
+                                    <SelectTrigger id="yookassa-test-method" className="h-9 rounded-none">
+                                      <SelectValue placeholder="Выберите способ оплаты" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {yookassaTestMethodOptions.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-9 rounded-none px-4"
+                                    onClick={runYooKassaIntegrationTest}
+                                    disabled={yookassaTestRunning || !isSettingEnabled("payments_yookassa_enabled") || yookassaTestMethodOptions.length === 0}
+                                  >
+                                    {yookassaTestRunning ? "Проверяем..." : "Проверить интеграцию"}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {yookassaTestError && (
+                                <div className="rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                  {yookassaTestError}
+                                </div>
+                              )}
+
+                              {yookassaTestResult && (
+                                <div className="space-y-3 rounded-none border border-black/10 bg-white p-3 text-sm">
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Проверено</div>
+                                      <div className="font-medium">{yookassaTestResult.checkedAtLabel}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Режим</div>
+                                      <div className="font-medium">
+                                        {yookassaTestResult.testMode ? "Тестовый магазин" : "Боевой магазин"}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Способ оплаты</div>
+                                      <div className="font-medium">
+                                        {(yookassaTestResult.paymentMethod && YOO_KASSA_PAYMENT_METHOD_LABELS[yookassaTestResult.paymentMethod as keyof typeof YOO_KASSA_PAYMENT_METHOD_LABELS])
+                                          || yookassaTestResult.paymentMethod
+                                          || "—"}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Статус</div>
+                                      <div className="font-medium">{yookassaTestResult.status || "—"}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">Результат проверки</div>
+                                      <div>Сумма: {formatOptionalRubles(yookassaTestResult.amount)}</div>
+                                      <div>Тип платежа: {yookassaTestResult.paymentType || "—"}</div>
+                                      <div>Payment ID: <span className="break-all">{yookassaTestResult.paymentId || "—"}</span></div>
+                                      <div>Создан: {yookassaTestResult.createdAt ? formatOrderDateTime(yookassaTestResult.createdAt) : "—"}</div>
+                                    </div>
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">Что получилось</div>
+                                      <div>{yookassaTestResult.detail || "—"}</div>
+                                      {yookassaTestResult.confirmationUrl && (
+                                        <a
+                                          href={yookassaTestResult.confirmationUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex text-sm font-medium underline underline-offset-4"
+                                        >
+                                          Открыть страницу тестовой оплаты
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                <div className="text-sm font-semibold">Что заполнить</div>
+                                <ol className="space-y-1 text-xs text-muted-foreground">
+                                  <li>1. Вставьте `Shop ID` и `Secret Key` из кабинета YooKassa.</li>
+                                  <li>2. Оставьте включенным тестовый режим, пока проверяете тестовый магазин.</li>
+                                  <li>3. При необходимости настройте префикс метки и окно ожидания оплаты.</li>
+                                  <li>4. Включите нужные способы оплаты: карта, СБП и/или ЮMoney.</li>
+                                  <li>5. Настройте HTTP-уведомления на URL ниже и подпишитесь на нужные события.</li>
+                                </ol>
+                              </div>
+                              <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                <div className="text-sm font-semibold">Как это работает</div>
+                                <ol className="space-y-1 text-xs text-muted-foreground">
+                                  <li>1. При оформлении заказа backend создает платеж YooKassa, а заказ получает статус `pending_payment`.</li>
+                                  <li>2. Покупатель переходит на защищенную страницу YooKassa и завершает оплату там.</li>
+                                  <li>3. YooKassa присылает webhook о результате платежа, а backend обновляет статус заказа.</li>
+                                  <li>4. Если нужно, статус оплаты можно перепроверить вручную из профиля или админки.</li>
+                                </ol>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-none border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Webhook и тестовый контур</div>
+                                <p className="text-xs text-muted-foreground">
+                                  Укажите этот URL в кабинете YooKassa в разделе HTTP-уведомлений и подпишитесь как минимум на события `payment.succeeded` и `payment.canceled`.
+                                </p>
+                              </div>
+                              <div className="flex flex-col gap-2 md:flex-row">
+                                <Input value={yookassaNotificationUrl} readOnly className="font-mono text-xs" />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="rounded-none"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(yookassaNotificationUrl);
+                                      toast.success("URL уведомлений YooKassa скопирован");
+                                    } catch {
+                                      toast.error("Не удалось скопировать URL уведомлений YooKassa");
+                                    }
+                                  }}
+                                >
+                                  <Copy className="mr-2 h-4 w-4" />
+                                  Скопировать
+                                </Button>
+                              </div>
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                              </div>
+                            </div>
+                          </div>
+                        </TabsContent>
+
                         <TabsContent value="dadata" className="mt-3">
                           <div className="space-y-1 border p-3">
                             <Label htmlFor="dadata-api-key">DaData API Key</Label>
@@ -7150,14 +8418,180 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                         <TabsContent value="yandex" className="mt-3">
                           <div className="space-y-3 border p-3">
-                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
-                              <Checkbox
-                                id="yandex-delivery-test-environment"
-                                checked={isSettingEnabled("yandex_delivery_use_test_environment")}
-                                onCheckedChange={(checked) => updateSetting("yandex_delivery_use_test_environment", checked ? "true" : "false")}
-                              />
-                              <Label htmlFor="yandex-delivery-test-environment">Использовать тестовый контур Яндекс.Доставки</Label>
+                            <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-2 xl:justify-end">
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="yandex-delivery-enabled"
+                                  checked={isYandexDeliveryEnabled}
+                                  onCheckedChange={(checked) => updateSetting("yandex_delivery_enabled", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yandex-delivery-enabled">Включить Яндекс.Доставку</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="yandex-delivery-test-environment"
+                                  checked={isSettingEnabled("yandex_delivery_use_test_environment")}
+                                  onCheckedChange={(checked) => updateSetting("yandex_delivery_use_test_environment", checked ? "true" : "false")}
+                                />
+                                <Label htmlFor="yandex-delivery-test-environment">Использовать тестовый контур Яндекс.Доставки</Label>
+                              </div>
                             </div>
+
+                            {renderYandexDeliveryIntegrationStatus()}
+
+                            {yandexDeliveryConfigurationIssues.length > 0 && (
+                              <div className="space-y-2 rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                <div className="font-semibold">Яндекс.Доставка настроена не до конца</div>
+                                <p>
+                                  Пока эти пункты не исправлены, расчет и синхронизация доставки в боевом контуре могут работать нестабильно.
+                                </p>
+                                <ul className="list-disc space-y-1 pl-5">
+                                  {yandexDeliveryConfigurationIssues.map((issue) => (
+                                    <li key={issue}>{issue}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            <div className="space-y-3 rounded-none border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Проверка интеграции</div>
+                                <p className="text-xs text-muted-foreground">
+                                  Проверка использует текущие значения из формы, даже если вы еще не нажали «Сохранить настройки».
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_120px_180px_auto]">
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-test-address">Тестовый адрес</Label>
+                                  <Input
+                                    id="yandex-delivery-test-address"
+                                    value={yandexDeliveryTestAddress}
+                                    onChange={(e) => setYandexDeliveryTestAddress(e.target.value)}
+                                    placeholder="Например: 630099, Новосибирск, Красный проспект, 25"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-test-weight">Вес, кг</Label>
+                                  <Input
+                                    id="yandex-delivery-test-weight"
+                                    value={yandexDeliveryTestWeightKg}
+                                    onChange={(e) => setYandexDeliveryTestWeightKg(e.target.value)}
+                                    inputMode="decimal"
+                                    placeholder="0.300"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-test-declared-cost">Объявленная стоимость, ₽</Label>
+                                  <Input
+                                    id="yandex-delivery-test-declared-cost"
+                                    value={yandexDeliveryTestDeclaredCost}
+                                    onChange={(e) => setYandexDeliveryTestDeclaredCost(e.target.value)}
+                                    inputMode="decimal"
+                                    placeholder="1000"
+                                  />
+                                </div>
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-9 rounded-none px-4"
+                                    onClick={runYandexDeliveryIntegrationTest}
+                                    disabled={yandexDeliveryTestRunning || !isYandexDeliveryEnabled}
+                                  >
+                                    {yandexDeliveryTestRunning ? "Проверяем..." : "Проверить интеграцию"}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {yandexDeliveryTestError && (
+                                <div className="rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                  {yandexDeliveryTestError}
+                                </div>
+                              )}
+
+                              {yandexDeliveryTestResult && (
+                                <div className="space-y-3 rounded-none border border-black/10 bg-white p-3 text-sm">
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Проверено</div>
+                                      <div className="font-medium">{yandexDeliveryTestResult.checkedAtLabel}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Режим</div>
+                                      <div className="font-medium">
+                                        {yandexDeliveryTestResult.details?.testEnvironment ? "Тестовый контур" : "Боевой контур"}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">SourceStationId</div>
+                                      <div className="break-all font-medium">{yandexDeliveryTestResult.details?.sourceStationId || "—"}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Адрес назначения</div>
+                                      <div className="font-medium">{yandexDeliveryTestResult.toAddress || "—"}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-none border border-black/10 bg-slate-50 p-3 text-sm">
+                                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Что проверялось</div>
+                                    <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1">
+                                      <span>Адрес: {yandexDeliveryTestResult.toAddress || "—"}</span>
+                                      <span>Вес: {Number(yandexDeliveryTestResult.details?.requestedWeightKg ?? 0).toFixed(3)} кг</span>
+                                      <span>Объявленная стоимость: {formatOptionalRubles(yandexDeliveryTestResult.details?.declaredCost)}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">До двери</div>
+                                      <div className={yandexDeliveryTestResult.homeDelivery?.available ? "text-xs text-muted-foreground" : "text-xs font-medium text-amber-700"}>
+                                        Статус: {yandexDeliveryTestResult.homeDelivery?.available ? "тариф найден" : yandexDeliveryTestResult.homeDelivery?.error ? "тариф не найден" : "ожидает расчета"}
+                                      </div>
+                                      <div>Стоимость: {formatOptionalRubles(yandexDeliveryTestResult.homeDelivery?.estimatedCost)}</div>
+                                      <div>Срок: {formatDeliveryDaysLabel(yandexDeliveryTestResult.homeDelivery?.deliveryDays)}</div>
+                                      {yandexDeliveryTestResult.homeDelivery?.available && yandexDeliveryTestResult.homeDelivery?.tariff && (
+                                        <div>Тариф: {yandexDeliveryTestResult.homeDelivery.tariff}</div>
+                                      )}
+                                      {yandexDeliveryTestResult.homeDelivery?.error && (
+                                        <div className="text-red-600">Причина: {yandexDeliveryTestResult.homeDelivery.error}</div>
+                                      )}
+                                    </div>
+
+                                    <div className="space-y-2 rounded-none border border-black/10 bg-slate-50 p-3">
+                                      <div className="text-sm font-semibold">ПВЗ</div>
+                                      {Array.isArray(yandexDeliveryTestResult.pickupPoints) && yandexDeliveryTestResult.pickupPoints.length > 0 ? (
+                                        <>
+                                          <div className={yandexDeliveryTestResult.pickupPointDelivery?.available ? "text-xs text-muted-foreground" : "text-xs font-medium text-amber-700"}>
+                                            Статус: {yandexDeliveryTestResult.pickupPointDelivery?.available ? "тариф найден" : yandexDeliveryTestResult.pickupPointDelivery?.error ? "тариф не найден" : "ожидает расчета"}
+                                          </div>
+                                          <div className="text-xs text-muted-foreground">
+                                            Найдено пунктов: {yandexDeliveryTestResult.pickupPoints.length}
+                                          </div>
+                                          <div className="font-medium">
+                                            {yandexDeliveryTestResult.pickupPointDelivery?.point?.name || yandexDeliveryTestResult.pickupPoints[0]?.name || "Ближайший пункт выдачи"}
+                                          </div>
+                                          <div>{yandexDeliveryTestResult.pickupPointDelivery?.point?.address || yandexDeliveryTestResult.pickupPoints[0]?.address || "—"}</div>
+                                          <div>Стоимость: {formatOptionalRubles(yandexDeliveryTestResult.pickupPointDelivery?.estimatedCost)}</div>
+                                          <div>Срок: {formatDeliveryDaysLabel(yandexDeliveryTestResult.pickupPointDelivery?.deliveryDays)}</div>
+                                          {yandexDeliveryTestResult.pickupPointDelivery?.available && yandexDeliveryTestResult.pickupPointDelivery?.tariff && (
+                                            <div>Тариф: {yandexDeliveryTestResult.pickupPointDelivery.tariff}</div>
+                                          )}
+                                          {Number.isFinite(Number(yandexDeliveryTestResult.pickupPointDelivery?.point?.distanceKm ?? yandexDeliveryTestResult.pickupPoints[0]?.distanceKm)) && (
+                                            <div>Расстояние: {Number(yandexDeliveryTestResult.pickupPointDelivery?.point?.distanceKm ?? yandexDeliveryTestResult.pickupPoints[0]?.distanceKm).toFixed(1)} км</div>
+                                          )}
+                                          {yandexDeliveryTestResult.pickupPointDelivery?.error && (
+                                            <div className="text-red-600">Причина: {yandexDeliveryTestResult.pickupPointDelivery.error}</div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div className="text-muted-foreground">Подходящие пункты выдачи не найдены.</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
                             <div className="space-y-3 border border-black/10 bg-slate-50 p-3">
                               <div className="space-y-1">
                                 <div className="text-sm font-semibold">Быстрый выбор SourceStationId</div>

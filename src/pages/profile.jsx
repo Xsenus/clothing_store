@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -15,6 +15,13 @@ import AdminPage from "./admin";
 import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
+import {
+  YOO_KASSA_PAYMENT_METHOD_LABELS,
+  YOO_KASSA_PAYMENT_STATUS_LABELS,
+  YOO_MONEY_PAYMENT_METHOD_LABELS,
+  YOO_MONEY_PAYMENT_STATUS_LABELS,
+  submitHostedCheckout,
+} from "@/lib/yoomoney";
 
 const normalizePhone = (value) => {
   const clean = String(value || "").trim();
@@ -107,9 +114,14 @@ const PAYMENT_METHOD_LABELS = {
   cash: "Наличные",
 };
 
+ORDER_STATUS_LABELS.pending_payment = "Ожидает оплаты";
+Object.assign(PAYMENT_METHOD_LABELS, YOO_MONEY_PAYMENT_METHOD_LABELS);
+Object.assign(PAYMENT_METHOD_LABELS, YOO_KASSA_PAYMENT_METHOD_LABELS);
+
 const SHIPPING_METHOD_LABELS = {
   home: "До двери",
   pickup: "ПВЗ",
+  self_pickup: "Самовывоз",
 };
 
 const parseJsonArray = (raw) => {
@@ -133,6 +145,64 @@ const formatOrderDateTime = (raw) => {
   if (!value) return "—";
   const normalized = value > 10_000_000_000 ? value : value * 1000;
   return new Date(normalized).toLocaleString("ru-RU");
+};
+
+const normalizePaymentStatus = (value) => String(value || "").trim().toLowerCase();
+
+const formatPaymentStatus = (value) => {
+  const normalized = normalizePaymentStatus(value);
+  return YOO_MONEY_PAYMENT_STATUS_LABELS[normalized]
+    || YOO_KASSA_PAYMENT_STATUS_LABELS[normalized]
+    || value
+    || "—";
+};
+
+const getPaymentStatusBadgeClassName = (value) => {
+  switch (normalizePaymentStatus(value)) {
+    case "paid":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "review_required":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "expired":
+    case "canceled":
+    case "cancelled":
+    case "error":
+      return "border-red-200 bg-red-50 text-red-700";
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
+  }
+};
+
+const getOrderPaymentSummaryText = (payment) => {
+  if (!payment) {
+    return "";
+  }
+
+  const status = normalizePaymentStatus(payment.status);
+
+  if (status === "paid") {
+    return payment.paidAt
+      ? `Оплата подтверждена ${formatOrderDateTime(payment.paidAt)}.`
+      : "Оплата подтверждена.";
+  }
+
+  if (status === "review_required") {
+    return "Платеж найден, но требует ручной проверки менеджером.";
+  }
+
+  if (status === "expired") {
+    return "Срок действия счета истек. Можно запросить форму оплаты заново.";
+  }
+
+  if (status === "canceled" || status === "cancelled") {
+    return "Счет отменен.";
+  }
+
+  if (payment.expiresAt) {
+    return `Счет ожидает оплату до ${formatOrderDateTime(payment.expiresAt)}.`;
+  }
+
+  return "Счет создан и ожидает оплату.";
 };
 
 const getYandexDeliveryStatusText = (order) => {
@@ -203,6 +273,9 @@ export default function ProfilePage() {
   const [emailCodeRequested, setEmailCodeRequested] = useState(false);
   const [phoneVerifyState, setPhoneVerifyState] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [paymentActionOrderId, setPaymentActionOrderId] = useState("");
+  const [paymentRefreshOrderId, setPaymentRefreshOrderId] = useState("");
+  const handledPaymentReturnRef = useRef("");
 
   useEffect(() => {
     const nextTab = normalizeProfileTab(searchParams.get("tab"), isAdmin);
@@ -210,6 +283,62 @@ export default function ProfilePage() {
       setActiveTab(nextTab);
     }
   }, [activeTab, isAdmin, searchParams]);
+
+  const loadOrders = async () => {
+    const ordersRes = await FLOW.getUserOrders({ input: {} });
+    const nextOrders = Array.isArray(ordersRes) ? ordersRes : [];
+    setOrders(nextOrders);
+    return nextOrders;
+  };
+
+  const buildPaymentReturnUrl = () => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return `${window.location.origin}/profile?tab=orders`;
+  };
+
+  const refreshOrdersWithPaymentFeedback = async (orderId, successMessage) => {
+    await FLOW.refreshOrderPayment({ input: { orderId } });
+    await loadOrders();
+    toast.success(successMessage);
+  };
+
+  const handleOpenPaymentCheckout = async (orderId) => {
+    setPaymentActionOrderId(orderId);
+
+    try {
+      const response = await FLOW.getOrderPaymentCheckout({
+        input: {
+          orderId,
+          returnUrl: buildPaymentReturnUrl(),
+        },
+      });
+
+      if (!response?.checkout) {
+        throw new Error("Счет для оплаты сейчас недоступен.");
+      }
+
+      submitHostedCheckout(response.checkout);
+    } catch (error) {
+      toast.error(error?.message || "Не удалось открыть форму оплаты ЮMoney.");
+    } finally {
+      setPaymentActionOrderId((current) => (current === orderId ? "" : current));
+    }
+  };
+
+  const handleRefreshOrderPayment = async (orderId, successMessage = "Статус оплаты обновлен.") => {
+    setPaymentRefreshOrderId(orderId);
+
+    try {
+      await refreshOrdersWithPaymentFeedback(orderId, successMessage);
+    } catch (error) {
+      toast.error(error?.message || "Не удалось обновить статус оплаты.");
+    } finally {
+      setPaymentRefreshOrderId((current) => (current === orderId ? "" : current));
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -222,14 +351,13 @@ export default function ProfilePage() {
 
       setLoading(true);
       try {
-        const [ordersRes, likesRes, productsRes, profileRes] = await Promise.all([
-          FLOW.getUserOrders({ input: {} }),
+        const [, likesRes, productsRes, profileRes] = await Promise.all([
+          loadOrders(),
           FLOW.getUserLikes({ input: {} }),
           FLOW.getAllProducts({ input: {} }),
           FLOW.getProfile({ input: {} }),
         ]);
 
-        if (Array.isArray(ordersRes)) setOrders(ordersRes);
         if (Array.isArray(likesRes)) setLikedProductIds(likesRes.map((like) => like.productId));
         if (Array.isArray(productsRes)) setProducts(productsRes);
         if (profileRes) {
@@ -259,6 +387,60 @@ export default function ProfilePage() {
 
     fetchData();
   }, [navigate, signOut]);
+
+  useEffect(() => {
+    const paymentStatus = searchParams.get("paymentStatus");
+    const orderId = searchParams.get("orderId");
+    const paymentId = searchParams.get("paymentId");
+
+    if (paymentStatus !== "return" || !orderId) {
+      return undefined;
+    }
+
+    const handledKey = `${paymentStatus}:${orderId}:${paymentId || ""}`;
+    if (handledPaymentReturnRef.current === handledKey) {
+      return undefined;
+    }
+
+    handledPaymentReturnRef.current = handledKey;
+    setActiveTab("orders");
+
+    let cancelled = false;
+
+    const run = async () => {
+      setPaymentRefreshOrderId(orderId);
+
+      try {
+        await FLOW.refreshOrderPayment({ input: { orderId } });
+        if (!cancelled) {
+          await loadOrders();
+          toast.success("Возврат из ЮMoney выполнен. Статус оплаты обновлен.");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error?.message || "Не удалось обновить оплату после возврата из ЮMoney.");
+        }
+      } finally {
+        if (!cancelled) {
+          setPaymentRefreshOrderId((current) => (current === orderId ? "" : current));
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.set("tab", "orders");
+            next.delete("paymentStatus");
+            next.delete("orderId");
+            next.delete("paymentId");
+            return next;
+          }, { replace: true });
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
 
   const emailChanged = useMemo(
     () => String(emailDraft || "").trim().toLowerCase() !== String(profile?.email || "").trim().toLowerCase(),
@@ -655,6 +837,57 @@ export default function ProfilePage() {
                                 <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Адрес</p>
                                 <p className="break-words text-gray-700">{order.shippingAddress || "—"}</p>
                               </div>
+                              {order.payment ? (
+                                <div className="rounded-none border border-gray-200 bg-gray-50 p-3">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getPaymentStatusBadgeClassName(order.payment.status)}`}>
+                                      {formatPaymentStatus(order.payment.status)}
+                                    </span>
+                                    {order.payment.label ? (
+                                      <span className="font-mono text-[11px] text-gray-500">
+                                        {order.payment.label}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <p className="mt-2 text-sm text-gray-700">
+                                    {getOrderPaymentSummaryText(order.payment)}
+                                  </p>
+                                  <div className="mt-2 space-y-1 text-xs text-gray-500">
+                                    {Number.isFinite(Number(order.payment.chargeAmount)) ? (
+                                      <div>К оплате: {formatRubles(order.payment.chargeAmount)}</div>
+                                    ) : null}
+                                    {order.payment.receiverMasked ? (
+                                      <div>Кошелек получателя: {order.payment.receiverMasked}</div>
+                                    ) : null}
+                                    {order.payment.lastError ? (
+                                      <div className="text-red-600">{order.payment.lastError}</div>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {order.payment.canPay ? (
+                                      <Button
+                                        type="button"
+                                        className="h-10 rounded-none bg-black px-4 text-xs font-bold uppercase tracking-[0.18em] text-white hover:bg-gray-800"
+                                        onClick={() => handleOpenPaymentCheckout(order.id)}
+                                        disabled={paymentActionOrderId === order.id}
+                                      >
+                                        {paymentActionOrderId === order.id ? "Переход..." : "Оплатить"}
+                                      </Button>
+                                    ) : null}
+                                    {order.payment.canRefresh ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-10 rounded-none px-4 text-xs font-bold uppercase tracking-[0.18em]"
+                                        onClick={() => handleRefreshOrderPayment(order.id)}
+                                        disabled={paymentRefreshOrderId === order.id}
+                                      >
+                                        {paymentRefreshOrderId === order.id ? "Проверяем..." : "Проверить оплату"}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : null}
                               {String(order.yandexRequestId || "").trim() ? (
                                 <div>
                                   <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Статус доставки</p>
