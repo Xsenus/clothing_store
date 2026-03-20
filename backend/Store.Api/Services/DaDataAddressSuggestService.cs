@@ -13,7 +13,14 @@ public interface IDaDataAddressSuggestService
     Task<IReadOnlyList<DaDataAddressSuggestion>> SuggestAsync(AddressSuggestPayload payload, CancellationToken cancellationToken = default);
 }
 
-public sealed record DaDataAddressSuggestion(string? Value, string? UnrestrictedValue);
+public sealed record DaDataAddressSuggestion(
+    string? Value,
+    string? UnrestrictedValue,
+    string? GeoLat,
+    string? GeoLon,
+    string? City,
+    string? Settlement,
+    string? Region);
 
 public sealed class DaDataAddressSuggestService : IDaDataAddressSuggestService
 {
@@ -99,7 +106,12 @@ public sealed class DaDataAddressSuggestService : IDaDataAddressSuggestService
     private static DaDataAddressSuggestion MapSuggestion(JsonElement item) =>
         new(
             ReadString(item, "value"),
-            ReadString(item, "unrestricted_value"));
+            ReadString(item, "unrestricted_value"),
+            ReadNestedString(item, "data", "geo_lat"),
+            ReadNestedString(item, "data", "geo_lon"),
+            ReadNestedString(item, "data", "city"),
+            ReadNestedString(item, "data", "settlement"),
+            ReadNestedString(item, "data", "region"));
 
     private static string? ReadString(JsonElement element, string propertyName)
     {
@@ -112,5 +124,13 @@ public sealed class DaDataAddressSuggestService : IDaDataAddressSuggestService
             JsonValueKind.Null => null,
             _ => property.ToString()
         };
+    }
+
+    private static string? ReadNestedString(JsonElement element, string parentPropertyName, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parentPropertyName, out var parent))
+            return null;
+
+        return ReadString(parent, propertyName);
     }
 }

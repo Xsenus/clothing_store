@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using Store.Api.Configuration;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -16,6 +17,7 @@ public class DatabaseInitializer
     private readonly IConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<DatabaseInitializer> _logger;
+    private readonly StoreRuntimePaths _storeRuntimePaths;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="DatabaseInitializer"/>.
@@ -23,11 +25,13 @@ public class DatabaseInitializer
     public DatabaseInitializer(
         IConfiguration configuration,
         IServiceProvider serviceProvider,
-        ILogger<DatabaseInitializer> logger)
+        ILogger<DatabaseInitializer> logger,
+        StoreRuntimePaths storeRuntimePaths)
     {
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _storeRuntimePaths = storeRuntimePaths;
     }
 
     /// <summary>
@@ -706,8 +710,36 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_width", "1600");
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_max_height", "1600");
         await EnsureAppSettingExistsAsync(db, "image_upload_telegram_bot_quality", "92");
+        foreach (var (key, value) in GetDefaultLegalTextSettings())
+        {
+            await EnsureAppSettingHasValueAsync(db, key, value);
+        }
 
         await db.SaveChangesAsync();
+    }
+
+    private IReadOnlyDictionary<string, string> GetDefaultLegalTextSettings()
+    {
+        var legalDirectory = Path.Combine(_storeRuntimePaths.RepositoryRoot, "seed", "legal");
+
+        return new Dictionary<string, string>
+        {
+            ["privacy_policy"] = ReadSeedText(Path.Combine(legalDirectory, "privacy-policy.txt"), "privacy_policy"),
+            ["user_agreement"] = ReadSeedText(Path.Combine(legalDirectory, "user-agreement.txt"), "user_agreement"),
+            ["public_offer"] = ReadSeedText(Path.Combine(legalDirectory, "public-offer.txt"), "public_offer"),
+            ["cookie_consent_text"] = ReadSeedText(Path.Combine(legalDirectory, "cookie-consent.txt"), "cookie_consent_text"),
+        };
+    }
+
+    private string ReadSeedText(string path, string settingKey)
+    {
+        if (!File.Exists(path))
+        {
+            _logger.LogWarning("Legal default seed file for {SettingKey} was not found at {Path}.", settingKey, path);
+            return string.Empty;
+        }
+
+        return File.ReadAllText(path).Trim();
     }
 
     private static async Task EnsureAppSettingExistsAsync(StoreDbContext db, string key, string value)
@@ -717,6 +749,24 @@ public class DatabaseInitializer
             return;
 
         db.AppSettings.Add(new AppSetting { Key = key, Value = value });
+    }
+
+    private static async Task EnsureAppSettingHasValueAsync(StoreDbContext db, string key, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        var row = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+        if (row is null)
+        {
+            db.AppSettings.Add(new AppSetting { Key = key, Value = value });
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(row.Value))
+        {
+            row.Value = value;
+        }
     }
 
     private async Task EnsureLegacyTelegramBotMigratedAsync(StoreDbContext db)

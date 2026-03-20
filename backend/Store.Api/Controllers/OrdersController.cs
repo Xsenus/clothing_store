@@ -20,18 +20,24 @@ public class OrdersController : ControllerBase
 {
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
-    private readonly TransactionalEmailService _emailService;
+    private readonly IOrderEmailQueue _orderEmailQueue;
+    private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="OrdersController"/>.
     /// </summary>
-    public OrdersController(StoreDbContext db, AuthService auth, TransactionalEmailService emailService)
+    public OrdersController(
+        StoreDbContext db,
+        AuthService auth,
+        IOrderEmailQueue orderEmailQueue,
+        IYandexDeliveryTrackingService yandexDeliveryTrackingService)
     {
         _db = db;
         _auth = auth;
-        _emailService = emailService;
+        _orderEmailQueue = orderEmailQueue;
+        _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
     }
 
     /// <summary>
@@ -46,6 +52,9 @@ public class OrdersController : ControllerBase
             .Where(x => x.UserId == user.Id)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
+        await _yandexDeliveryTrackingService.SyncOrderStatusesAsync(
+            orders.Select(order => order.Id),
+            HttpContext.RequestAborted);
 
         var parsedItemsByOrderId = orders.ToDictionary(
             x => x.Id,
@@ -91,8 +100,20 @@ public class OrdersController : ControllerBase
                     };
                 }),
                 order.TotalAmount,
+                order.ShippingAmount,
                 order.Status,
                 order.PaymentMethod,
+                order.ShippingMethod,
+                order.PickupPointId,
+                order.YandexRequestId,
+                order.YandexDeliveryStatus,
+                order.YandexDeliveryStatusDescription,
+                order.YandexDeliveryStatusReason,
+                order.YandexDeliveryStatusUpdatedAt,
+                order.YandexDeliveryStatusSyncedAt,
+                order.YandexDeliveryTrackingUrl,
+                order.YandexPickupCode,
+                order.YandexDeliveryLastSyncError,
                 order.ShippingAddress,
                 order.CreatedAt
             };
@@ -195,10 +216,9 @@ public class OrdersController : ControllerBase
                     };
                 })
                 .ToList();
-            var computedTotalAmount = Math.Round(serializedItems.Sum(item => item.unitPrice * item.quantity), 2, MidpointRounding.AwayFromZero);
-            var resolvedTotalAmount = computedTotalAmount > 0
-                ? computedTotalAmount
-                : Math.Round(payload.TotalAmount, 2, MidpointRounding.AwayFromZero);
+            var computedItemsAmount = Math.Round(serializedItems.Sum(item => item.unitPrice * item.quantity), 2, MidpointRounding.AwayFromZero);
+            var resolvedShippingAmount = Math.Max(0d, Math.Round(payload.ShippingAmount ?? 0d, 2, MidpointRounding.AwayFromZero));
+            var resolvedTotalAmount = Math.Round(computedItemsAmount + resolvedShippingAmount, 2, MidpointRounding.AwayFromZero);
 
             var resolvedStatus = string.IsNullOrWhiteSpace(payload.Status)
                 ? "processing"
@@ -209,6 +229,12 @@ public class OrdersController : ControllerBase
             var resolvedPurchaseChannel = string.IsNullOrWhiteSpace(payload.PurchaseChannel)
                 ? "web"
                 : payload.PurchaseChannel.Trim().ToLowerInvariant();
+            var resolvedShippingMethod = string.Equals(payload.ShippingMethod?.Trim(), "pickup", StringComparison.OrdinalIgnoreCase)
+                ? "pickup"
+                : "home";
+            var resolvedPickupPointId = string.IsNullOrWhiteSpace(payload.PickupPointId)
+                ? null
+                : payload.PickupPointId.Trim();
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
             var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
                 ? user.Email
@@ -222,16 +248,7 @@ public class OrdersController : ControllerBase
                     ["kind"] = "created",
                     ["changedAt"] = now,
                     ["changedBy"] = user.Email,
-                    ["comment"] = "Заказ создан",
-                    ["fieldChanges"] = BuildInitialOrderFieldChanges(
-                        resolvedStatus,
-                        resolvedPaymentMethod,
-                        resolvedPurchaseChannel,
-                        resolvedCustomerName,
-                        resolvedCustomerEmail,
-                        resolvedCustomerPhone,
-                        resolvedShippingAddress,
-                        resolvedTotalAmount)
+                    ["comment"] = "Заказ создан"
                 }
             };
 
@@ -244,6 +261,9 @@ public class OrdersController : ControllerBase
                 Status = resolvedStatus,
                 PaymentMethod = resolvedPaymentMethod,
                 PurchaseChannel = resolvedPurchaseChannel,
+                ShippingMethod = resolvedShippingMethod,
+                ShippingAmount = resolvedShippingAmount,
+                PickupPointId = resolvedPickupPointId,
                 ShippingAddress = resolvedShippingAddress,
                 CustomerName = resolvedCustomerName,
                 CustomerEmail = resolvedCustomerEmail,
@@ -260,7 +280,7 @@ public class OrdersController : ControllerBase
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
-            await _emailService.TrySendOrderCreatedEmailAsync(order);
+            _orderEmailQueue.QueueOrderCreatedEmail(order);
             return Results.Ok(new
             {
                 id = order.Id,
@@ -276,52 +296,6 @@ public class OrdersController : ControllerBase
         {
             return Results.Conflict(new { detail = "Остатки изменились во время оформления заказа. Обновите корзину и попробуйте снова." });
         }
-    }
-
-    private static List<Dictionary<string, object?>> BuildInitialOrderFieldChanges(
-        string status,
-        string paymentMethod,
-        string purchaseChannel,
-        string customerName,
-        string customerEmail,
-        string customerPhone,
-        string shippingAddress,
-        double totalAmount)
-    {
-        var changes = new List<Dictionary<string, object?>>();
-
-        AddInitialOrderFieldChange(changes, "status", status);
-        AddInitialOrderFieldChange(changes, "paymentMethod", paymentMethod);
-        AddInitialOrderFieldChange(changes, "purchaseChannel", purchaseChannel);
-        AddInitialOrderFieldChange(changes, "customerName", customerName);
-        AddInitialOrderFieldChange(changes, "customerEmail", customerEmail);
-        AddInitialOrderFieldChange(changes, "customerPhone", customerPhone);
-        AddInitialOrderFieldChange(changes, "shippingAddress", shippingAddress);
-        if (totalAmount > 0)
-        {
-            changes.Add(new Dictionary<string, object?>
-            {
-                ["field"] = "totalAmount",
-                ["oldValue"] = null,
-                ["newValue"] = totalAmount
-            });
-        }
-
-        return changes;
-    }
-
-    private static void AddInitialOrderFieldChange(List<Dictionary<string, object?>> changes, string field, string? value)
-    {
-        var normalized = value?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized))
-            return;
-
-        changes.Add(new Dictionary<string, object?>
-        {
-            ["field"] = field,
-            ["oldValue"] = null,
-            ["newValue"] = normalized
-        });
     }
 
     private static List<NormalizedOrderItem> NormalizeOrderItems(List<Dictionary<string, object>> items)

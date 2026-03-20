@@ -107,6 +107,7 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<ContactChangeRequest>().HasIndex(x => x.State);
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
         modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
+        modelBuilder.Entity<Order>().HasIndex(x => x.YandexRequestId);
         modelBuilder.Entity<Order>()
             .Property(x => x.OrderNumber)
             .HasDefaultValueSql("nextval('orders_order_number_seq')")

@@ -225,3 +225,51 @@
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   }
 }
+
+.admin-date-input {
+  position: relative;
+  text-align: center;
+  text-align-last: center;
+}
+
+.admin-date-input::-webkit-datetime-edit {
+  display: flex;
+  min-width: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  text-align: center;
+}
+
+.admin-date-input::-webkit-datetime-edit-fields-wrapper {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+.admin-date-input::-webkit-date-and-time-value {
+  min-width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.admin-date-input::-webkit-datetime-edit-day-field,
+.admin-date-input::-webkit-datetime-edit-month-field,
+.admin-date-input::-webkit-datetime-edit-year-field,
+.admin-date-input::-webkit-datetime-edit-text {
+  padding: 0;
+}
+
+.admin-date-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  transform: translateY(-50%);
+  opacity: 0;
+  cursor: pointer;
+}

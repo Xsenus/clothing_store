@@ -20,7 +20,7 @@ function AuthMiniFooter() {
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
         <Link className="underline-offset-2 hover:underline" to="/privacy">Политика конфиденциальности</Link>
         <span className="hidden sm:inline">•</span>
-        <Link className="underline-offset-2 hover:underline" to="/agreement">Соглашение</Link>
+        <Link className="underline-offset-2 hover:underline" to="/terms">Соглашение</Link>
         <span className="hidden sm:inline">•</span>
         <Link className="underline-offset-2 hover:underline" to="/offer">Оферта</Link>
       </div>

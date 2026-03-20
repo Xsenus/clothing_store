@@ -107,6 +107,11 @@ const PAYMENT_METHOD_LABELS = {
   cash: "Наличные",
 };
 
+const SHIPPING_METHOD_LABELS = {
+  home: "До двери",
+  pickup: "ПВЗ",
+};
+
 const parseJsonArray = (raw) => {
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -121,6 +126,27 @@ const formatOrderDate = (raw) => {
   if (!value) return "—";
   const normalized = value > 10_000_000_000 ? value : value * 1000;
   return new Date(normalized).toLocaleDateString();
+};
+
+const formatOrderDateTime = (raw) => {
+  const value = Number(raw || 0);
+  if (!value) return "—";
+  const normalized = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(normalized).toLocaleString("ru-RU");
+};
+
+const getYandexDeliveryStatusText = (order) => {
+  const description = String(order?.yandexDeliveryStatusDescription || "").trim();
+  if (description) return description;
+
+  const statusCode = String(order?.yandexDeliveryStatus || "").trim();
+  if (statusCode) return statusCode;
+
+  if (String(order?.yandexRequestId || "").trim()) {
+    return "Статус доставки обновится позже";
+  }
+
+  return "";
 };
 
 const formatRubles = (raw) => {
@@ -500,15 +526,15 @@ export default function ProfilePage() {
         />
         <Header />
 
-        <main className="flex-1 container mx-auto px-4 py-12">
-          <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter mb-8">МОЙ АККАУНТ</h1>
+        <main className="flex-1 container mx-auto px-4 pb-8 pt-24 sm:pb-12 md:pb-12 md:pt-20">
+          <h1 className="mb-6 text-3xl font-black uppercase tracking-tighter sm:text-4xl md:mb-8 md:text-5xl">МОЙ АККАУНТ</h1>
 
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
-              <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">ЗАКАЗЫ</TabsTrigger>
-              <TabsTrigger value="wishlist" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">ИЗБРАННОЕ</TabsTrigger>
-              <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">НАСТРОЙКИ</TabsTrigger>
-              {isAdmin && <TabsTrigger value="admin" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest text-gray-400 data-[state=active]:text-black transition-all">АДМИН</TabsTrigger>}
+            <TabsList className="mb-6 h-auto w-full justify-start gap-3 overflow-x-auto border-b border-gray-200 bg-transparent p-0 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mb-8 md:gap-8">
+              <TabsTrigger value="orders" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">ЗАКАЗЫ</TabsTrigger>
+              <TabsTrigger value="wishlist" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">ИЗБРАННОЕ</TabsTrigger>
+              <TabsTrigger value="settings" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">НАСТРОЙКИ</TabsTrigger>
+              {isAdmin && <TabsTrigger value="admin" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">АДМИН</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="orders" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -542,6 +568,29 @@ export default function ProfilePage() {
                                 {ORDER_STATUS_LABELS[order.status] || order.status || "В обработке"}
                               </span>
                             </div>
+
+                            {String(order.yandexRequestId || "").trim() ? (
+                              <div className="rounded-none border border-gray-200 bg-gray-50 p-3 text-sm">
+                                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-400">Яндекс.Доставка</p>
+                                <p className="font-medium">{getYandexDeliveryStatusText(order)}</p>
+                                {order.yandexPickupCode ? (
+                                  <p className="mt-1 text-gray-700">Код получения: <span className="font-semibold">{order.yandexPickupCode}</span></p>
+                                ) : null}
+                                {order.yandexDeliveryStatusUpdatedAt ? (
+                                  <p className="mt-1 text-xs text-gray-500">Статус обновлен: {formatOrderDateTime(order.yandexDeliveryStatusUpdatedAt)}</p>
+                                ) : null}
+                                {order.yandexDeliveryTrackingUrl ? (
+                                  <a
+                                    href={order.yandexDeliveryTrackingUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-2 inline-flex text-xs font-semibold uppercase tracking-[0.16em] underline underline-offset-2"
+                                  >
+                                    Отслеживать в Яндекс.Доставке
+                                  </a>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
 
                           <div className="min-w-0">
@@ -589,6 +638,12 @@ export default function ProfilePage() {
                             <div className="text-left xl:text-right">
                               <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Итого</p>
                               <p className="text-2xl font-black leading-none">{formatRubles(order.totalAmount)}</p>
+                              <div className="mt-2 text-xs text-gray-500">
+                                Доставка: {SHIPPING_METHOD_LABELS[order.shippingMethod] || order.shippingMethod || "—"}
+                                {Number.isFinite(Number(order.shippingAmount))
+                                  ? ` · ${formatRubles(order.shippingAmount)}`
+                                  : ""}
+                              </div>
                             </div>
 
                             <div className="space-y-2 text-sm">
@@ -600,6 +655,12 @@ export default function ProfilePage() {
                                 <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Адрес</p>
                                 <p className="break-words text-gray-700">{order.shippingAddress || "—"}</p>
                               </div>
+                              {String(order.yandexRequestId || "").trim() ? (
+                                <div>
+                                  <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Статус доставки</p>
+                                  <p className="break-words text-gray-700">{getYandexDeliveryStatusText(order)}</p>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </div>

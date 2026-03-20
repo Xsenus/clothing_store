@@ -931,6 +931,42 @@ public class Order
     [Column("purchase_channel")]
     public string PurchaseChannel { get; set; } = "web";
 
+    [Column("shipping_method")]
+    public string ShippingMethod { get; set; } = "home";
+
+    [Column("shipping_amount")]
+    public double ShippingAmount { get; set; }
+
+    [Column("pickup_point_id")]
+    public string? PickupPointId { get; set; }
+
+    [Column("yandex_request_id")]
+    public string? YandexRequestId { get; set; }
+
+    [Column("yandex_delivery_status")]
+    public string? YandexDeliveryStatus { get; set; }
+
+    [Column("yandex_delivery_status_description")]
+    public string? YandexDeliveryStatusDescription { get; set; }
+
+    [Column("yandex_delivery_status_reason")]
+    public string? YandexDeliveryStatusReason { get; set; }
+
+    [Column("yandex_delivery_status_updated_at")]
+    public long? YandexDeliveryStatusUpdatedAt { get; set; }
+
+    [Column("yandex_delivery_status_synced_at")]
+    public long? YandexDeliveryStatusSyncedAt { get; set; }
+
+    [Column("yandex_delivery_tracking_url")]
+    public string? YandexDeliveryTrackingUrl { get; set; }
+
+    [Column("yandex_pickup_code")]
+    public string? YandexPickupCode { get; set; }
+
+    [Column("yandex_delivery_last_sync_error")]
+    public string? YandexDeliveryLastSyncError { get; set; }
+
     [Column("shipping_address")]
     public string ShippingAddress { get; set; } = string.Empty;
 

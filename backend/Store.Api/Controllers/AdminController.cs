@@ -23,23 +23,32 @@ public class AdminController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
-    private readonly AdminDataSeeder _adminDataSeeder;
     private readonly ITelegramBotManager _telegramBotManager;
     private readonly TransactionalEmailService _emailService;
+    private readonly IOrderEmailQueue _orderEmailQueue;
+    private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
 
     private sealed record NormalizedOrderItem(string ProductId, string Size, string LookupSize, int Quantity);
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
     /// </summary>
-    public AdminController(IConfiguration configuration, StoreDbContext db, AuthService auth, AdminDataSeeder adminDataSeeder, ITelegramBotManager telegramBotManager, TransactionalEmailService emailService)
+    public AdminController(
+        IConfiguration configuration,
+        StoreDbContext db,
+        AuthService auth,
+        ITelegramBotManager telegramBotManager,
+        TransactionalEmailService emailService,
+        IOrderEmailQueue orderEmailQueue,
+        IYandexDeliveryTrackingService yandexDeliveryTrackingService)
     {
         _configuration = configuration;
         _db = db;
         _auth = auth;
-        _adminDataSeeder = adminDataSeeder;
         _telegramBotManager = telegramBotManager;
         _emailService = emailService;
+        _orderEmailQueue = orderEmailQueue;
+        _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
     }
 
     /// <summary>
@@ -106,7 +115,7 @@ public class AdminController : ControllerBase
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
 
         var resolvedPageSize = Math.Clamp(pageSize, 5, 100);
-        IQueryable<Order> query = _db.Orders.AsNoTracking();
+        IQueryable<Order> query = _db.Orders;
 
         if (!string.IsNullOrWhiteSpace(userId))
         {
@@ -181,6 +190,9 @@ public class AdminController : ControllerBase
             .Skip((resolvedPage - 1) * resolvedPageSize)
             .Take(resolvedPageSize)
             .ToListAsync();
+        await _yandexDeliveryTrackingService.SyncOrderStatusesAsync(
+            orders.Select(order => order.Id),
+            HttpContext.RequestAborted);
 
         var userIds = orders.Select(x => x.UserId).Distinct().ToList();
         var users = userIds.Count == 0
@@ -234,9 +246,21 @@ public class AdminController : ControllerBase
                             profile.PhoneVerified
                         },
                     o.TotalAmount,
+                    o.ShippingAmount,
                     o.Status,
                     o.PaymentMethod,
                     o.PurchaseChannel,
+                    o.ShippingMethod,
+                    o.PickupPointId,
+                    o.YandexRequestId,
+                    o.YandexDeliveryStatus,
+                    o.YandexDeliveryStatusDescription,
+                    o.YandexDeliveryStatusReason,
+                    o.YandexDeliveryStatusUpdatedAt,
+                    o.YandexDeliveryStatusSyncedAt,
+                    o.YandexDeliveryTrackingUrl,
+                    o.YandexPickupCode,
+                    o.YandexDeliveryLastSyncError,
                     o.ShippingAddress,
                     o.CustomerName,
                     o.CustomerEmail,
@@ -291,7 +315,10 @@ public class AdminController : ControllerBase
         var nextCustomerName = payload.CustomerName is null ? order.CustomerName : payload.CustomerName.Trim();
         var nextCustomerEmail = payload.CustomerEmail is null ? order.CustomerEmail : payload.CustomerEmail.Trim();
         var nextCustomerPhone = payload.CustomerPhone is null ? order.CustomerPhone : payload.CustomerPhone.Trim();
-        var fieldChanges = BuildOrderFieldChanges(order, nextStatus, nextShippingAddress, nextPaymentMethod, nextCustomerName, nextCustomerEmail, nextCustomerPhone);
+        var nextYandexRequestId = payload.YandexRequestId is null
+            ? order.YandexRequestId
+            : NormalizeOptionalText(payload.YandexRequestId);
+        var fieldChanges = BuildOrderFieldChanges(order, nextStatus, nextShippingAddress, nextPaymentMethod, nextCustomerName, nextCustomerEmail, nextCustomerPhone, nextYandexRequestId);
 
         if (fieldChanges.Count == 0)
             return Results.Ok(new { ok = true, noChanges = true });
@@ -309,6 +336,18 @@ public class AdminController : ControllerBase
         order.CustomerName = nextCustomerName;
         order.CustomerEmail = nextCustomerEmail;
         order.CustomerPhone = nextCustomerPhone;
+        if (!string.Equals(order.YandexRequestId, nextYandexRequestId, StringComparison.Ordinal))
+        {
+            order.YandexRequestId = nextYandexRequestId;
+            order.YandexDeliveryStatus = null;
+            order.YandexDeliveryStatusDescription = null;
+            order.YandexDeliveryStatusReason = null;
+            order.YandexDeliveryStatusUpdatedAt = null;
+            order.YandexDeliveryStatusSyncedAt = null;
+            order.YandexDeliveryTrackingUrl = null;
+            order.YandexPickupCode = null;
+            order.YandexDeliveryLastSyncError = null;
+        }
         order.UpdatedAt = now;
 
         var history = ParseOrderHistory(order.StatusHistoryJson);
@@ -329,7 +368,7 @@ public class AdminController : ControllerBase
         await tx.CommitAsync();
 
         if (!string.Equals(currentStatus, nextStatus, StringComparison.Ordinal))
-            await _emailService.TrySendOrderStatusChangedEmailAsync(order, currentStatus, payload.ManagerComment);
+            _orderEmailQueue.QueueOrderStatusChangedEmail(order, currentStatus, payload.ManagerComment);
 
         return Results.Ok(new { ok = true });
     }
@@ -495,33 +534,6 @@ public class AdminController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
-    }
-
-
-    [HttpPost("operations/seed-demo-data")]
-    [HttpPost("seed-demo-data")]
-    public async Task<IResult> SeedDemoData()
-    {
-        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-
-        try
-        {
-            var result = await _adminDataSeeder.SeedDemoDataAsync();
-            return Results.Ok(new
-            {
-                ok = true,
-                message = "Demo data seeded",
-                products = result.Products,
-                users = result.Users,
-                cartItems = result.CartItems,
-                orders = result.Orders,
-                likes = result.Likes
-            });
-        }
-        catch (Exception ex)
-        {
-            return Results.BadRequest(new { detail = ex.Message });
-        }
     }
 
 
@@ -1502,7 +1514,8 @@ public class AdminController : ControllerBase
         string nextPaymentMethod,
         string nextCustomerName,
         string nextCustomerEmail,
-        string nextCustomerPhone)
+        string nextCustomerPhone,
+        string? nextYandexRequestId)
     {
         var changes = new List<Dictionary<string, object?>>();
 
@@ -1512,6 +1525,7 @@ public class AdminController : ControllerBase
         AddOrderFieldChange(changes, "customerName", order.CustomerName, nextCustomerName);
         AddOrderFieldChange(changes, "customerEmail", order.CustomerEmail, nextCustomerEmail);
         AddOrderFieldChange(changes, "customerPhone", order.CustomerPhone, nextCustomerPhone);
+        AddOrderFieldChange(changes, "yandexRequestId", order.YandexRequestId, nextYandexRequestId);
 
         return changes;
     }

@@ -1,9 +1,6 @@
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Store.Api.Contracts;
-using Store.Api.Data;
 using Store.Api.Services;
 
 namespace Store.Api.Controllers;
@@ -12,17 +9,18 @@ namespace Store.Api.Controllers;
 [Route("integrations")]
 public class IntegrationsController : ControllerBase
 {
-    private readonly StoreDbContext _db;
-    private readonly IConfiguration _configuration;
     private readonly ITelegramBotManager _telegramBotManager;
     private readonly IDaDataAddressSuggestService _daDataAddressSuggestService;
+    private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
 
-    public IntegrationsController(StoreDbContext db, IConfiguration configuration, ITelegramBotManager telegramBotManager, IDaDataAddressSuggestService daDataAddressSuggestService)
+    public IntegrationsController(
+        ITelegramBotManager telegramBotManager,
+        IDaDataAddressSuggestService daDataAddressSuggestService,
+        IYandexDeliveryQuoteService yandexDeliveryQuoteService)
     {
-        _db = db;
-        _configuration = configuration;
         _telegramBotManager = telegramBotManager;
         _daDataAddressSuggestService = daDataAddressSuggestService;
+        _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
     }
 
     [HttpPost("telegram/webhook/{id}")]
@@ -50,53 +48,128 @@ public class IntegrationsController : ControllerBase
         }
     }
 
-    [HttpPost("yandex/delivery/calculate")]
-    public async Task<IResult> CalculateYandexDelivery([FromBody] YandexDeliveryCalculatePayload payload)
+    [HttpGet("yandex/delivery/widget-config")]
+    public async Task<IResult> GetYandexDeliveryWidgetConfig(CancellationToken cancellationToken)
     {
-        var baseCost = await GetDecimalSettingAsync("yandex_delivery_base_cost", 350m);
-        var kgCost = await GetDecimalSettingAsync("yandex_delivery_cost_per_kg", 40m);
-        var markupPercent = await GetDecimalSettingAsync("yandex_delivery_markup_percent", 0m);
-
-        var safeWeight = payload.WeightKg.GetValueOrDefault(1m);
-        if (safeWeight <= 0m)
-            safeWeight = 1m;
-
-        var estimated = baseCost + (safeWeight * kgCost);
-        if (markupPercent > 0)
-            estimated += estimated * (markupPercent / 100m);
-
-        var rounded = Math.Round(estimated, 2, MidpointRounding.AwayFromZero);
-        return Results.Ok(new
+        try
         {
-            provider = "yandex_delivery",
-            currency = "RUB",
-            toAddress = payload.ToAddress,
-            estimatedCost = rounded,
-            details = new
+            var config = await _yandexDeliveryQuoteService.GetWidgetConfigAsync(cancellationToken);
+            return Results.Ok(new
             {
-                baseCost,
-                kgCost,
-                markupPercent,
-                weightKg = safeWeight,
-                declaredCost = payload.DeclaredCost
-            }
-        });
+                scriptUrl = config.ScriptUrl,
+                testEnvironment = config.TestEnvironment,
+                sourcePlatformStationId = config.SourcePlatformStationId
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
-    private async Task<string?> GetSettingOrConfigAsync(string key, string configPath)
+    [HttpPost("yandex/delivery/pickup-points")]
+    public async Task<IResult> GetYandexDeliveryPickupPoints([FromBody] YandexDeliveryPickupPointsPayload payload, CancellationToken cancellationToken)
     {
-        var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
-        if (row is not null && !string.IsNullOrWhiteSpace(row.Value))
-            return row.Value;
-
-        return _configuration[configPath];
+        try
+        {
+            var points = await _yandexDeliveryQuoteService.ListPickupPointsAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                points = points.Select(point => new
+                {
+                    id = point.Id,
+                    name = point.Name,
+                    address = point.Address,
+                    instruction = point.Instruction,
+                    latitude = point.Latitude,
+                    longitude = point.Longitude,
+                    distanceKm = point.DistanceKm,
+                    paymentMethods = point.PaymentMethods,
+                    available = point.Available,
+                    estimatedCost = point.EstimatedCost,
+                    deliveryDays = point.DeliveryDays,
+                    error = point.Error
+                })
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
-    private async Task<decimal> GetDecimalSettingAsync(string key, decimal fallback)
+    [HttpPost("yandex/delivery/calculate")]
+    public async Task<IResult> CalculateYandexDelivery([FromBody] YandexDeliveryCalculatePayload payload, CancellationToken cancellationToken)
     {
-        var row = await _db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
-        if (row is not null && decimal.TryParse(row.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-            return value;
-        return fallback;
+        try
+        {
+            var quote = await _yandexDeliveryQuoteService.CalculateAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = quote.Provider,
+                currency = quote.Currency,
+                toAddress = quote.DestinationAddress,
+                homeDelivery = new
+                {
+                    available = quote.HomeDelivery.Available,
+                    estimatedCost = quote.HomeDelivery.EstimatedCost,
+                    deliveryDays = quote.HomeDelivery.DeliveryDays,
+                    tariff = quote.HomeDelivery.Tariff,
+                    error = quote.HomeDelivery.Error
+                },
+                pickupPointDelivery = new
+                {
+                    available = quote.NearestPickupPointDelivery.Available,
+                    estimatedCost = quote.NearestPickupPointDelivery.EstimatedCost,
+                    deliveryDays = quote.NearestPickupPointDelivery.DeliveryDays,
+                    tariff = quote.NearestPickupPointDelivery.Tariff,
+                    error = quote.NearestPickupPointDelivery.Error,
+                    point = quote.NearestPickupPointDelivery.Point is null
+                        ? null
+                        : new
+                        {
+                            id = quote.NearestPickupPointDelivery.Point.Id,
+                            name = quote.NearestPickupPointDelivery.Point.Name,
+                            address = quote.NearestPickupPointDelivery.Point.Address,
+                            instruction = quote.NearestPickupPointDelivery.Point.Instruction,
+                            latitude = quote.NearestPickupPointDelivery.Point.Latitude,
+                            longitude = quote.NearestPickupPointDelivery.Point.Longitude,
+                            distanceKm = quote.NearestPickupPointDelivery.Point.DistanceKm
+                        }
+                },
+                nearestPickupPointDelivery = new
+                {
+                    available = quote.NearestPickupPointDelivery.Available,
+                    estimatedCost = quote.NearestPickupPointDelivery.EstimatedCost,
+                    deliveryDays = quote.NearestPickupPointDelivery.DeliveryDays,
+                    tariff = quote.NearestPickupPointDelivery.Tariff,
+                    error = quote.NearestPickupPointDelivery.Error,
+                    point = quote.NearestPickupPointDelivery.Point is null
+                        ? null
+                        : new
+                        {
+                            id = quote.NearestPickupPointDelivery.Point.Id,
+                            name = quote.NearestPickupPointDelivery.Point.Name,
+                            address = quote.NearestPickupPointDelivery.Point.Address,
+                            instruction = quote.NearestPickupPointDelivery.Point.Instruction,
+                            latitude = quote.NearestPickupPointDelivery.Point.Latitude,
+                            longitude = quote.NearestPickupPointDelivery.Point.Longitude,
+                            distanceKm = quote.NearestPickupPointDelivery.Point.DistanceKm
+                        }
+                },
+                details = new
+                {
+                    testEnvironment = quote.Details.TestEnvironment,
+                    sourceStationId = quote.Details.SourceStationId,
+                    requestedWeightKg = quote.Details.RequestedWeightKg,
+                    declaredCost = quote.Details.DeclaredCost
+                }
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
+
 }

@@ -117,7 +117,7 @@ export default function Header() {
         isScrolled ? 'bg-background/80 backdrop-blur-md border-b' : 'bg-transparent'
       }`}
     >
-      <div className="container mx-auto px-4 h-20 flex items-center justify-between">
+      <div className="container mx-auto flex h-16 items-center justify-between px-4 md:h-20">
         {/* Mobile Menu */}
         <div className="md:hidden">
           <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -191,7 +191,10 @@ export default function Header() {
         </div>
 
         {/* Logo */}
-        <Link to="/" className="text-2xl md:text-3xl font-black tracking-tighter uppercase">
+        <Link
+          to="/"
+          className="max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-none md:text-3xl"
+        >
           FASHION_DEMON
         </Link>
 

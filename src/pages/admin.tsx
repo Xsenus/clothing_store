@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
+import { COOKIE_CONSENT_TEXT, PRIVACY_POLICY, PUBLIC_OFFER, USER_AGREEMENT } from '@/lib/legal-texts';
 import { type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
@@ -54,7 +55,7 @@ import {
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Upload, ShieldCheck, Play, Pause, Copy, RefreshCcw, Check, Ban, ImagePlus, Images, PlusCircle, Search, ShieldAlert, ShieldX, UserCog, ArrowUp, ArrowDown, Columns3, Eye, EyeOff, GripVertical, CalendarDays } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 interface TelegramBotCommand {
@@ -332,6 +333,7 @@ interface AdminOrder {
     phoneVerified?: boolean;
   } | null;
   totalAmount: number;
+  shippingAmount?: number;
   status: string;
   createdAt?: string | number;
   itemsJson?: string;
@@ -346,6 +348,17 @@ interface AdminOrder {
   }> | unknown;
   paymentMethod?: string;
   purchaseChannel?: string;
+  shippingMethod?: string;
+  pickupPointId?: string | null;
+  yandexRequestId?: string | null;
+  yandexDeliveryStatus?: string | null;
+  yandexDeliveryStatusDescription?: string | null;
+  yandexDeliveryStatusReason?: string | null;
+  yandexDeliveryStatusUpdatedAt?: string | number | null;
+  yandexDeliveryStatusSyncedAt?: string | number | null;
+  yandexDeliveryTrackingUrl?: string | null;
+  yandexPickupCode?: string | null;
+  yandexDeliveryLastSyncError?: string | null;
   shippingAddress?: string;
   customerName?: string;
   customerEmail?: string;
@@ -479,6 +492,11 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Наличные",
 };
 
+const SHIPPING_METHOD_LABELS: Record<string, string> = {
+  home: "До двери",
+  pickup: "ПВЗ",
+};
+
 const PURCHASE_CHANNEL_LABELS: Record<string, string> = {
   web: "Сайт",
   mobile: "Мобильное приложение",
@@ -489,6 +507,10 @@ const ORDER_HISTORY_FIELD_LABELS: Record<string, string> = {
   status: "Статус",
   paymentMethod: "Способ оплаты",
   purchaseChannel: "Канал заказа",
+  shippingMethod: "Способ доставки",
+  shippingAmount: "Стоимость доставки",
+  pickupPointId: "ID ПВЗ",
+  yandexRequestId: "ID заявки Яндекс.Доставки",
   customerName: "Получатель",
   customerEmail: "Email",
   customerPhone: "Телефон",
@@ -928,10 +950,10 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   product_detail_background_color: "#e9e3da",
   product_detail_image_fit_mode: "contain",
   product_detail_media_size_mode: "compact",
-  privacy_policy: "",
-  user_agreement: "",
-  public_offer: "",
-  cookie_consent_text: "",
+  privacy_policy: PRIVACY_POLICY,
+  user_agreement: USER_AGREEMENT,
+  public_offer: PUBLIC_OFFER,
+  cookie_consent_text: COOKIE_CONSENT_TEXT,
   auth_password_policy_enabled: "true",
   auth_session_ttl_hours: "720",
   auth_refresh_session_ttl_hours: "2160",
@@ -983,11 +1005,117 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   admin_orders_row_color_canceled: "#fee2e2",
   admin_orders_row_color_returned: "#ffedd5",
   dadata_api_key: "",
-  yandex_delivery_base_cost: "350",
-  yandex_delivery_cost_per_kg: "40",
-  yandex_delivery_markup_percent: "0",
+  yandex_delivery_use_test_environment: "false",
+  yandex_delivery_api_token: "",
+  yandex_delivery_source_station_id: "",
+  yandex_delivery_package_length_cm: "30",
+  yandex_delivery_package_height_cm: "20",
+  yandex_delivery_package_width_cm: "10",
   ...IMAGE_UPLOAD_SETTING_DEFAULTS
 };
+
+const LEGAL_SETTING_KEYS = [
+  "privacy_policy",
+  "user_agreement",
+  "public_offer",
+  "cookie_consent_text",
+] as const;
+
+const mergeSettingsWithDefaults = (rawSettings?: Record<string, string> | null) => {
+  const mergedSettings = { ...DEFAULT_APP_SETTINGS, ...(rawSettings || {}) };
+
+  for (const key of LEGAL_SETTING_KEYS) {
+    if (!String(mergedSettings[key] ?? "").trim()) {
+      mergedSettings[key] = DEFAULT_APP_SETTINGS[key];
+    }
+  }
+
+  return mergedSettings;
+};
+
+const YANDEX_TEST_SOURCE_STATION_ID = "fbed3aa1-2cc6-4370-ab4d-59c5cc9bb924";
+
+type YandexSourceStationPreset = {
+  id: string;
+  label: string;
+  address: string;
+  mode: "test" | "live";
+};
+
+const YANDEX_SOURCE_STATION_PRESETS: YandexSourceStationPreset[] = [
+  {
+    id: YANDEX_TEST_SOURCE_STATION_ID,
+    label: "Тестовый контур Яндекса",
+    address: "Demo station из документации Яндекс.Доставки",
+    mode: "test",
+  },
+  {
+    id: "0198ebbcd65571f5b61e3cdb57f253c0",
+    label: "Новосибирск",
+    address: "пер. Архонский, д. 2А, корп. 6",
+    mode: "live",
+  },
+  {
+    id: "71fe4a70-677d-44ee-adf1-6e8b9320bb08",
+    label: "Томск",
+    address: "ул. Мокрушина, д. 9, стр. 21",
+    mode: "live",
+  },
+  {
+    id: "019a2a19d7927402abdab92f025774b1",
+    label: "Омск",
+    address: "ул. 22 Декабря, д. 108А",
+    mode: "live",
+  },
+  {
+    id: "b07a534a-f6d6-40c8-963b-3930146a81ab",
+    label: "Барнаул",
+    address: "ул. Чернышевского, д. 293Б",
+    mode: "live",
+  },
+  {
+    id: "8197a006-ff4f-444b-9ea4-7df14dc54a22",
+    label: "Красноярск",
+    address: "ул. Промысловая, д. 41А",
+    mode: "live",
+  },
+  {
+    id: "dbee4575-9a39-4d34-a1c3-2594d97ee2fd",
+    label: "Екатеринбург",
+    address: "Серовский тракт, 11-й километр, д. 5",
+    mode: "live",
+  },
+  {
+    id: "3c528302-17d0-48a7-a7cd-c6f4c69ccc69",
+    label: "Казань",
+    address: "с. Столбище, ул. Почтовая, д. 1",
+    mode: "live",
+  },
+  {
+    id: "0262bd9d-5837-4209-8f09-e3217a765198",
+    label: "Москва (Строгино)",
+    address: "ул. 2-я Лыковская, д. 63, стр. 6",
+    mode: "live",
+  },
+  {
+    id: "f43a9f99-212a-44fe-acf3-54541401773b",
+    label: "Москва (Царицыно)",
+    address: "Промышленная ул., 12А",
+    mode: "live",
+  },
+  {
+    id: "d544c95c-d47d-4054-9d55-e85c3db7e523",
+    label: "Санкт-Петербург (Бугры)",
+    address: "Порошкино, ул. 23 км КАД, стр. 3",
+    mode: "live",
+  },
+  {
+    id: "434f9528-944e-4c4d-9464-ac7a0acf3942",
+    label: "Санкт-Петербург (Троицкий)",
+    address: "ул. Запорожская, д. 12, стр. 1",
+    mode: "live",
+  },
+];
 
 const DICTIONARY_FILTER_SETTING_KEYS: Partial<Record<DictionaryKind, string>> = {
   categories: "catalog_filter_categories_enabled",
@@ -1087,6 +1215,78 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [ordersStatusFilter, setOrdersStatusFilter] = useState("all");
   const [ordersDateFrom, setOrdersDateFrom] = useState("");
   const [ordersDateTo, setOrdersDateTo] = useState("");
+  const [ordersDateFromDisplay, setOrdersDateFromDisplay] = useState("");
+  const [ordersDateToDisplay, setOrdersDateToDisplay] = useState("");
+
+  const formatOrderFilterDateDisplay = (value: string) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return "";
+    }
+
+    const [year, month, day] = value.split("-");
+    return `${day}.${month}.${year}`;
+  };
+
+  const normalizeOrderFilterDateDraft = (value: string) => {
+    const digits = value.replace(/\D/g, "").slice(0, 8);
+
+    if (digits.length <= 2) {
+      return digits;
+    }
+
+    if (digits.length <= 4) {
+      return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+    }
+
+    return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+  };
+
+  const parseOrderFilterDateDraft = (value: string): string | null => {
+    const match = value.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+
+    if (!match) {
+      return null;
+    }
+
+    const [, day, month, year] = match;
+    const parsedDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      String(parsedDate.getUTCFullYear()).padStart(4, "0") !== year ||
+      String(parsedDate.getUTCMonth() + 1).padStart(2, "0") !== month ||
+      String(parsedDate.getUTCDate()).padStart(2, "0") !== day
+    ) {
+      return null;
+    }
+
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleOrderDateDraftChange = (
+    value: string,
+    setDisplayValue: (value: string) => void,
+    setIsoValue: (value: string) => void,
+  ) => {
+    const normalizedValue = normalizeOrderFilterDateDraft(value);
+    setDisplayValue(normalizedValue);
+
+    if (!normalizedValue) {
+      setIsoValue("");
+      return;
+    }
+
+    setIsoValue(parseOrderFilterDateDraft(normalizedValue) ?? "");
+  };
+
+  const handleOrderDatePickerChange = (
+    value: string,
+    setDisplayValue: (value: string) => void,
+    setIsoValue: (value: string) => void,
+  ) => {
+    setIsoValue(value);
+    setDisplayValue(formatOrderFilterDateDisplay(value));
+  };
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersPageSize, setOrdersPageSize] = useState<(typeof ORDER_PAGE_SIZE_OPTIONS)[number]>(ORDER_PAGE_SIZE_OPTIONS[0]);
   const [ordersTotalItems, setOrdersTotalItems] = useState(0);
@@ -1110,13 +1310,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     customerName: "",
     customerEmail: "",
     customerPhone: "",
+    yandexRequestId: "",
     managerComment: "",
   });
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState("auth");
   const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState("branding");
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState("telegram");
-  const [operationsLoading, setOperationsLoading] = useState(false);
-  const [isSeedDialogOpen, setIsSeedDialogOpen] = useState(false);
   const [selectedUserOrders, setSelectedUserOrders] = useState<AdminOrder[]>([]);
   const [selectedUserOrdersTotal, setSelectedUserOrdersTotal] = useState(0);
   const [selectedUserOrdersLoading, setSelectedUserOrdersLoading] = useState(false);
@@ -1326,7 +1525,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       ]);
       setUsers(Array.isArray(usersRes) ? usersRes : []);
       setStockHistory(Array.isArray(stockHistoryRes) ? stockHistoryRes : []);
-      const mergedSettings = { ...DEFAULT_APP_SETTINGS, ...(settingsRes || {}) };
+      const mergedSettings = mergeSettingsWithDefaults(settingsRes);
       const resolvedPreferences = sanitizeOrderTablePreferences(preferencesRes?.[ADMIN_ORDER_TABLE_PREFERENCE_KEY]);
       setSettings(mergedSettings);
       setOrderTablePreferences(resolvedPreferences);
@@ -1708,6 +1907,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return PURCHASE_CHANNEL_LABELS[normalized] || value || "—";
   };
 
+  const formatShippingMethod = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return SHIPPING_METHOD_LABELS[normalized] || value || "—";
+  };
+
+  const formatYandexDeliveryStatus = (order?: AdminOrder | null) => {
+    const description = String(order?.yandexDeliveryStatusDescription || "").trim();
+    if (description) {
+      return description;
+    }
+
+    const statusCode = String(order?.yandexDeliveryStatus || "").trim();
+    return statusCode || "—";
+  };
+
   const getOrderStatusBadgeClassName = (value?: string | null) => {
     switch (normalizeOrderStatusValue(value)) {
       case "canceled":
@@ -1808,7 +2022,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     const textValue = String(value).trim();
     if (!textValue) return "—";
 
-    if (field === "totalAmount") {
+    if (field === "totalAmount" || field === "shippingAmount") {
       const numeric = Number(textValue);
       return Number.isFinite(numeric) ? formatRubles(numeric) : textValue;
     }
@@ -1820,6 +2034,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         return formatPaymentMethod(textValue);
       case "purchaseChannel":
         return formatPurchaseChannel(textValue);
+      case "shippingMethod":
+        return formatShippingMethod(textValue);
       case "totalAmount": {
         const numeric = Number(textValue);
         return Number.isFinite(numeric) ? `${numeric.toFixed(2)} ₽` : textValue;
@@ -1850,6 +2066,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       customerEmail: form.customerEmail.trim(),
       customerPhone: form.customerPhone.trim(),
       shippingAddress: form.shippingAddress.trim(),
+      yandexRequestId: form.yandexRequestId.trim(),
     };
     const currentValues = {
       status: normalizeOrderStatusValue(order.status),
@@ -1858,6 +2075,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       customerEmail: (snapshot.email || "").trim(),
       customerPhone: (snapshot.phone || "").trim(),
       shippingAddress: (snapshot.shippingAddress || "").trim(),
+      yandexRequestId: String(order.yandexRequestId || "").trim(),
     };
 
     return [
@@ -1867,6 +2085,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       { field: "customerEmail", label: ORDER_HISTORY_FIELD_LABELS.customerEmail, oldValue: currentValues.customerEmail, newValue: nextValues.customerEmail },
       { field: "customerPhone", label: ORDER_HISTORY_FIELD_LABELS.customerPhone, oldValue: currentValues.customerPhone, newValue: nextValues.customerPhone },
       { field: "shippingAddress", label: ORDER_HISTORY_FIELD_LABELS.shippingAddress, oldValue: currentValues.shippingAddress, newValue: nextValues.shippingAddress },
+      { field: "yandexRequestId", label: ORDER_HISTORY_FIELD_LABELS.yandexRequestId, oldValue: currentValues.yandexRequestId, newValue: nextValues.yandexRequestId },
     ].filter((change) => String(change.oldValue ?? "").trim() !== String(change.newValue ?? "").trim());
   };
 
@@ -1882,6 +2101,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       customerName: "",
       customerEmail: "",
       customerPhone: "",
+      yandexRequestId: "",
       managerComment: "",
     });
   };
@@ -1896,6 +2116,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       customerName: snapshot.name,
       customerEmail: snapshot.email,
       customerPhone: snapshot.phone,
+      yandexRequestId: String(order?.yandexRequestId || "").trim(),
       managerComment: "",
     });
     setIsOrderDialogOpen(true);
@@ -2023,11 +2244,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const saveSettings = async () => {
     try {
       const currentRemote = await FLOW.adminGetSettings();
-      const mergedSettings = {
-        ...DEFAULT_APP_SETTINGS,
+      const mergedSettings = mergeSettingsWithDefaults({
         ...(currentRemote || {}),
         ...settings
-      };
+      });
 
       await FLOW.adminSaveSettings({ input: mergedSettings });
       setSettings(mergedSettings);
@@ -2040,6 +2260,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const updateSetting = (key: string, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const yandexSourceStationId = settings["yandex_delivery_source_station_id"] || "";
+  const selectedYandexSourcePreset = YANDEX_SOURCE_STATION_PRESETS.find((preset) => preset.id === yandexSourceStationId) || null;
+  const selectedYandexSourcePresetValue = selectedYandexSourcePreset?.id || "manual";
+
+  const applyYandexSourceStationPreset = (presetId: string) => {
+    if (presetId === "manual") {
+      return;
+    }
+
+    const preset = YANDEX_SOURCE_STATION_PRESETS.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+
+    updateSetting("yandex_delivery_source_station_id", preset.id);
+    updateSetting("yandex_delivery_use_test_environment", preset.mode === "test" ? "true" : "false");
+    toast.success(
+      preset.mode === "test"
+        ? "Подставлен тестовый SourceStationId и включен тестовый контур."
+        : `Подставлен SourceStationId для ${preset.label} и включен боевой контур.`,
+    );
   };
 
   const getSmtpSecurityMode = (): SmtpSecurityMode => (
@@ -3218,7 +3461,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const settingsGroups = [
     { id: "orders", label: "Заказы" },
     { id: "auth", label: "Авторизация" },
-    { id: "operations", label: "Регламентные операции" },
     { id: "smtp", label: "Почта (SMTP)" },
     { id: "metrics", label: "Метрики" },
     { id: "integrations", label: "Интеграции" },
@@ -4035,31 +4277,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     { key: "colors" as const, label: "Цвета", count: formData.colors.length }
   ];
 
-  const runSeedDemoData = async () => {
-    setOperationsLoading(true);
-    try {
-      const result = await FLOW.adminRunSeedDemoData();
-      setIsSeedDialogOpen(false);
-      toast.success(`Преднаполнение выполнено: товаров ${result?.products ?? 0}, пользователей ${result?.users ?? 0}, заказов ${result?.orders ?? 0}`);
-      await Promise.all([fetchProducts(), fetchAdminData()]);
-    } catch (error) {
-      let errorMessage = "Не удалось выполнить преднаполнение базы данных";
-      if (error instanceof Error && error.message) {
-        try {
-          const parsedError = JSON.parse(error.message);
-          if (parsedError?.detail) {
-            errorMessage = `Преднаполнение не выполнено: ${parsedError.detail}`;
-          }
-        } catch {
-          errorMessage = `Преднаполнение не выполнено: ${error.message}`;
-        }
-      }
-      toast.error(errorMessage);
-    } finally {
-      setOperationsLoading(false);
-    }
-  };
-
   const handleModerateReview = async (reviewId: string, action: "hide" | "show" | "delete" | "restore") => {
     if (!editingProduct) return;
 
@@ -4104,38 +4321,156 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       <div className={embedded ? "" : "min-h-screen flex flex-col bg-background text-foreground"}>
         {!embedded && <Header />}
         
-        <main className={embedded ? "" : "flex-1 container mx-auto px-4 py-12"}>
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-4xl font-black uppercase tracking-tighter">ПАНЕЛЬ АДМИНИСТРАТОРА</h1>
-            <div className="flex items-center gap-3">
-              {!embedded && <Button variant="outline" className="rounded-none font-bold uppercase tracking-widest" onClick={async () => {
+        <main className={embedded ? "" : "flex-1 container mx-auto px-4 pb-8 pt-24 md:pb-12 md:pt-20"}>
+          <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-3xl font-black uppercase tracking-tighter sm:text-4xl">ПАНЕЛЬ АДМИНИСТРАТОРА</h1>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              {!embedded && <Button variant="outline" className="w-full rounded-none font-bold uppercase tracking-widest sm:w-auto" onClick={async () => {
                 await FLOW.adminLogout();
                 navigate("/profile");
               }}>
                 ВЫЙТИ
               </Button>}
-              <Button onClick={() => handleOpen()} className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest">
+              <Button onClick={() => handleOpen()} className="w-full rounded-none bg-black font-bold uppercase tracking-widest text-white hover:bg-gray-800 sm:w-auto">
                 <Plus className="w-4 h-4 mr-2" /> ДОБАВИТЬ ТОВАР
               </Button>
             </div>
           </div>
 
           <Tabs value={selectedAdminTab} onValueChange={handleAdminTabChange} className="w-full">
-            <TabsList className="bg-transparent border-b border-gray-200 w-full justify-start rounded-none h-auto p-0 mb-8 gap-8">
-              <TabsTrigger value="products" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ТОВАРЫ</TabsTrigger>
-              <TabsTrigger value="orders" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ЗАКАЗЫ</TabsTrigger>
-              <TabsTrigger value="users" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
-              <TabsTrigger value="gallery" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">ГАЛЕРЕЯ</TabsTrigger>
-              <TabsTrigger value="dictionaries" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">СЛОВАРИ</TabsTrigger>
-              <TabsTrigger value="settings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 font-bold uppercase tracking-widest">НАСТРОЙКИ</TabsTrigger>
+            <TabsList className="mb-6 h-auto w-full justify-start gap-3 overflow-x-auto border-b border-gray-200 bg-transparent p-0 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mb-8 md:gap-8">
+              <TabsTrigger value="products" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ТОВАРЫ</TabsTrigger>
+              <TabsTrigger value="orders" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ЗАКАЗЫ</TabsTrigger>
+              <TabsTrigger value="users" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
+              <TabsTrigger value="gallery" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ГАЛЕРЕЯ</TabsTrigger>
+              <TabsTrigger value="dictionaries" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">СЛОВАРИ</TabsTrigger>
+              <TabsTrigger value="settings" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">НАСТРОЙКИ</TabsTrigger>
             </TabsList>
 
           <TabsContent value="products" className="mt-0">
           {!isOpen && (
-            <div className="border border-gray-200 rounded-none overflow-hidden">
-              <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm text-muted-foreground">
+            <div className="space-y-4">
+              <div className="border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-muted-foreground">
                 Нажмите на название товара, чтобы открыть историю остатков по размерам.
               </div>
+              <div className="space-y-3 md:hidden">
+                {products.map((product) => {
+                  const sizeNames = getProductSizeNames(product);
+                  const hasStockInfo = Boolean(product.sizeStock && Object.keys(product.sizeStock).length > 0);
+                  const stockEntries = hasStockInfo
+                    ? sizeNames.map((size) => ({
+                        size,
+                        stock: Math.max(0, Number(product.sizeStock?.[size] ?? 0)),
+                      }))
+                    : [];
+                  const totalStock = stockEntries.reduce((sum, entry) => sum + entry.stock, 0);
+                  const previewImageUrl =
+                    product.catalogImageUrl || product.images?.[0] || product.media?.find((media) => media.type === "image")?.url || "";
+                  const priceValue = Math.round(product.discountPercent ? (product.discountedPrice || product.price) : (product.basePrice || product.price));
+
+                  return (
+                    <div key={product._id} className="border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        {previewImageUrl ? (
+                          <img src={previewImageUrl} alt={product.name} className="h-24 w-20 shrink-0 bg-gray-100 object-cover" />
+                        ) : (
+                          <div className="h-24 w-20 shrink-0 bg-gray-200" />
+                        )}
+
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => openProductStockHistory(product)}
+                            className="w-full text-left transition-opacity hover:opacity-80"
+                          >
+                            <div className="truncate text-base font-bold leading-tight">{product.name}</div>
+                            {product.isHidden && (
+                              <div className="mt-1 text-[11px] font-medium uppercase tracking-[0.16em] text-amber-700">
+                                Скрыт с витрины
+                              </div>
+                            )}
+                          </button>
+
+                          <div className="text-xl font-black leading-none">{priceValue}₽</div>
+
+                          <div className="flex flex-wrap gap-1">
+                            {product.isNew && <span className="bg-black px-2 py-0.5 text-[10px] font-bold uppercase text-white">Новинка</span>}
+                            {product.isPopular && <span className="bg-gray-200 px-2 py-0.5 text-[10px] font-bold uppercase text-black">Хит</span>}
+                            {product.isHidden && <span className="bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Скрыт</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Размеры</div>
+                          {sizeNames.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {sizeNames.map((size) => (
+                                <span key={size} className="inline-flex items-center border border-gray-200 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide">
+                                  {size}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Не указаны</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Остатки</div>
+                          {hasStockInfo ? (
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-1">
+                                {stockEntries.map(({ size, stock }) => (
+                                  <span
+                                    key={size}
+                                    className={`inline-flex items-center gap-1 border px-2 py-1 text-[11px] font-semibold ${stock > 0 ? "border-gray-200 text-black" : "border-red-200 bg-red-50 text-red-600"}`}
+                                  >
+                                    <span className="uppercase tracking-wide">{size}</span>
+                                    <span>{stock}</span>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Всего: {totalStock}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Не заданы</span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => handleOpen(product)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Изменить
+                          </Button>
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => handleDuplicate(product)}>
+                            <Copy className="mr-2 h-4 w-4" />
+                            Копия
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={`h-10 rounded-none ${product.isHidden ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50"}`}
+                            onClick={() => handleToggleHidden(product)}
+                          >
+                            {product.isHidden ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
+                            {product.isHidden ? "Показать" : "Скрыть"}
+                          </Button>
+                          <Button type="button" variant="outline" className="h-10 rounded-none border-red-200 text-red-600 hover:bg-red-50" onClick={() => handleDelete(product._id)}>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Удалить
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden overflow-hidden rounded-none border border-gray-200 md:block">
               <Table>
                 <TableHeader className="bg-gray-50">
                   <TableRow>
@@ -4253,6 +4588,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   })}
                 </TableBody>
               </Table>
+              </div>
             </div>
           )}
           <Dialog open={Boolean(selectedProductStockHistory)} onOpenChange={(open) => (!open ? closeProductStockHistory() : undefined)}>
@@ -4662,6 +4998,66 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
               </div>
 
+              <div className="space-y-3 md:hidden">
+                {paginatedUsers.map((user) => {
+                  const userOrdersCount = user.ordersCount || 0;
+
+                  return (
+                    <div key={user.id} className="border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="space-y-3">
+                        <div>
+                          <div className="break-all text-base font-semibold">{user.email}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">
+                            {user.profile?.name || "Без имени"}
+                            {user.profile?.nickname ? ` · @${user.profile.nickname}` : ""}
+                            {user.profile?.phone ? ` · ${user.profile.phone}` : ""}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${user.isAdmin ? "border-black bg-black text-white" : "border-gray-200 text-black"}`}>
+                            {user.isAdmin ? "Админ" : "Пользователь"}
+                            {user.isSystem ? " (system)" : ""}
+                          </span>
+                          <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${user.isBlocked ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                            {user.isBlocked ? "Заблокирован" : "Активен"}
+                          </span>
+                          <span className="inline-flex border border-gray-200 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Заказов: {userOrdersCount}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => openUserEditModal(user)}>
+                            <UserCog className="mr-2 h-4 w-4" />
+                            Открыть
+                          </Button>
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => toggleUserBlock(user)}>
+                            {user.isBlocked ? <ShieldCheck className="mr-2 h-4 w-4" /> : <ShieldX className="mr-2 h-4 w-4" />}
+                            {user.isBlocked ? "Разблок." : "Блок."}
+                          </Button>
+                          <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => toggleUserAdmin(user)} disabled={user.isSystem}>
+                            {user.isAdmin ? <ShieldAlert className="mr-2 h-4 w-4" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                            {user.isAdmin ? "Снять admin" : "Дать admin"}
+                          </Button>
+                          <Button type="button" variant="outline" className="h-10 rounded-none border-red-200 text-red-600 hover:bg-red-50" onClick={() => deleteUser(user)} disabled={user.isSystem}>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Удалить
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {paginatedUsers.length === 0 && (
+                  <div className="border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-muted-foreground">
+                    Пользователи не найдены
+                  </div>
+                )}
+              </div>
+
+              <div className="hidden md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -4741,6 +5137,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
                 </TableBody>
               </Table>
+              </div>
 
               <div className="mt-4 flex items-center justify-between gap-3">
                 <div className="text-sm text-muted-foreground">
@@ -4959,19 +5356,71 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     ))}
                   </select>
 
-                  <Input
-                    type="date"
-                    value={ordersDateFrom}
-                    onChange={(e) => setOrdersDateFrom(e.target.value)}
-                    className="h-11 rounded-none"
-                  />
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="дд.мм.гггг"
+                      maxLength={10}
+                      value={ordersDateFromDisplay}
+                      className="h-11 rounded-none pr-12 text-center tracking-[0.08em] placeholder:text-center"
+                      onChange={(event: { target: { value: string } }) =>
+                        handleOrderDateDraftChange(
+                          event.target.value,
+                          setOrdersDateFromDisplay,
+                          setOrdersDateFrom,
+                        )
+                      }
+                    />
+                    <input
+                      type="date"
+                      value={ordersDateFrom}
+                      onChange={(event) =>
+                        handleOrderDatePickerChange(
+                          event.target.value,
+                          setOrdersDateFromDisplay,
+                          setOrdersDateFrom,
+                        )
+                      }
+                      className="absolute inset-y-0 right-0 w-12 cursor-pointer opacity-0"
+                      aria-label="Дата начала"
+                      tabIndex={-1}
+                    />
+                    <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  </div>
 
-                  <Input
-                    type="date"
-                    value={ordersDateTo}
-                    onChange={(e) => setOrdersDateTo(e.target.value)}
-                    className="h-11 rounded-none"
-                  />
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="дд.мм.гггг"
+                      maxLength={10}
+                      value={ordersDateToDisplay}
+                      className="h-11 rounded-none pr-12 text-center tracking-[0.08em] placeholder:text-center"
+                      onChange={(event: { target: { value: string } }) =>
+                        handleOrderDateDraftChange(
+                          event.target.value,
+                          setOrdersDateToDisplay,
+                          setOrdersDateTo,
+                        )
+                      }
+                    />
+                    <input
+                      type="date"
+                      value={ordersDateTo}
+                      onChange={(event) =>
+                        handleOrderDatePickerChange(
+                          event.target.value,
+                          setOrdersDateToDisplay,
+                          setOrdersDateTo,
+                        )
+                      }
+                      className="absolute inset-y-0 right-0 w-12 cursor-pointer opacity-0"
+                      aria-label="Дата окончания"
+                      tabIndex={-1}
+                    />
+                    <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  </div>
 
                   <Button
                     type="button"
@@ -4991,14 +5440,144 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       setOrderSearch("");
                       setOrdersStatusFilter("all");
                       setOrdersDateFrom("");
-                      setOrdersDateTo("");
+                          setOrdersDateTo("");
+                          setOrdersDateFromDisplay("");
+                          setOrdersDateToDisplay("");
                     }}
                   >
                     Сбросить
                   </Button>
                 </div>
 
-                <div className="border border-gray-200">
+                <div className="space-y-3 md:hidden">
+                  {ordersLoading ? (
+                    <div className="border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-muted-foreground">
+                      Загружаем заказы...
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div className="border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-muted-foreground">
+                      Заказы по текущим фильтрам не найдены
+                    </div>
+                  ) : (
+                    orders.map((order) => {
+                      const customer = resolveOrderCustomerSnapshot(order);
+                      const items = getOrderItemsDetails(order);
+                      const isTerminalOrder = TERMINAL_ORDER_STATUSES.has(normalizeOrderStatusValue(order.status));
+
+                      return (
+                        <div key={order.id} className="border border-gray-200 bg-white p-4 shadow-sm" style={getOrderRowStyle(order.status)}>
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="font-mono text-base font-bold">{formatAdminOrderNumber(order)}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{formatOrderDateTime(order.createdAt)}</div>
+                              </div>
+                              <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(order.status)}`}>
+                                {formatOrderStatus(order.status)}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Клиент</div>
+                                <div className="mt-1 break-words font-medium">{customer.email || order.userId}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {customer.name || "Без имени"}
+                                  {customer.phone ? ` · ${customer.phone}` : ""}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Сумма</div>
+                                <div className="mt-1 text-lg font-black">{formatRubles(order.totalAmount)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {formatPaymentMethod(order.paymentMethod)} · {formatShippingMethod(order.shippingMethod)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Доставка</div>
+                              <div className="mt-1 text-sm">{customer.shippingAddress || "—"}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Стоимость: {Number.isFinite(Number(order.shippingAmount)) ? formatRubles(order.shippingAmount) : "—"}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Товары</div>
+                              {items.length === 0 ? (
+                                <div className="border border-dashed border-gray-200 px-3 py-4 text-sm text-muted-foreground">
+                                  Нет данных по товарам
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  {items.map((item, index) => (
+                                    <div key={`${order.id}-${item.productId}-${item.size}-${index}`} className="grid grid-cols-[56px_minmax(0,1fr)] gap-3 border border-dashed border-gray-200 p-3">
+                                      <div className="h-16 w-14 overflow-hidden bg-gray-100">
+                                        {item.imageUrl ? (
+                                          <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center bg-gray-900 px-1 text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-white">
+                                            FD
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="font-medium leading-tight">{item.title}</div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                          Размер: {item.size || "—"} · Количество: {item.quantity}
+                                        </div>
+                                        <div className="mt-2 text-sm font-semibold">{formatRubles(item.lineTotal)}</div>
+                                        <div className="text-xs text-muted-foreground">{formatRubles(item.unitPrice)} × {item.quantity}</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {order.yandexRequestId ? (
+                              <div className="border border-gray-200 bg-gray-50 p-3 text-sm">
+                                <div className="font-medium">Яндекс: {formatYandexDeliveryStatus(order)}</div>
+                                {order.yandexDeliveryLastSyncError ? (
+                                  <div className="mt-1 text-xs text-red-600">{order.yandexDeliveryLastSyncError}</div>
+                                ) : null}
+                              </div>
+                            ) : null}
+
+                            <div className="grid grid-cols-3 gap-2">
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={() => openOrderEditor(order)}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                Откр.
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-10 rounded-none border-amber-200 text-amber-700 hover:bg-amber-50"
+                                onClick={() => openOrderActionDialog("cancel", order)}
+                                disabled={isTerminalOrder}
+                              >
+                                <Ban className="mr-2 h-4 w-4" />
+                                Отмена
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-10 rounded-none border-red-200 text-red-600 hover:bg-red-50"
+                                onClick={() => openOrderActionDialog("delete", order)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Удалить
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="hidden border border-gray-200 md:block">
                   <Table className="min-w-max table-fixed">
                     <colgroup>
                       {visibleOrderColumns.map((column) => (
@@ -5123,6 +5702,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   return (
                                     <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <div>{formatPaymentMethod(order.paymentMethod)}</div>
+                                      <div className="text-xs text-muted-foreground">Доставка: {formatShippingMethod(order.shippingMethod)}</div>
                                       <div className="text-xs text-muted-foreground">Канал: {formatPurchaseChannel(order.purchaseChannel)}</div>
                                     </TableCell>
                                   );
@@ -5131,6 +5711,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 if (column.id === "delivery") {
                                   return (
                                     <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
+                                      <div className="text-xs text-muted-foreground">
+                                        Стоимость: {Number.isFinite(Number(order.shippingAmount)) ? formatRubles(order.shippingAmount) : "—"}
+                                      </div>
                                       <div className="text-sm">{customer.shippingAddress || "—"}</div>
                                       <div className="text-xs text-muted-foreground">Получатель: {customer.name || "—"}</div>
                                     </TableCell>
@@ -5143,6 +5726,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${getOrderStatusBadgeClassName(order.status)}`}>
                                         {formatOrderStatus(order.status)}
                                       </span>
+                                      {order.yandexRequestId ? (
+                                        <div className="mt-2 space-y-1 text-xs">
+                                          <div className="text-muted-foreground">
+                                            Яндекс: {formatYandexDeliveryStatus(order)}
+                                          </div>
+                                          {order.yandexDeliveryLastSyncError ? (
+                                            <div className="text-red-600">{order.yandexDeliveryLastSyncError}</div>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
                                     </TableCell>
                                   );
                                 }
@@ -5388,10 +5981,47 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Оплата</div>
                                 <div>{formatPaymentMethod(editingOrder.paymentMethod)}</div>
+                                <div className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">Доставка</div>
+                                <div>{formatShippingMethod(editingOrder.shippingMethod)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {Number.isFinite(Number(editingOrder.shippingAmount)) ? formatRubles(editingOrder.shippingAmount) : "—"}
+                                </div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Канал заказа</div>
                                 <div>{formatPurchaseChannel(editingOrder.purchaseChannel)}</div>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">Яндекс.Доставка</div>
+                                <div className="mt-1 space-y-1 text-sm">
+                                  <div>Статус: {formatYandexDeliveryStatus(editingOrder)}</div>
+                                  <div className="text-muted-foreground">Request ID: {editingOrder.yandexRequestId || "—"}</div>
+                                  {editingOrder.yandexPickupCode ? (
+                                    <div className="text-muted-foreground">Код получения: {editingOrder.yandexPickupCode}</div>
+                                  ) : null}
+                                  {editingOrder.yandexDeliveryStatusReason ? (
+                                    <div className="text-muted-foreground">Причина: {editingOrder.yandexDeliveryStatusReason}</div>
+                                  ) : null}
+                                  {editingOrder.yandexDeliveryStatusUpdatedAt ? (
+                                    <div className="text-muted-foreground">Статус обновлен: {formatOrderDateTime(editingOrder.yandexDeliveryStatusUpdatedAt)}</div>
+                                  ) : null}
+                                  {editingOrder.yandexDeliveryStatusSyncedAt ? (
+                                    <div className="text-muted-foreground">Последний sync: {formatOrderDateTime(editingOrder.yandexDeliveryStatusSyncedAt)}</div>
+                                  ) : null}
+                                  {editingOrder.yandexDeliveryTrackingUrl ? (
+                                    <a
+                                      href={editingOrder.yandexDeliveryTrackingUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex text-sm underline underline-offset-2"
+                                    >
+                                      Открыть трекинг Яндекса
+                                    </a>
+                                  ) : null}
+                                  {editingOrder.yandexDeliveryLastSyncError ? (
+                                    <div className="text-sm text-red-600">{editingOrder.yandexDeliveryLastSyncError}</div>
+                                  ) : null}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -5530,6 +6160,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2 md:col-span-2">
+                                <Label>Yandex request ID</Label>
+                                <Input
+                                  value={orderForm.yandexRequestId}
+                                  onChange={(e) => setOrderForm((prev) => ({ ...prev, yandexRequestId: e.target.value }))}
+                                  className="rounded-none border-black"
+                                  placeholder="Например: 77241d8009bb46d0bff5c65a73077bcd-udp"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Нужен для автоматического обновления статуса доставки в профиле клиента и в админке.
+                                </p>
+                              </div>
+
+                              <div className="space-y-2 md:col-span-2">
                                 <Label>Комментарий к изменению</Label>
                                 <Textarea
                                   value={orderForm.managerComment}
@@ -5557,7 +6200,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         ) : (
                           <div className="space-y-3">
                             {editingOrderHistory.map((entry, index) => {
-                              const changes = Array.isArray(entry.fieldChanges)
+                              const changes = entry.kind === "created"
+                                ? []
+                                : Array.isArray(entry.fieldChanges)
                                 ? entry.fieldChanges.filter((change) => isOrderHistoryFieldChanged(change))
                                 : [];
                               const entryTitle = entry.kind === "created"
@@ -6023,12 +6668,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="order-1 lg:order-1">
                   <div className="border p-3 space-y-2 lg:sticky lg:top-4">
                     <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Группы</p>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
                       {settingsGroups.map((group) => (
                         <Button
                           key={group.id}
                           variant={selectedSettingsGroup === group.id ? "default" : "outline"}
-                          className="justify-start"
+                          className="h-auto min-h-11 justify-start whitespace-normal break-words px-3 py-3 text-left leading-snug"
                           onClick={() => setSelectedSettingsGroup(group.id)}
                         >
                           {group.label}
@@ -6120,41 +6765,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </div>
                           );
                         })}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedSettingsGroup === "operations" && (
-                    <div className="space-y-4 border p-3">
-                      <h3 className="font-semibold">Регламентные операции</h3>
-                      <p className="text-sm text-muted-foreground max-w-3xl">
-                        Сервисные действия для быстрого запуска полностью рабочего демо-магазина:
-                        предзаполненные товары, пользователи, корзины, лайки, заказы и отзывы.
-                      </p>
-                      <div className="border border-dashed p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div>
-                          <h4 className="font-bold uppercase tracking-wide">Преднаполнение БД</h4>
-                          <p className="text-sm text-muted-foreground">Создает 50 товаров и связанный демо-набор пользователей, заказов, корзин, лайков, комментариев и отзывов.</p>
-                        </div>
-                        <Dialog open={isSeedDialogOpen} onOpenChange={setIsSeedDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button disabled={operationsLoading} className="rounded-none font-bold uppercase tracking-widest">
-                              {operationsLoading ? "ВЫПОЛНЯЕТСЯ..." : "ЗАПУСТИТЬ ПРЕДНАПОЛНЕНИЕ"}
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Подтвердите преднаполнение БД</DialogTitle>
-                            </DialogHeader>
-                            <p className="text-sm text-muted-foreground">
-                              Текущие товары, пользователи, корзины, заказы и лайки (кроме системного администратора) будут заменены.
-                            </p>
-                            <DialogFooter>
-                              <Button variant="outline" onClick={() => setIsSeedDialogOpen(false)} disabled={operationsLoading}>Отмена</Button>
-                              <Button onClick={runSeedDemoData} disabled={operationsLoading}>Подтвердить</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
                       </div>
                     </div>
                   )}
@@ -6540,19 +7150,114 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                         <TabsContent value="yandex" className="mt-3">
                           <div className="space-y-3 border p-3">
-                            <h4 className="font-semibold">Яндекс Доставка (расчёт)</h4>
+                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                              <Checkbox
+                                id="yandex-delivery-test-environment"
+                                checked={isSettingEnabled("yandex_delivery_use_test_environment")}
+                                onCheckedChange={(checked) => updateSetting("yandex_delivery_use_test_environment", checked ? "true" : "false")}
+                              />
+                              <Label htmlFor="yandex-delivery-test-environment">Использовать тестовый контур Яндекс.Доставки</Label>
+                            </div>
+                            <div className="space-y-3 border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Быстрый выбор SourceStationId</div>
+                                <p className="text-xs text-muted-foreground">
+                                  Для сортировочного центра можно выбрать готовый ID из справочника Яндекса и сохранить его в настройках.
+                                  Для собственного склада station id обычно выдает поддержка Яндекса, поэтому такой ID нужно вставить вручную.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-source-station-preset">Пресет источника отправки</Label>
+                                  <Select value={selectedYandexSourcePresetValue} onValueChange={applyYandexSourceStationPreset}>
+                                    <SelectTrigger id="yandex-delivery-source-station-preset" className="h-11 rounded-none">
+                                      <SelectValue placeholder="Выберите источник отправки" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="manual">Свой склад или ручной ввод</SelectItem>
+                                      {YANDEX_SOURCE_STATION_PRESETS.map((preset) => (
+                                        <SelectItem key={preset.id} value={preset.id}>
+                                          {preset.label} - {preset.address}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-11 rounded-none px-4"
+                                    onClick={() => updateSetting("yandex_delivery_source_station_id", "")}
+                                  >
+                                    Очистить ID
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="rounded-none border border-black/10 bg-white p-3 text-xs text-muted-foreground">
+                                <div>
+                                  Текущий режим: {isSettingEnabled("yandex_delivery_use_test_environment") ? "тестовый контур" : "боевой контур"}
+                                </div>
+                                <div>
+                                  Текущий SourceStationId: {yandexSourceStationId || "не указан"}
+                                </div>
+                                {selectedYandexSourcePreset && (
+                                  <div>
+                                    Выбранный источник: {selectedYandexSourcePreset.label}, {selectedYandexSourcePreset.address}
+                                  </div>
+                                )}
+                                <div className="pt-1">
+                                  Значение запоминается как обычная настройка и будет использоваться во всех расчетах доставки после сохранения.
+                                </div>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="yandex-delivery-api-token">API token</Label>
+                              <Input
+                                id="yandex-delivery-api-token"
+                                type="password"
+                                value={settings["yandex_delivery_api_token"] || ""}
+                                onChange={(e) => updateSetting("yandex_delivery_api_token", e.target.value)}
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Для боевого режима укажите Bearer-токен из кабинета Яндекс.Доставки. В тестовом режиме поле можно оставить пустым и использовать тестовый токен из документации.
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="yandex-delivery-source-station-id">Source platform_station_id</Label>
+                              <Input
+                                id="yandex-delivery-source-station-id"
+                                value={settings["yandex_delivery_source_station_id"] || ""}
+                                onChange={(e) => updateSetting("yandex_delivery_source_station_id", e.target.value)}
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Идентификатор склада отправки, который используется как точка А при расчете доставки.
+                              </p>
+                            </div>
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                               <div className="space-y-1">
-                                <Label htmlFor="yandex-delivery-base-cost">Базовая стоимость (₽)</Label>
-                                <Input id="yandex-delivery-base-cost" value={settings["yandex_delivery_base_cost"] || "350"} onChange={(e) => updateSetting("yandex_delivery_base_cost", e.target.value)} />
+                                <Label htmlFor="yandex-delivery-package-length">Длина упаковки (см)</Label>
+                                <Input
+                                  id="yandex-delivery-package-length"
+                                  value={settings["yandex_delivery_package_length_cm"] || "30"}
+                                  onChange={(e) => updateSetting("yandex_delivery_package_length_cm", e.target.value)}
+                                />
                               </div>
                               <div className="space-y-1">
-                                <Label htmlFor="yandex-delivery-cost-per-kg">Стоимость за кг (₽)</Label>
-                                <Input id="yandex-delivery-cost-per-kg" value={settings["yandex_delivery_cost_per_kg"] || "40"} onChange={(e) => updateSetting("yandex_delivery_cost_per_kg", e.target.value)} />
+                                <Label htmlFor="yandex-delivery-package-height">Высота упаковки (см)</Label>
+                                <Input
+                                  id="yandex-delivery-package-height"
+                                  value={settings["yandex_delivery_package_height_cm"] || "20"}
+                                  onChange={(e) => updateSetting("yandex_delivery_package_height_cm", e.target.value)}
+                                />
                               </div>
                               <div className="space-y-1">
-                                <Label htmlFor="yandex-delivery-markup">Наценка (%)</Label>
-                                <Input id="yandex-delivery-markup" value={settings["yandex_delivery_markup_percent"] || "0"} onChange={(e) => updateSetting("yandex_delivery_markup_percent", e.target.value)} />
+                                <Label htmlFor="yandex-delivery-package-width">Ширина упаковки (см)</Label>
+                                <Input
+                                  id="yandex-delivery-package-width"
+                                  value={settings["yandex_delivery_package_width_cm"] || "10"}
+                                  onChange={(e) => updateSetting("yandex_delivery_package_width_cm", e.target.value)}
+                                />
                               </div>
                             </div>
                           </div>
@@ -6562,20 +7267,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
 
                   {selectedSettingsGroup === "legal" && (
-                    <div className="space-y-3 border p-3">
+                    <div className="space-y-4 border p-3">
                       <h3 className="font-semibold">Юридические тексты</h3>
+                      <p className="text-sm leading-6 text-muted-foreground">
+                        На телефоне удобнее редактировать каждый документ в отдельном блоке с увеличенной высотой поля.
+                      </p>
+                      <p className="text-sm leading-6 text-muted-foreground">
+                        При пустых значениях подставляются шаблонные тексты. Перед публикацией обязательно проверьте и замените реквизиты продавца, адрес и контакты.
+                      </p>
                       {[
                         ["privacy_policy", "Политика конфиденциальности"],
                         ["user_agreement", "Пользовательское соглашение"],
                         ["public_offer", "Публичная оферта"],
                         ["cookie_consent_text", "Текст cookie-согласия"]
                       ].map(([key, label]) => (
-                        <div key={key} className="space-y-1">
-                          <Label>{label}</Label>
+                        <div key={key} className="space-y-2 rounded-none border border-gray-200 p-3">
+                          <Label className="block leading-snug">{label}</Label>
                           <Textarea
                             value={settings[key] || ""}
                             onChange={(e) => updateSetting(key, e.target.value)}
-                            className="min-h-[120px]"
+                            rows={10}
+                            className="min-h-[220px] resize-y text-sm leading-6"
                           />
                         </div>
                       ))}
@@ -8659,7 +9371,3 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       </div>
   );
 }
-
-
-
-

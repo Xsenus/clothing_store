@@ -64,6 +64,9 @@ public record ReviewModerationPayload(string Action);
 public record OrderPayload(
     List<Dictionary<string, object>> Items,
     double TotalAmount,
+    double? ShippingAmount,
+    string? ShippingMethod,
+    string? PickupPointId,
     string? Status,
     string? CustomerName,
     string? CustomerEmail,
@@ -79,6 +82,7 @@ public record AdminOrderPatchPayload(
     string? CustomerName,
     string? CustomerEmail,
     string? CustomerPhone,
+    string? YandexRequestId,
     string? ManagerComment);
 
 /// <summary>
@@ -119,7 +123,19 @@ public record AddressSuggestPayload(string Query, int? Count);
 /// <summary>
 /// Параметры расчёта стоимости доставки Яндекс.
 /// </summary>
-public record YandexDeliveryCalculatePayload(string ToAddress, decimal? WeightKg, decimal? DeclaredCost);
+public record YandexDeliveryCalculatePayload(
+    string ToAddress,
+    decimal? WeightKg,
+    decimal? DeclaredCost,
+    string? PaymentMethod = null,
+    string? PickupPointId = null);
+
+public record YandexDeliveryPickupPointsPayload(
+    string ToAddress,
+    string? PaymentMethod = null,
+    int? Limit = null,
+    decimal? WeightKg = null,
+    decimal? DeclaredCost = null);
 
 public record TelegramBotCommandPayload(string Command, string Description);
 

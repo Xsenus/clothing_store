@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { fetchPublicSettings } from '@/lib/site-settings';
+import { COOKIE_CONSENT_TEXT } from '@/lib/legal-texts';
 
 const consentKey = 'cookieConsentAccepted';
 
 export default function CookieBanner() {
   const [visible, setVisible] = useState(false);
-  const [text, setText] = useState('Мы используем cookie для улучшения работы сайта. Продолжая пользоваться сайтом, вы соглашаетесь с этим.');
+  const [text, setText] = useState(COOKIE_CONSENT_TEXT);
 
   useEffect(() => {
     const accepted = localStorage.getItem(consentKey) === '1';

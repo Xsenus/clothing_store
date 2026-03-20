@@ -698,6 +698,14 @@ export const FLOW = {
     body: JSON.stringify({ query: input.query, count: input.count || 5 }),
   }),
 
+  getYandexDeliveryWidgetConfig: async () => request("/integrations/yandex/delivery/widget-config"),
+
+  getYandexDeliveryPickupPoints: async ({ input }) => request("/integrations/yandex/delivery/pickup-points", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   yandexDeliveryCalculate: async ({ input }) => request("/integrations/yandex/delivery/calculate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -884,27 +892,6 @@ export const FLOW = {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }),
-
-  adminRunSeedDemoData: async () => {
-    try {
-      return await request("/admin/operations/seed-demo-data", {
-        method: "POST",
-      });
-    } catch (error) {
-      const status = typeof error === "object" && error !== null && "status" in error
-        ? Number(error.status)
-        : null;
-      const message = error instanceof Error ? error.message : String(error || "");
-      const isNotFound = status === 404 || message.includes("404") || message.includes("Not Found");
-      if (!isNotFound) {
-        throw error;
-      }
-
-      return request("/admin/seed-demo-data", {
-        method: "POST",
-      });
-    }
-  },
 
   getPublicSettings: async () => request("/settings/public"),
 

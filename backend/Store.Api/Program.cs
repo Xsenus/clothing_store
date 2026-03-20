@@ -47,15 +47,19 @@ builder.Services.AddDbContext<StoreDbContext>(opt => opt.UseNpgsql(databaseUrl))
 builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
-builder.Services.AddScoped<AdminDataSeeder>();
 builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestService>();
+builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
+builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
 builder.Services.AddScoped<TransactionalEmailService>();
+builder.Services.AddSingleton<OrderEmailQueue>();
+builder.Services.AddSingleton<IOrderEmailQueue>(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddSingleton<GalleryStorageService>();
 builder.Services.AddSingleton<TelegramBotManager>();
 builder.Services.AddSingleton<ITelegramBotManager>(sp => sp.GetRequiredService<TelegramBotManager>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotManager>());
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
