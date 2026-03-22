@@ -142,6 +142,7 @@ Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/clothing-store-api/dotnet-
 Environment=DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 Environment=DOTNET_NOLOGO=1
 Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=DatabaseBackup__Directory=/var/lib/clothing-store-api/backups/database
 EnvironmentFile=/etc/clothing-store/environment
 
 [Install]
@@ -157,6 +158,7 @@ sudo systemctl status clothing-store-api --no-pager
 Эталонный шаблон в репозитории: [deploy/systemd/clothing-store-api.service](../deploy/systemd/clothing-store-api.service).
 
 Дополнительные переменные окружения `HOME` / `DOTNET_*` не дают .NET host пытаться записывать first-run файлы в `/var/www/.dotnet`, когда сервис работает от `www-data`.
+`DatabaseBackup__Directory` в unit-файле уводит дампы БД в `/var/lib/clothing-store-api/backups/database`, чтобы сервис не пытался создавать их внутри git-каталога `/opt/clothing_store/backend`.
 
 ## 9) Настройка Nginx
 ```bash

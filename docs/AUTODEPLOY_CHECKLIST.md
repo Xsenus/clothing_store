@@ -81,6 +81,7 @@ journalctl -u clothing-store-api -n 100 --no-pager
 - `EnvironmentFiles=/etc/clothing-store/environment`
 - `HOME=/var/lib/clothing-store-api`
 - `DOTNET_CLI_HOME=/var/lib/clothing-store-api/.dotnet`
+- `DatabaseBackup__Directory=/var/lib/clothing-store-api/backups/database`
 
 ## 6) Ожидаемое состояние Nginx
 Быстрая проверка:

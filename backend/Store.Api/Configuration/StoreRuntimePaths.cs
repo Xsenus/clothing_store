@@ -31,10 +31,10 @@ public sealed class StoreRuntimePaths
             configuration["Storage:UploadsDir"],
             repositoryRoot,
             Path.Combine("backend", "uploads"));
-        var databaseBackupsDir = ResolveAbsolutePath(
+        var databaseBackupsDir = ResolveDatabaseBackupsDir(
             configuration["DatabaseBackup:Directory"],
             repositoryRoot,
-            Path.Combine("backend", "backups", "database"));
+            appBaseDirectory);
 
         return new StoreRuntimePaths(repositoryRoot, seedProductsPath, uploadsDir, databaseBackupsDir);
     }
@@ -105,5 +105,42 @@ public sealed class StoreRuntimePaths
         return Path.IsPathRooted(configuredPath)
             ? Path.GetFullPath(configuredPath)
             : Path.GetFullPath(Path.Combine(repositoryRoot, configuredPath));
+    }
+
+    private static string ResolveDatabaseBackupsDir(string? configuredPath, string repositoryRoot, string appBaseDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return ResolveAbsolutePath(configuredPath, repositoryRoot, Path.Combine("backend", "backups", "database"));
+        }
+
+        if (IsPathWithin(appBaseDirectory, repositoryRoot))
+        {
+            return Path.GetFullPath(Path.Combine(repositoryRoot, "backend", "backups", "database"));
+        }
+
+        var homeDirectory = Environment.GetEnvironmentVariable("HOME");
+        if (!string.IsNullOrWhiteSpace(homeDirectory) && Path.IsPathRooted(homeDirectory))
+        {
+            return Path.GetFullPath(Path.Combine(homeDirectory, "backups", "database"));
+        }
+
+        return Path.GetFullPath(Path.Combine(appBaseDirectory, "backups", "database"));
+    }
+
+    private static bool IsPathWithin(string candidatePath, string rootPath)
+    {
+        var normalizedCandidate = NormalizeDirectory(candidatePath);
+        var normalizedRoot = NormalizeDirectory(rootPath);
+
+        return normalizedCandidate.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDirectory(string path)
+    {
+        var fullPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return fullPath + Path.DirectorySeparatorChar;
     }
 }

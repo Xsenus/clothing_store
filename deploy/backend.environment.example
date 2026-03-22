@@ -43,7 +43,9 @@ Auth__Yandex__ClientSecret=
 # Linux example for pg_dump: /usr/bin/pg_dump
 # Windows example for pg_dump: C:\Program Files\PostgreSQL\16\bin\pg_dump.exe
 DatabaseBackup__PgDumpPath=
-# Linux example for backup directory: /var/www/clothing_store/backups/database
+# By default the systemd unit stores backups in /var/lib/clothing-store-api/backups/database.
+# Set this only if you want to override that location.
+# Linux example for backup directory: /var/lib/clothing-store-api/backups/database
 # Windows example for backup directory: C:\clothing_store\backups\database
 DatabaseBackup__Directory=
 DatabaseBackup__Enabled=true
