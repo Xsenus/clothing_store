@@ -20,6 +20,10 @@ public class ProductsController : ControllerBase
         IReadOnlyDictionary<string, int> Colors,
         IReadOnlyDictionary<string, int> Collections);
 
+    private sealed record ProductPopularityStats(int Score, long? LastViewedAt);
+
+    private const int PopularityLookbackDays = 30;
+
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
 
@@ -56,6 +60,7 @@ public class ProductsController : ControllerBase
         var stockByProduct = stock.GroupBy(x => x.ProductId).ToDictionary(
             g => g.Key,
             g => g.ToDictionary(x => sizeMap.GetValueOrDefault(x.SizeId, x.SizeId), x => x.Stock));
+        var popularityByProduct = await LoadProductPopularityStatsAsync(productIds);
 
         return Results.Json(products.Select(product =>
         {
@@ -72,6 +77,7 @@ public class ProductsController : ControllerBase
 
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
             AppendProductVisibilityFields(json, product);
+            AppendProductPopularityFields(json, popularityByProduct.GetValueOrDefault(product.Id));
             return json;
         }));
     }
@@ -88,8 +94,9 @@ public class ProductsController : ControllerBase
     {
         var includeHidden = await _auth.RequireAdminAsync(Request);
         return Results.Json(await BuildOrderedProductPayloadsAsync(
-            ApplyProductVisibility(_db.Products.Where(p => p.IsPopular), includeHidden).OrderByDescending(p => p.LikesCount),
-            includeHidden));
+            ApplyProductVisibility(_db.Products, includeHidden),
+            appendVisibilityFields: includeHidden,
+            sortByPopularity: true));
     }
 
     [HttpGet("filters")]
@@ -369,8 +376,9 @@ public class ProductsController : ControllerBase
     {
         var includeHidden = await _auth.RequireAdminAsync(Request);
         return Results.Json(await BuildOrderedProductPayloadsAsync(
-            ApplyProductVisibility(_db.Products.Where(p => p.Category == category && p.IsPopular), includeHidden).OrderByDescending(p => p.LikesCount),
-            includeHidden));
+            ApplyProductVisibility(_db.Products.Where(p => p.Category == category), includeHidden),
+            appendVisibilityFields: includeHidden,
+            sortByPopularity: true));
     }
 
     [HttpGet("{slug}/collections")]
@@ -469,7 +477,63 @@ public class ProductsController : ControllerBase
 
         ApplyDictionaryOrdering(json, dictionaryOrderMaps);
         AppendProductVisibilityFields(json, p);
+        AppendProductPopularityFields(json, (await LoadProductPopularityStatsAsync([p.Id])).GetValueOrDefault(p.Id));
         return Results.Json(json);
+    }
+
+    [HttpPost("{productId}/view")]
+    public async Task<IResult> RegisterView(string productId, [FromBody] ProductViewPayload? payload)
+    {
+        var includeHidden = await _auth.RequireAdminAsync(Request);
+        var product = await FindProductByIdAsync(productId, includeHidden);
+        if (product is null)
+            return Results.NotFound(new { detail = "Product not found" });
+
+        var user = await _auth.RequireUserAsync(Request);
+        var visitorId = NormalizeVisitorId(payload?.VisitorId);
+        var viewerKey = user is not null
+            ? $"user:{user.Id}"
+            : (visitorId is { Length: > 0 } ? $"visitor:{visitorId}" : null);
+
+        if (string.IsNullOrWhiteSpace(viewerKey))
+            return Results.Ok(new { tracked = false });
+
+        var now = DateTimeOffset.UtcNow;
+        var nowUnix = now.ToUnixTimeMilliseconds();
+        var dayKey = int.Parse(now.ToString("yyyyMMdd"));
+
+        var existing = await _db.ProductViews.FirstOrDefaultAsync(x =>
+            x.ProductId == productId
+            && x.ViewerKey == viewerKey
+            && x.DayKey == dayKey);
+
+        if (existing is null)
+        {
+            _db.ProductViews.Add(new ProductView
+            {
+                ProductId = productId,
+                UserId = user?.Id,
+                VisitorId = user is null ? visitorId : null,
+                ViewerKey = viewerKey,
+                DayKey = dayKey,
+                ViewCount = 1,
+                FirstViewedAt = nowUnix,
+                LastViewedAt = nowUnix
+            });
+        }
+        else
+        {
+            existing.ViewCount += 1;
+            existing.LastViewedAt = nowUnix;
+            if (user is not null && string.IsNullOrWhiteSpace(existing.UserId))
+            {
+                existing.UserId = user.Id;
+                existing.VisitorId = null;
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return Results.Ok(new { tracked = true });
     }
 
     private static bool ParseBooleanSetting(IDictionary<string, string> settings, string key, bool fallback)
@@ -1116,10 +1180,23 @@ public class ProductsController : ControllerBase
             collections.ToDictionary(x => x.Name.Trim().ToLowerInvariant(), x => x.SortOrder, StringComparer.OrdinalIgnoreCase));
     }
 
-    private async Task<List<JsonObject>> BuildOrderedProductPayloadsAsync(IQueryable<Product> query, bool appendVisibilityFields = false)
+    private async Task<List<JsonObject>> BuildOrderedProductPayloadsAsync(
+        IQueryable<Product> query,
+        bool appendVisibilityFields = false,
+        bool sortByPopularity = false)
     {
         var products = await query.ToListAsync();
         var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
+        var popularityByProduct = await LoadProductPopularityStatsAsync(products.Select(product => product.Id));
+
+        if (sortByPopularity)
+        {
+            products = products
+                .OrderByDescending(product => popularityByProduct.GetValueOrDefault(product.Id)?.Score ?? 0)
+                .ThenByDescending(product => popularityByProduct.GetValueOrDefault(product.Id)?.LastViewedAt ?? 0)
+                .ThenByDescending(product => product.CreationTime)
+                .ToList();
+        }
 
         return products.Select(product =>
         {
@@ -1127,6 +1204,7 @@ public class ProductsController : ControllerBase
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
             if (appendVisibilityFields)
                 AppendProductVisibilityFields(json, product);
+            AppendProductPopularityFields(json, popularityByProduct.GetValueOrDefault(product.Id));
             return json;
         }).ToList();
     }
@@ -1135,12 +1213,59 @@ public class ProductsController : ControllerBase
     {
         json.Remove("isHidden");
         json.Remove("hiddenAt");
+        json.Remove("popularityScore");
+        json.Remove("popularityUpdatedAt");
     }
 
     private static void AppendProductVisibilityFields(JsonObject json, Product product)
     {
         json["isHidden"] = product.IsHidden;
         json["hiddenAt"] = product.HiddenAt.HasValue ? JsonValue.Create(product.HiddenAt.Value) : null;
+    }
+
+    private static void AppendProductPopularityFields(JsonObject json, ProductPopularityStats? stats)
+    {
+        json["popularityScore"] = stats?.Score ?? 0;
+        json["popularityUpdatedAt"] = stats?.LastViewedAt.HasValue == true
+            ? JsonValue.Create(stats.LastViewedAt.Value)
+            : null;
+    }
+
+    private async Task<Dictionary<string, ProductPopularityStats>> LoadProductPopularityStatsAsync(IEnumerable<string> productIds)
+    {
+        var ids = productIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0)
+            return [];
+
+        var since = DateTimeOffset.UtcNow.AddDays(-PopularityLookbackDays).ToUnixTimeMilliseconds();
+        var views = await _db.ProductViews
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.ProductId) && x.LastViewedAt >= since)
+            .Select(x => new { x.ProductId, x.ViewerKey, x.LastViewedAt })
+            .ToListAsync();
+
+        return views
+            .GroupBy(x => x.ProductId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => new ProductPopularityStats(
+                    group.Select(item => item.ViewerKey).Distinct(StringComparer.Ordinal).Count(),
+                    group.Max(item => (long?)item.LastViewedAt)),
+                StringComparer.Ordinal);
+    }
+
+    private static string? NormalizeVisitorId(string? visitorId)
+    {
+        var normalized = visitorId?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        return normalized.Length > 120
+            ? normalized[..120]
+            : normalized;
     }
 
     private static void ApplyDictionaryOrdering(JsonObject json, DictionaryOrderMaps maps)

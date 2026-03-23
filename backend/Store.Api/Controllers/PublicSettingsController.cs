@@ -13,6 +13,7 @@ public class PublicSettingsController : ControllerBase
         "privacy_policy",
         "user_agreement",
         "public_offer",
+        "return_policy",
         "cookie_consent_text",
         "metrics_yandex_metrika_enabled",
         "metrics_yandex_metrika_code",

@@ -127,7 +127,7 @@ public class AuthController : ControllerBase
             profile.EmailVerified = true;
         }
         _db.VerificationCodes.Remove(code);
-        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "email");
         return Results.Ok(new
         {
             token,
@@ -148,7 +148,7 @@ public class AuthController : ControllerBase
         if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
         if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
-        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "email");
         return Results.Ok(new { token, refreshToken, user = await BuildAuthUserPayloadAsync(user) });
     }
 
@@ -183,7 +183,7 @@ public class AuthController : ControllerBase
                 ChatId: parsedChatId),
             HttpContext.RequestAborted);
 
-        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "telegram");
 
         if (existingIdentity is null)
             await _emailService.TrySendTelegramConnectedEmailAsync(user.Id, payload.Id, payload.Username);
@@ -305,7 +305,7 @@ public class AuthController : ControllerBase
             profile.PhoneVerified = true;
         }
 
-        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "telegram");
 
         request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         request.Status = "consumed";
@@ -436,7 +436,7 @@ public class AuthController : ControllerBase
         if (user is null || user.IsBlocked)
             return Results.BadRequest(new { detail = "User is not available for login" });
 
-        var (token, refreshToken) = await CreateSessionPairAsync(user.Id);
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, request.Provider);
         request.ConsumedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         request.Status = "consumed";
         await _db.SaveChangesAsync();
@@ -1081,7 +1081,7 @@ public class AuthController : ControllerBase
         return expected == payload.Hash.Trim().ToLowerInvariant();
     }
 
-    private async Task<(string token, string refreshToken)> CreateSessionPairAsync(string userId)
+    private async Task<(string token, string refreshToken)> CreateSessionPairAsync(string userId, string? loginProvider = null)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var token = AuthService.GenerateToken();
@@ -1101,8 +1101,33 @@ public class AuthController : ControllerBase
             CreatedAt = now
         });
 
+        if (!string.IsNullOrWhiteSpace(loginProvider))
+        {
+            _db.AuthEvents.Add(new AuthEvent
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                UserId = userId,
+                Provider = NormalizeAuthEventProvider(loginProvider),
+                EventType = "login",
+                CreatedAt = now
+            });
+        }
+
         await _db.SaveChangesAsync();
         return (token, refreshToken);
+    }
+
+    private static string NormalizeAuthEventProvider(string? provider)
+    {
+        var normalized = provider?.Trim().ToLowerInvariant() ?? string.Empty;
+        return normalized switch
+        {
+            "email" or "password" => "email",
+            "telegram" => "telegram",
+            "google" => "google",
+            "yandex" => "yandex",
+            _ => "other"
+        };
     }
 
     private static bool IsValidEmail(string email)

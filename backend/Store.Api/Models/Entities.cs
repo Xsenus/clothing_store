@@ -980,8 +980,86 @@ public class Like
 }
 
 /// <summary>
+/// Представляет событие изменения избранного пользователя.
+/// </summary>
+[Table("favorite_events")]
+public class FavoriteEvent
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("event_type")]
+    public string EventType { get; set; } = "added";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Представляет событие входа пользователя.
+/// </summary>
+[Table("auth_events")]
+public class AuthEvent
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Column("provider")]
+    public string Provider { get; set; } = "email";
+
+    [Column("event_type")]
+    public string EventType { get; set; } = "login";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
+/// <summary>
 /// Представляет запись заказа.
 /// </summary>
+[Table("product_views")]
+public class ProductView
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("product_id")]
+    public string ProductId { get; set; } = string.Empty;
+
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
+    [Column("visitor_id")]
+    public string? VisitorId { get; set; }
+
+    [Column("viewer_key")]
+    public string ViewerKey { get; set; } = string.Empty;
+
+    [Column("day_key")]
+    public int DayKey { get; set; }
+
+    [Column("view_count")]
+    public int ViewCount { get; set; }
+
+    [Column("first_viewed_at")]
+    public long FirstViewedAt { get; set; }
+
+    [Column("last_viewed_at")]
+    public long LastViewedAt { get; set; }
+}
+
 [Table("orders")]
 public class Order
 {

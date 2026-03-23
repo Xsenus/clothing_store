@@ -51,6 +51,7 @@ public record CartUpdatePayload(int Quantity);
 /// Данные для переключения лайка.
 /// </summary>
 public record LikeTogglePayload(string ProductId);
+public record ProductViewPayload(string? VisitorId);
 
 /// <summary>
 /// Данные отзыва.

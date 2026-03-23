@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Store.Api.Contracts;
@@ -34,7 +35,20 @@ public class CartController : ControllerBase
     {
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
-        return Results.Json(await _db.CartItems.Where(x => x.UserId == user.Id).ToListAsync());
+        var items = await _db.CartItems
+            .Where(x => x.UserId == user.Id)
+            .ToListAsync();
+        var productPayloads = await BuildProductPayloadMapAsync(items.Select(x => x.ProductId));
+
+        return Results.Json(items.Select(item => new
+        {
+            id = item.Id,
+            userId = item.UserId,
+            productId = item.ProductId,
+            size = item.Size,
+            quantity = item.Quantity,
+            product = productPayloads.GetValueOrDefault(item.ProductId)
+        }));
     }
 
     /// <summary>
@@ -83,7 +97,14 @@ public class CartController : ControllerBase
 
         var availableStock = await GetAvailableStockAsync(item.ProductId, item.Size);
         if (!availableStock.HasValue)
-            return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара" });
+        {
+            if (payload.Quantity >= item.Quantity)
+                return Results.BadRequest(new { detail = $"Размер {item.Size} недоступен для товара" });
+
+            item.Quantity = payload.Quantity;
+            await _db.SaveChangesAsync();
+            return Results.Json(item);
+        }
         if (availableStock.HasValue && payload.Quantity > availableStock.Value)
             return Results.BadRequest(new { detail = $"Недостаточно остатка для размера {item.Size}. Доступно: {availableStock.Value}" });
 
@@ -140,5 +161,57 @@ public class CartController : ControllerBase
 
         var stock = await _db.ProductSizeStocks.FirstOrDefaultAsync(x => x.ProductId == productId && x.SizeId == sizeDictionary.Id);
         return stock?.Stock;
+    }
+
+    private async Task<Dictionary<string, JsonObject>> BuildProductPayloadMapAsync(IEnumerable<string> productIds)
+    {
+        var ids = productIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0)
+            return [];
+
+        var products = await _db.Products
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.Id))
+            .ToListAsync();
+        if (products.Count == 0)
+            return [];
+
+        var sizeMap = await _db.SizeDictionaries
+            .AsNoTracking()
+            .Select(x => new { x.Id, x.Name })
+            .ToDictionaryAsync(x => x.Id, x => x.Name, StringComparer.Ordinal);
+        var stockRows = await _db.ProductSizeStocks
+            .AsNoTracking()
+            .Where(x => ids.Contains(x.ProductId))
+            .ToListAsync();
+        var stockByProduct = stockRows
+            .GroupBy(x => x.ProductId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToDictionary(
+                    row => sizeMap.GetValueOrDefault(row.SizeId, row.SizeId),
+                    row => row.Stock,
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.Ordinal);
+
+        return products.ToDictionary(product => product.Id, product =>
+        {
+            var json = ProductJsonService.Parse(product);
+            if (stockByProduct.TryGetValue(product.Id, out var stockPayload))
+            {
+                json["sizes"] = new JsonArray(stockPayload.Keys.Select(sizeName => JsonValue.Create(sizeName)).ToArray());
+                var stockObject = new JsonObject();
+                foreach (var (sizeName, quantity) in stockPayload)
+                    stockObject[sizeName] = quantity;
+                json["sizeStock"] = stockObject;
+            }
+
+            json["isHidden"] = product.IsHidden;
+            json["hiddenAt"] = product.HiddenAt.HasValue ? JsonValue.Create(product.HiddenAt.Value) : null;
+            return json;
+        }, StringComparer.Ordinal);
     }
 }

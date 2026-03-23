@@ -453,6 +453,630 @@ public class AdminController : ControllerBase
         }
     }
 
+    [HttpGet("analytics")]
+    public async Task<IResult> Analytics(
+        [FromQuery] string? dateFrom = null,
+        [FromQuery] string? dateTo = null)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        var (resolvedDateFrom, resolvedDateTo, fromTimestamp, toTimestamp, periodDays) =
+            AdminAnalyticsSupport.ResolveRange(dateFrom, dateTo);
+        var (previousDateFrom, previousDateTo, previousFromTimestamp, previousToTimestamp, previousPeriodDays) =
+            AdminAnalyticsSupport.ResolvePreviousRange(fromTimestamp, periodDays);
+
+        var products = await _db.Products
+            .AsNoTracking()
+            .ToListAsync();
+        var productSnapshots = products
+            .Select(OrderPresentation.BuildProductSnapshot)
+            .ToDictionary(x => x.ProductId, StringComparer.Ordinal);
+        var productsById = products.ToDictionary(x => x.Id, StringComparer.Ordinal);
+
+        var stockRows = await _db.ProductSizeStocks
+            .AsNoTracking()
+            .ToListAsync();
+        var stockByProductId = stockRows
+            .GroupBy(x => x.ProductId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => Math.Max(0, item.Stock)),
+                StringComparer.Ordinal);
+
+        var likes = await _db.Likes
+            .AsNoTracking()
+            .ToListAsync();
+        var likeCountsByProduct = likes
+            .GroupBy(x => x.ProductId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var favoriteEventsInPeriod = await _db.FavoriteEvents
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= fromTimestamp && x.CreatedAt <= toTimestamp)
+            .ToListAsync();
+        var previousFavoriteEventsInPeriod = await _db.FavoriteEvents
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= previousFromTimestamp && x.CreatedAt <= previousToTimestamp)
+            .ToListAsync();
+        var authEventsInPeriod = await _db.AuthEvents
+            .AsNoTracking()
+            .Where(x =>
+                x.EventType == "login"
+                && x.CreatedAt >= fromTimestamp
+                && x.CreatedAt <= toTimestamp)
+            .ToListAsync();
+        var previousAuthEventsInPeriod = await _db.AuthEvents
+            .AsNoTracking()
+            .Where(x =>
+                x.EventType == "login"
+                && x.CreatedAt >= previousFromTimestamp
+                && x.CreatedAt <= previousToTimestamp)
+            .ToListAsync();
+
+        var orders = await _db.Orders
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= fromTimestamp && x.CreatedAt <= toTimestamp)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+        var previousOrders = await _db.Orders
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= previousFromTimestamp && x.CreatedAt <= previousToTimestamp)
+            .ToListAsync();
+        var latestPaymentsByOrderId = await _orderPaymentService.GetLatestPaymentsByOrderIdAsync(
+            orders.Select(x => x.Id),
+            HttpContext.RequestAborted);
+
+        var usersInPeriod = await _db.Users
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= fromTimestamp && x.CreatedAt <= toTimestamp)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+        var previousUsersInPeriod = await _db.Users
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= previousFromTimestamp && x.CreatedAt <= previousToTimestamp)
+            .ToListAsync();
+        var periodUserIds = usersInPeriod
+            .Select(x => x.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var userIdentitiesInPeriod = periodUserIds.Count == 0
+            ? []
+            : await _db.UserExternalIdentities
+                .AsNoTracking()
+                .Where(x => periodUserIds.Contains(x.UserId))
+                .ToListAsync();
+        var identitiesByUserId = userIdentitiesInPeriod
+            .GroupBy(x => x.UserId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<UserExternalIdentity>)group
+                    .OrderBy(item => item.CreatedAt)
+                    .ThenBy(item => item.Provider)
+                    .ToList(),
+                StringComparer.Ordinal);
+
+        var activeExternalProviders = await _db.UserExternalIdentities
+            .AsNoTracking()
+            .Where(x => x.LastUsedAt.HasValue && x.LastUsedAt.Value >= fromTimestamp && x.LastUsedAt.Value <= toTimestamp)
+            .Select(x => new { x.UserId, x.Provider })
+            .Distinct()
+            .ToListAsync();
+        var connectedExternalProviders = await _db.UserExternalIdentities
+            .AsNoTracking()
+            .Select(x => new { x.UserId, x.Provider })
+            .Distinct()
+            .ToListAsync();
+        var productViewRows = await _db.ProductViews
+            .AsNoTracking()
+            .Where(x => x.LastViewedAt >= fromTimestamp && x.LastViewedAt <= toTimestamp)
+            .ToListAsync();
+        var previousProductViewRows = await _db.ProductViews
+            .AsNoTracking()
+            .Where(x => x.LastViewedAt >= previousFromTimestamp && x.LastViewedAt <= previousToTimestamp)
+            .ToListAsync();
+        var timeline = AdminAnalyticsSupport.CreateTimeline(fromTimestamp, toTimestamp);
+
+        var productMetrics = new Dictionary<string, AdminAnalyticsSupport.AnalyticsProductMetric>(StringComparer.Ordinal);
+        foreach (var pair in likeCountsByProduct)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key))
+                continue;
+
+            var metric = AdminAnalyticsSupport.GetOrCreateProductMetric(
+                productMetrics,
+                pair.Key,
+                productSnapshots,
+                productsById,
+                stockByProductId);
+            metric.FavoritesCount = pair.Value;
+        }
+
+        foreach (var group in favoriteEventsInPeriod.GroupBy(x => x.ProductId, StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(group.Key))
+                continue;
+
+            var metric = AdminAnalyticsSupport.GetOrCreateProductMetric(
+                productMetrics,
+                group.Key,
+                productSnapshots,
+                productsById,
+                stockByProductId);
+            metric.FavoriteAddsCount = group.Count(item => AdminAnalyticsSupport.NormalizeFavoriteEventType(item.EventType) == "added");
+            metric.FavoriteRemovalsCount = group.Count(item => AdminAnalyticsSupport.NormalizeFavoriteEventType(item.EventType) == "removed");
+        }
+
+        foreach (var group in productViewRows.GroupBy(x => x.ProductId, StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(group.Key))
+                continue;
+
+            var metric = AdminAnalyticsSupport.GetOrCreateProductMetric(
+                productMetrics,
+                group.Key,
+                productSnapshots,
+                productsById,
+                stockByProductId);
+            metric.UniqueViewers = group
+                .Select(item => item.ViewerKey)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            metric.TotalViews = group.Sum(item => Math.Max(0, item.ViewCount));
+        }
+
+        var ordersByStatus = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+        var ordersByShippingMethod = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+        var ordersByPaymentMethod = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+        var ordersByPaymentGroup = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+        var ordersByPaymentProvider = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+        var ordersByPurchaseChannel = new Dictionary<string, AdminAnalyticsSupport.AnalyticsBucket>(StringComparer.Ordinal);
+
+        var successfulOrdersCount = 0;
+        var deliveredOrdersCount = 0;
+        var canceledOrdersCount = 0;
+        var soldUnits = 0;
+        var revenueAmount = 0d;
+        var shippingRevenueAmount = 0d;
+        var previousSuccessfulOrdersCount = 0;
+        var previousDeliveredOrdersCount = 0;
+        var previousCanceledOrdersCount = 0;
+        var previousSoldUnits = 0;
+        var previousRevenueAmount = 0d;
+        var previousShippingRevenueAmount = 0d;
+
+        foreach (var order in orders)
+        {
+            var normalizedStatus = AdminAnalyticsSupport.NormalizeOrderStatus(order.Status);
+            var normalizedShippingMethod = AdminAnalyticsSupport.NormalizeShippingMethod(order.ShippingMethod);
+            var normalizedPaymentMethod = AdminAnalyticsSupport.NormalizePaymentMethod(order.PaymentMethod);
+            var normalizedPurchaseChannel = AdminAnalyticsSupport.NormalizePurchaseChannel(order.PurchaseChannel);
+            var timelinePoint = timeline[AdminAnalyticsSupport.ToDayKey(order.CreatedAt)];
+            var paymentProviderKey = AdminAnalyticsSupport.ResolvePaymentProviderKey(
+                latestPaymentsByOrderId.GetValueOrDefault(order.Id),
+                normalizedPaymentMethod);
+            var paymentGroupKey = AdminAnalyticsSupport.ResolvePaymentGroupKey(normalizedPaymentMethod);
+            var statusBucket = AdminAnalyticsSupport.GetOrCreateBucket(ordersByStatus, normalizedStatus);
+            statusBucket.Count++;
+            AdminAnalyticsSupport.GetOrCreateBucket(ordersByPurchaseChannel, normalizedPurchaseChannel).Count++;
+            timelinePoint.OrdersCount++;
+
+            if (!AdminAnalyticsSupport.IsSuccessfulOrderStatus(normalizedStatus))
+            {
+                if (normalizedStatus is "delivered" or "completed")
+                    deliveredOrdersCount++;
+
+                if (normalizedStatus is "canceled" or "returned")
+                    canceledOrdersCount++;
+
+                continue;
+            }
+
+            successfulOrdersCount++;
+            if (normalizedStatus is "delivered" or "completed")
+                deliveredOrdersCount++;
+
+            timelinePoint.SuccessfulOrdersCount++;
+            revenueAmount += order.TotalAmount;
+            shippingRevenueAmount += order.ShippingAmount;
+            timelinePoint.RevenueAmount = Math.Round(timelinePoint.RevenueAmount + order.TotalAmount, 2, MidpointRounding.AwayFromZero);
+            timelinePoint.ShippingRevenueAmount = Math.Round(timelinePoint.ShippingRevenueAmount + order.ShippingAmount, 2, MidpointRounding.AwayFromZero);
+
+            AdminAnalyticsSupport.AccumulateBucket(statusBucket, 0, order.TotalAmount, order.ShippingAmount);
+            AdminAnalyticsSupport.AccumulateBucket(
+                AdminAnalyticsSupport.GetOrCreateBucket(ordersByShippingMethod, normalizedShippingMethod),
+                0,
+                order.TotalAmount,
+                order.ShippingAmount);
+            AdminAnalyticsSupport.AccumulateBucket(
+                AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentMethod, normalizedPaymentMethod),
+                0,
+                order.TotalAmount,
+                order.ShippingAmount);
+            AdminAnalyticsSupport.AccumulateBucket(
+                AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentGroup, paymentGroupKey),
+                0,
+                order.TotalAmount,
+                order.ShippingAmount);
+            AdminAnalyticsSupport.AccumulateBucket(
+                AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentProvider, paymentProviderKey),
+                0,
+                order.TotalAmount,
+                order.ShippingAmount);
+
+            var orderItems = OrderPresentation.ParseStoredOrderItems(order.ItemsJson);
+            var aggregatedOrderItems = new Dictionary<string, (int Units, double Revenue, string Name, string? ImageUrl)>(StringComparer.Ordinal);
+            foreach (var item in orderItems)
+            {
+                if (string.IsNullOrWhiteSpace(item.ProductId) || item.Quantity <= 0)
+                    continue;
+
+                var snapshot = productSnapshots.GetValueOrDefault(item.ProductId);
+                var resolvedName = !string.IsNullOrWhiteSpace(item.ProductName)
+                    ? item.ProductName!.Trim()
+                    : snapshot?.Name ?? item.ProductId;
+                var resolvedImageUrl = !string.IsNullOrWhiteSpace(item.ProductImageUrl)
+                    ? item.ProductImageUrl!.Trim()
+                    : snapshot?.ImageUrl;
+                var unitPrice = Math.Round(
+                    item.UnitPrice ?? snapshot?.UnitPrice ?? 0d,
+                    2,
+                    MidpointRounding.AwayFromZero);
+                var lineRevenue = Math.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+
+                if (aggregatedOrderItems.TryGetValue(item.ProductId, out var current))
+                {
+                    aggregatedOrderItems[item.ProductId] = (
+                        current.Units + item.Quantity,
+                        Math.Round(current.Revenue + lineRevenue, 2, MidpointRounding.AwayFromZero),
+                        current.Name,
+                        current.ImageUrl ?? resolvedImageUrl);
+                }
+                else
+                {
+                    aggregatedOrderItems[item.ProductId] = (item.Quantity, lineRevenue, resolvedName, resolvedImageUrl);
+                }
+
+                soldUnits += item.Quantity;
+                timelinePoint.SoldUnits += item.Quantity;
+            }
+
+            foreach (var aggregatedItem in aggregatedOrderItems)
+            {
+                var metric = AdminAnalyticsSupport.GetOrCreateProductMetric(
+                    productMetrics,
+                    aggregatedItem.Key,
+                    productSnapshots,
+                    productsById,
+                    stockByProductId,
+                    aggregatedItem.Value.Name,
+                    aggregatedItem.Value.ImageUrl);
+                metric.SoldUnits += aggregatedItem.Value.Units;
+                metric.RevenueAmount = Math.Round(metric.RevenueAmount + aggregatedItem.Value.Revenue, 2, MidpointRounding.AwayFromZero);
+                metric.OrdersCount++;
+
+                AdminAnalyticsSupport.AccumulateBucket(
+                    AdminAnalyticsSupport.GetOrCreateBucket(ordersByShippingMethod, normalizedShippingMethod),
+                    aggregatedItem.Value.Units,
+                    0,
+                    0);
+                AdminAnalyticsSupport.AccumulateBucket(
+                    AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentMethod, normalizedPaymentMethod),
+                    aggregatedItem.Value.Units,
+                    0,
+                    0);
+                AdminAnalyticsSupport.AccumulateBucket(
+                    AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentGroup, paymentGroupKey),
+                    aggregatedItem.Value.Units,
+                    0,
+                    0);
+                AdminAnalyticsSupport.AccumulateBucket(
+                    AdminAnalyticsSupport.GetOrCreateBucket(ordersByPaymentProvider, paymentProviderKey),
+                    aggregatedItem.Value.Units,
+                    0,
+                    0);
+                AdminAnalyticsSupport.AccumulateBucket(statusBucket, aggregatedItem.Value.Units, 0, 0);
+            }
+        }
+
+        foreach (var previousOrder in previousOrders)
+        {
+            var normalizedStatus = AdminAnalyticsSupport.NormalizeOrderStatus(previousOrder.Status);
+            if (!AdminAnalyticsSupport.IsSuccessfulOrderStatus(normalizedStatus))
+            {
+                if (normalizedStatus is "delivered" or "completed")
+                    previousDeliveredOrdersCount++;
+
+                if (normalizedStatus is "canceled" or "returned")
+                    previousCanceledOrdersCount++;
+
+                continue;
+            }
+
+            previousSuccessfulOrdersCount++;
+            if (normalizedStatus is "delivered" or "completed")
+                previousDeliveredOrdersCount++;
+
+            previousRevenueAmount += previousOrder.TotalAmount;
+            previousShippingRevenueAmount += previousOrder.ShippingAmount;
+
+            foreach (var item in OrderPresentation.ParseStoredOrderItems(previousOrder.ItemsJson))
+            {
+                if (string.IsNullOrWhiteSpace(item.ProductId) || item.Quantity <= 0)
+                    continue;
+
+                previousSoldUnits += item.Quantity;
+            }
+        }
+
+        var registrationChannels = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var user in usersInPeriod)
+        {
+            var channelKey = AdminAnalyticsSupport.ResolveRegistrationChannel(user, identitiesByUserId.GetValueOrDefault(user.Id) ?? []);
+            registrationChannels[channelKey] = registrationChannels.TryGetValue(channelKey, out var currentCount)
+                ? currentCount + 1
+                : 1;
+            timeline[AdminAnalyticsSupport.ToDayKey(user.CreatedAt)].NewUsersCount++;
+        }
+
+        var activeExternalUsersByProvider = activeExternalProviders
+            .GroupBy(x => AdminAnalyticsSupport.NormalizeExternalProviderKey(x.Provider), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var connectedExternalUsersByProvider = connectedExternalProviders
+            .GroupBy(x => AdminAnalyticsSupport.NormalizeExternalProviderKey(x.Provider), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var loginCounts = authEventsInPeriod
+            .GroupBy(x => AdminAnalyticsSupport.NormalizeAuthProviderKey(x.Provider), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        var totalProducts = products.Count;
+        var visibleProducts = products.Count(x => !x.IsHidden);
+        var hiddenProducts = totalProducts - visibleProducts;
+        var currentStockUnits = stockRows.Sum(x => Math.Max(0, x.Stock));
+        var visibleInStockProducts = products.Count(x => !x.IsHidden && stockByProductId.GetValueOrDefault(x.Id) > 0);
+        var outOfStockVisibleProducts = visibleProducts - visibleInStockProducts;
+        var lowStockVisibleProducts = products.Count(x => !x.IsHidden && stockByProductId.GetValueOrDefault(x.Id) is > 0 and <= 3);
+        var totalFavorites = likes.Count;
+        var uniqueFavoriteUsers = likes
+            .Select(x => x.UserId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var favoritesAddedCount = favoriteEventsInPeriod.Count(x => AdminAnalyticsSupport.NormalizeFavoriteEventType(x.EventType) == "added");
+        var favoritesRemovedCount = favoriteEventsInPeriod.Count - favoritesAddedCount;
+        var favoriteUsersCount = favoriteEventsInPeriod
+            .Select(x => x.UserId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var loginEventsCount = authEventsInPeriod.Count;
+        var totalViewEvents = productViewRows.Sum(x => Math.Max(0, x.ViewCount));
+        var totalUniqueViewers = productViewRows
+            .Select(x => x.ViewerKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        foreach (var favoriteGroup in favoriteEventsInPeriod.GroupBy(x => AdminAnalyticsSupport.ToDayKey(x.CreatedAt)))
+        {
+            if (!timeline.TryGetValue(favoriteGroup.Key, out var favoriteTimelinePoint))
+                continue;
+
+            favoriteTimelinePoint.FavoritesAddedCount += favoriteGroup.Count(item => AdminAnalyticsSupport.NormalizeFavoriteEventType(item.EventType) == "added");
+            favoriteTimelinePoint.FavoritesRemovedCount += favoriteGroup.Count(item => AdminAnalyticsSupport.NormalizeFavoriteEventType(item.EventType) == "removed");
+        }
+        foreach (var viewGroup in productViewRows.GroupBy(
+                     x => x.DayKey > 0 ? x.DayKey : AdminAnalyticsSupport.ToDayKey(x.LastViewedAt)))
+        {
+            if (!timeline.TryGetValue(viewGroup.Key, out var timelinePoint))
+                continue;
+
+            timelinePoint.TotalViewEvents = viewGroup.Sum(item => Math.Max(0, item.ViewCount));
+            timelinePoint.UniqueViewers = viewGroup
+                .Select(item => item.ViewerKey)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+        }
+        var viewedProductsCount = productViewRows
+            .Select(x => x.ProductId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        foreach (var authGroup in authEventsInPeriod.GroupBy(x => AdminAnalyticsSupport.ToDayKey(x.CreatedAt)))
+        {
+            if (!timeline.TryGetValue(authGroup.Key, out var authTimelinePoint))
+                continue;
+
+            authTimelinePoint.LoginsCount += authGroup.Count();
+        }
+        var previousFavoritesAddedCount = previousFavoriteEventsInPeriod.Count(x => AdminAnalyticsSupport.NormalizeFavoriteEventType(x.EventType) == "added");
+        var previousFavoritesRemovedCount = previousFavoriteEventsInPeriod.Count - previousFavoritesAddedCount;
+        var previousFavoriteUsersCount = previousFavoriteEventsInPeriod
+            .Select(x => x.UserId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var previousLoginEventsCount = previousAuthEventsInPeriod.Count;
+        var previousTotalViewEvents = previousProductViewRows.Sum(x => Math.Max(0, x.ViewCount));
+        var previousTotalUniqueViewers = previousProductViewRows
+            .Select(x => x.ViewerKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var previousViewedProductsCount = previousProductViewRows
+            .Select(x => x.ProductId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var averageOrderValue = successfulOrdersCount > 0
+            ? Math.Round(revenueAmount / successfulOrdersCount, 2, MidpointRounding.AwayFromZero)
+            : 0d;
+        var averageItemsPerOrder = successfulOrdersCount > 0
+            ? Math.Round((double)soldUnits / successfulOrdersCount, 2, MidpointRounding.AwayFromZero)
+            : 0d;
+        var previousAverageOrderValue = previousSuccessfulOrdersCount > 0
+            ? Math.Round(previousRevenueAmount / previousSuccessfulOrdersCount, 2, MidpointRounding.AwayFromZero)
+            : 0d;
+        var previousAverageItemsPerOrder = previousSuccessfulOrdersCount > 0
+            ? Math.Round((double)previousSoldUnits / previousSuccessfulOrdersCount, 2, MidpointRounding.AwayFromZero)
+            : 0d;
+
+        return Results.Ok(new
+        {
+            period = new
+            {
+                dateFrom = resolvedDateFrom,
+                dateTo = resolvedDateTo,
+                fromTimestamp,
+                toTimestamp,
+                days = periodDays
+            },
+            comparison = new
+            {
+                previousPeriod = new
+                {
+                    dateFrom = previousDateFrom,
+                    dateTo = previousDateTo,
+                    fromTimestamp = previousFromTimestamp,
+                    toTimestamp = previousToTimestamp,
+                    days = previousPeriodDays
+                },
+                previousSummary = new
+                {
+                    ordersCount = previousOrders.Count,
+                    successfulOrdersCount = previousSuccessfulOrdersCount,
+                    deliveredOrdersCount = previousDeliveredOrdersCount,
+                    canceledOrdersCount = previousCanceledOrdersCount,
+                    soldUnits = previousSoldUnits,
+                    revenueAmount = Math.Round(previousRevenueAmount, 2, MidpointRounding.AwayFromZero),
+                    shippingRevenueAmount = Math.Round(previousShippingRevenueAmount, 2, MidpointRounding.AwayFromZero),
+                    averageOrderValue = previousAverageOrderValue,
+                    averageItemsPerOrder = previousAverageItemsPerOrder,
+                    newUsersCount = previousUsersInPeriod.Count,
+                    favoritesAddedCount = previousFavoritesAddedCount,
+                    favoritesRemovedCount = previousFavoritesRemovedCount,
+                    favoriteUsersCount = previousFavoriteUsersCount,
+                    loginEventsCount = previousLoginEventsCount,
+                    totalViewEvents = previousTotalViewEvents,
+                    totalUniqueViewers = previousTotalUniqueViewers,
+                    viewedProductsCount = previousViewedProductsCount
+                }
+            },
+            snapshot = new
+            {
+                totalProducts,
+                visibleProducts,
+                hiddenProducts,
+                currentStockUnits,
+                visibleInStockProducts,
+                outOfStockVisibleProducts,
+                lowStockVisibleProducts,
+                totalFavorites,
+                uniqueFavoriteUsers,
+                totalUsers = await _db.Users.AsNoTracking().CountAsync()
+            },
+            periodSummary = new
+            {
+                ordersCount = orders.Count,
+                successfulOrdersCount,
+                deliveredOrdersCount,
+                canceledOrdersCount,
+                soldUnits,
+                revenueAmount = Math.Round(revenueAmount, 2, MidpointRounding.AwayFromZero),
+                shippingRevenueAmount = Math.Round(shippingRevenueAmount, 2, MidpointRounding.AwayFromZero),
+                averageOrderValue,
+                averageItemsPerOrder,
+                newUsersCount = usersInPeriod.Count,
+                favoritesAddedCount,
+                favoritesRemovedCount,
+                favoriteUsersCount,
+                loginEventsCount,
+                totalViewEvents,
+                totalUniqueViewers,
+                viewedProductsCount
+            },
+            orders = new
+            {
+                byStatus = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByStatus,
+                    AdminAnalyticsSupport.GetOrderStatusLabel,
+                    "status"),
+                byPurchaseChannel = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByPurchaseChannel,
+                    AdminAnalyticsSupport.GetPurchaseChannelLabel,
+                    "purchaseChannel"),
+                byShippingMethod = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByShippingMethod,
+                    AdminAnalyticsSupport.GetShippingMethodLabel,
+                    "shippingMethod")
+            },
+            payments = new
+            {
+                byMethod = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByPaymentMethod,
+                    AdminAnalyticsSupport.GetPaymentMethodLabel,
+                    "paymentMethod"),
+                byGroup = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByPaymentGroup,
+                    AdminAnalyticsSupport.GetPaymentGroupLabel,
+                    "paymentGroup"),
+                byProvider = AdminAnalyticsSupport.BuildBucketPayload(
+                    ordersByPaymentProvider,
+                    AdminAnalyticsSupport.GetPaymentProviderLabel,
+                    "paymentProvider")
+            },
+            users = new
+            {
+                registrationsByChannel = AdminAnalyticsSupport.BuildCountPayload(
+                    registrationChannels,
+                    AdminAnalyticsSupport.GetRegistrationChannelLabel,
+                    "registrationChannel"),
+                externalActiveUsersByProvider = AdminAnalyticsSupport.BuildCountPayload(
+                    activeExternalUsersByProvider,
+                    AdminAnalyticsSupport.GetExternalProviderLabel,
+                    "externalProvider"),
+                connectedExternalUsersByProvider = AdminAnalyticsSupport.BuildCountPayload(
+                    connectedExternalUsersByProvider,
+                    AdminAnalyticsSupport.GetExternalProviderLabel,
+                    "externalProvider"),
+                loginsByProvider = AdminAnalyticsSupport.BuildCountPayload(
+                    loginCounts,
+                    AdminAnalyticsSupport.GetAuthProviderLabel,
+                    "authProvider")
+            },
+            products = new
+            {
+                topPopular = productMetrics.Values
+                    .Where(x => x.UniqueViewers > 0)
+                    .OrderByDescending(x => x.UniqueViewers)
+                    .ThenByDescending(x => x.TotalViews)
+                    .ThenByDescending(x => x.FavoritesCount)
+                    .ThenBy(x => x.Name)
+                    .Take(10)
+                    .Select(AdminAnalyticsSupport.BuildProductMetricPayload),
+                topSold = productMetrics.Values
+                    .Where(x => x.SoldUnits > 0)
+                    .OrderByDescending(x => x.SoldUnits)
+                    .ThenByDescending(x => x.RevenueAmount)
+                    .ThenByDescending(x => x.OrdersCount)
+                    .ThenBy(x => x.Name)
+                    .Take(10)
+                    .Select(AdminAnalyticsSupport.BuildProductMetricPayload),
+                topWishlisted = productMetrics.Values
+                    .Where(x => x.FavoriteAddsCount > 0)
+                    .OrderByDescending(x => x.FavoriteAddsCount)
+                    .ThenByDescending(x => x.FavoritesCount)
+                    .ThenByDescending(x => x.UniqueViewers)
+                    .ThenBy(x => x.Name)
+                    .Take(10)
+                    .Select(AdminAnalyticsSupport.BuildProductMetricPayload)
+            },
+            trends = new
+            {
+                daily = AdminAnalyticsSupport.BuildTimelinePayload(timeline)
+            }
+        });
+    }
+
     [HttpGet("users")]
     public async Task<IResult> Users()
     {

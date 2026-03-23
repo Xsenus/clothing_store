@@ -61,6 +61,9 @@ public class StoreDbContext : DbContext
     /// Возвращает набор лайков.
     /// </summary>
     public DbSet<Like> Likes => Set<Like>();
+    public DbSet<FavoriteEvent> FavoriteEvents => Set<FavoriteEvent>();
+    public DbSet<AuthEvent> AuthEvents => Set<AuthEvent>();
+    public DbSet<ProductView> ProductViews => Set<ProductView>();
     /// <summary>
     /// Возвращает набор заказов.
     /// </summary>
@@ -88,6 +91,15 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<ProductReview>().HasIndex(x => new { x.ProductId, x.CreatedAt });
         modelBuilder.Entity<CartItem>().HasIndex(x => new { x.UserId, x.ProductId, x.Size }).IsUnique();
         modelBuilder.Entity<Like>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();
+        modelBuilder.Entity<FavoriteEvent>().HasIndex(x => x.CreatedAt);
+        modelBuilder.Entity<FavoriteEvent>().HasIndex(x => new { x.ProductId, x.CreatedAt });
+        modelBuilder.Entity<FavoriteEvent>().HasIndex(x => new { x.UserId, x.CreatedAt });
+        modelBuilder.Entity<FavoriteEvent>().HasIndex(x => new { x.EventType, x.CreatedAt });
+        modelBuilder.Entity<AuthEvent>().HasIndex(x => x.CreatedAt);
+        modelBuilder.Entity<AuthEvent>().HasIndex(x => new { x.Provider, x.EventType, x.CreatedAt });
+        modelBuilder.Entity<AuthEvent>().HasIndex(x => new { x.UserId, x.CreatedAt });
+        modelBuilder.Entity<ProductView>().HasIndex(x => new { x.ProductId, x.ViewerKey, x.DayKey }).IsUnique();
+        modelBuilder.Entity<ProductView>().HasIndex(x => new { x.ProductId, x.LastViewedAt });
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
         modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Name).IsUnique();
@@ -199,6 +211,36 @@ public class StoreDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Like>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<FavoriteEvent>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<FavoriteEvent>()
+            .HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(x => x.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<AuthEvent>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductView>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<ProductView>()
             .HasOne<Product>()
             .WithMany()
             .HasForeignKey(x => x.ProductId)
