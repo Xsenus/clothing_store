@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { FLOW } from "@/lib/api-mapping";
+import { clearProductLikeStateCache } from "@/lib/product-like-state";
 
 const AuthContext = createContext(undefined);
 
@@ -102,6 +103,7 @@ export function AuthProvider({ children }) {
 
   const signOut = async () => {
     await FLOW.signOut();
+    clearProductLikeStateCache();
     setUser(null);
   };
 

@@ -18,7 +18,7 @@ export default function Footer() {
             <ul className="space-y-2 text-gray-400">
               <li><Link to="/catalog" className="hover:text-white transition-colors">Все товары</Link></li>
               <li><Link to="/catalog?sort=new" className="hover:text-white transition-colors">Новинки</Link></li>
-              <li><Link to="/catalog?sort=popular" className="hover:text-white transition-colors">Хиты продаж</Link></li>
+              <li><Link to="/catalog?sort=popular" className="hover:text-white transition-colors">В тренде</Link></li>
             </ul>
           </div>
           
@@ -27,8 +27,8 @@ export default function Footer() {
             <ul className="space-y-2 text-gray-400">
               <li><Link to="/profile" className="hover:text-white transition-colors">Мой аккаунт</Link></li>
               <li><Link to="/cart" className="hover:text-white transition-colors">Корзина</Link></li>
-              <li><span className="cursor-not-allowed opacity-50">Доставка</span></li>
-              <li><span className="cursor-not-allowed opacity-50">Возврат</span></li>
+              <li><Link to="/checkout" className="hover:text-white transition-colors">Доставка</Link></li>
+              <li><Link to="/returns" className="hover:text-white transition-colors">Условия возврата</Link></li>
             </ul>
           </div>
         </div>

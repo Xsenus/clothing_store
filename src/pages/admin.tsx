@@ -1,5 +1,6 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
 import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +28,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
-import { COOKIE_CONSENT_TEXT, PRIVACY_POLICY, PUBLIC_OFFER, USER_AGREEMENT } from '@/lib/legal-texts';
+import { COOKIE_CONSENT_TEXT, PRIVACY_POLICY, PUBLIC_OFFER, RETURN_POLICY, USER_AGREEMENT } from '@/lib/legal-texts';
 import { type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
@@ -934,7 +935,7 @@ const EMAIL_TEMPLATE_SETTING_DEFAULTS = Object.fromEntries(
 type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collections";
 
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
-const ADMIN_TAB_VALUES = ["products", "orders", "users", "gallery", "dictionaries", "settings"] as const;
+const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "dadata", "yandex"] as const;
@@ -980,6 +981,19 @@ const readPersistedAdminNavigationState = () => {
     window.localStorage.removeItem(ADMIN_NAVIGATION_STORAGE_KEY);
     return DEFAULT_ADMIN_NAVIGATION_STATE;
   }
+};
+
+const formatDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getRelativeDateInputValue = (daysOffset: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + daysOffset);
+  return formatDateInputValue(date);
 };
 
 const persistAdminNavigationState = (state: typeof DEFAULT_ADMIN_NAVIGATION_STATE) => {
@@ -1187,6 +1201,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   privacy_policy: PRIVACY_POLICY,
   user_agreement: USER_AGREEMENT,
   public_offer: PUBLIC_OFFER,
+  return_policy: RETURN_POLICY,
   cookie_consent_text: COOKIE_CONSENT_TEXT,
   auth_password_policy_enabled: "true",
   auth_session_ttl_hours: "720",
@@ -1281,6 +1296,7 @@ const LEGAL_SETTING_KEYS = [
   "privacy_policy",
   "user_agreement",
   "public_offer",
+  "return_policy",
   "cookie_consent_text",
 ] as const;
 
@@ -1527,6 +1543,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [ordersDateTo, setOrdersDateTo] = useState("");
   const [ordersDateFromDisplay, setOrdersDateFromDisplay] = useState("");
   const [ordersDateToDisplay, setOrdersDateToDisplay] = useState("");
+  const [analyticsDateFrom, setAnalyticsDateFrom] = useState(() => getRelativeDateInputValue(-29));
+  const [analyticsDateTo, setAnalyticsDateTo] = useState(() => getRelativeDateInputValue(0));
+  const [analyticsData, setAnalyticsData] = useState<AdminAnalyticsResponse | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   const formatOrderFilterDateDisplay = (value: string) => {
     if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -2196,6 +2216,31 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         setOrdersLoading(false);
       }
     }
+  };
+
+  const loadAnalytics = async (overrides?: Partial<{ dateFrom: string; dateTo: string }>) => {
+    setAnalyticsLoading(true);
+    try {
+      const response = await FLOW.adminGetAnalytics({
+        input: {
+          dateFrom: overrides?.dateFrom ?? analyticsDateFrom,
+          dateTo: overrides?.dateTo ?? analyticsDateTo,
+        },
+      });
+      setAnalyticsData(response || null);
+      return response;
+    } catch (error) {
+      toast.error(getErrorMessage(error, "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ Р°РЅР°Р»РёС‚РёРєСѓ"));
+      return null;
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const applyAnalyticsPreset = (days: number) => {
+    const safeDays = Math.max(1, Math.trunc(days || 1));
+    setAnalyticsDateFrom(getRelativeDateInputValue(-(safeDays - 1)));
+    setAnalyticsDateTo(getRelativeDateInputValue(0));
   };
 
   const openOrderTableDialog = () => {
@@ -4155,6 +4200,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   }, [deferredOrderSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo, ordersPageSize, ordersReady]);
 
   useEffect(() => {
+    if (!isAdmin || selectedAdminTab !== "analytics") return;
+    void loadAnalytics();
+  }, [isAdmin, selectedAdminTab, analyticsDateFrom, analyticsDateTo]);
+
+  useEffect(() => {
     if (!ordersReady || selectedAdminTab !== "orders") return;
     void loadOrders();
   }, [ordersReady, selectedAdminTab, ordersPage, ordersPageSize, deferredOrderSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo]);
@@ -5405,6 +5455,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
           <Tabs value={selectedAdminTab} onValueChange={handleAdminTabChange} className="w-full">
             <TabsList className="mb-6 h-auto w-full justify-start gap-3 overflow-x-auto border-b border-gray-200 bg-transparent p-0 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mb-8 md:gap-8">
+              <TabsTrigger value="analytics" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">АНАЛИТИКА</TabsTrigger>
               <TabsTrigger value="products" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ТОВАРЫ</TabsTrigger>
               <TabsTrigger value="orders" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="users" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] sm:text-sm">ПОЛЬЗОВАТЕЛИ</TabsTrigger>
@@ -5764,6 +5815,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               ) : null}
             </DialogContent>
           </Dialog>
+          </TabsContent>
+
+          <TabsContent value="analytics" className="mt-0">
+            <AdminAnalyticsTab
+              analytics={analyticsData}
+              loading={analyticsLoading}
+              dateFrom={analyticsDateFrom}
+              dateTo={analyticsDateTo}
+              onDateFromChange={setAnalyticsDateFrom}
+              onDateToChange={setAnalyticsDateTo}
+              onApplyPreset={applyAnalyticsPreset}
+              onRefresh={() => {
+                void loadAnalytics();
+              }}
+              formatRubles={formatRubles}
+            />
           </TabsContent>
 
           <TabsContent value="gallery" className="mt-0">
@@ -9434,6 +9501,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         ["privacy_policy", "Политика конфиденциальности"],
                         ["user_agreement", "Пользовательское соглашение"],
                         ["public_offer", "Публичная оферта"],
+                        ["return_policy", "Условия возврата"],
                         ["cookie_consent_text", "Текст cookie-согласия"]
                       ].map(([key, label]) => (
                         <div key={key} className="space-y-2 rounded-none border border-gray-200 p-3">

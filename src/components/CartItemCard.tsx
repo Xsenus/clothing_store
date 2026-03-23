@@ -11,6 +11,7 @@ interface Product {
   price: number;
   images: string[];
   slug: string;
+  isHidden?: boolean;
 }
 
 interface CartItem {
@@ -31,6 +32,7 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
   const { updateQuantity, removeFromCart } = useCart();
   const [updating, setUpdating] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const isHiddenProduct = product?.isHidden === true;
 
   const handleQuantityChange = async (val: number) => {
     setUpdating(true);
@@ -45,11 +47,24 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
   };
 
   if (!product) return (
-    <div className="flex items-center justify-between p-4 border-b animate-pulse">
-      <div className="h-20 w-20 bg-gray-200 rounded" />
-      <div className="space-y-2 flex-1 px-4">
-        <div className="h-4 bg-gray-200 w-1/2 rounded" />
-        <div className="h-4 bg-gray-200 w-1/4 rounded" />
+    <div className="flex gap-4 py-6 border-b border-gray-100 last:border-0">
+      <div className="h-24 w-24 flex-shrink-0 border border-gray-200 bg-gray-100" />
+      <div className="flex flex-1 items-start justify-between gap-4">
+        <div>
+          <h3 className="font-bold uppercase tracking-wide text-sm md:text-base">Товар недоступен</h3>
+          <p className="text-sm text-gray-500 uppercase tracking-wider mt-1">Размер: {item.size}</p>
+          <p className="text-xs text-red-600 mt-2 font-semibold">Позиция больше не отображается в каталоге.</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRemove}
+          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+          disabled={updating}
+        >
+          {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          <span className="sr-only">Удалить</span>
+        </Button>
       </div>
     </div>
   );
@@ -81,7 +96,11 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
           <p className="text-xs text-gray-400 mt-1">{formatProductPrice(product.price)} / шт</p>
           {isOutOfStock && (
             <p className="text-xs text-red-600 mt-1 font-semibold">
-              {availableStock === 0 ? "Товар закончился" : `Доступно: ${availableStock ?? 0} шт.`}
+              {isHiddenProduct
+                ? "Товар закончился и временно недоступен."
+                : availableStock === 0
+                  ? "Товар закончился"
+                  : `Доступно: ${availableStock ?? 0} шт.`}
             </p>
           )}
         </div>
@@ -92,6 +111,7 @@ export default function CartItemCard({ item, product, isOutOfStock = false, avai
             onChange={handleQuantityChange}
             min={1}
             max={isOutOfStock ? item.quantity : Math.max(1, availableStock ?? 10)}
+            disabled={!product}
           />
           <Button
             variant="ghost"

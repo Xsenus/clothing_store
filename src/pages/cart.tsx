@@ -4,9 +4,7 @@ import CartItemCard from '@/components/CartItemCard';
 import { Button } from '@/components/ui/button';
 import { useCart } from '@/context/CartContext';
 import { Link } from 'react-router';
-import { FLOW } from '@/lib/api-mapping';
 import { formatProductPrice } from '@/lib/price-format';
-import { useEffect, useState } from 'react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PageSeo from '@/components/PageSeo';
 
@@ -16,48 +14,27 @@ interface Product {
   slug: string;
   price: number;
   images: string[];
+  isHidden?: boolean;
   sizeStock?: Record<string, number>;
 }
 
 export default function CartPage() {
   const { cartItems, isLoading, clearCart } = useCart();
-  const [products, setProducts] = useState<Record<string, Product>>({});
-  const [fetchingProducts, setFetchingProducts] = useState(true);
-
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const allProducts = await FLOW.getAllProducts({ input: {} });
-        if (Array.isArray(allProducts)) {
-          const productMap: Record<string, Product> = {};
-          allProducts.forEach((p: any) => {
-            productMap[p._id] = p;
-          });
-          setProducts(productMap);
-        }
-      } catch (error) {
-        console.error("Failed to fetch products for cart:", error);
-      } finally {
-        setFetchingProducts(false);
-      }
-    };
-
-    fetchProducts();
-  }, []);
 
   const subtotal = cartItems.reduce((sum, item) => {
-    const product = products[item.productId];
+    const product = item.product as Product | undefined;
     return sum + (product ? product.price * item.quantity : 0);
   }, 0);
 
   const hasUnavailableItems = cartItems.some((item) => {
-    const product = products[item.productId];
+    const product = item.product as Product | undefined;
     if (!product) return true;
+    if (product.isHidden) return true;
     if (!product?.sizeStock) return false;
     return (product.sizeStock[item.size] ?? 0) < item.quantity;
   });
 
-  if (isLoading || fetchingProducts) return (
+  if (isLoading) return (
     <>
       <PageSeo
         title="Корзина"
@@ -113,9 +90,13 @@ export default function CartPage() {
 
                 <div className="space-y-0">
                   {cartItems.map((item) => {
-                    const product = products[item.productId];
-                    const available = product?.sizeStock ? (product.sizeStock[item.size] ?? 0) : (product ? null : 0);
-                    const isOutOfStock = !product || (available !== null && available < item.quantity);
+                    const product = item.product as Product | undefined;
+                    const available = product?.isHidden
+                      ? 0
+                      : product?.sizeStock
+                        ? (product.sizeStock[item.size] ?? 0)
+                        : (product ? null : 0);
+                    const isOutOfStock = !product || product.isHidden || (available !== null && available < item.quantity);
                     return (
                       <CartItemCard
                         key={item.cartId}

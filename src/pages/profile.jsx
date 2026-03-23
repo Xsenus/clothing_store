@@ -277,8 +277,7 @@ export default function ProfilePage() {
   const confirmAction = useConfirmDialog();
 
   const [orders, setOrders] = useState([]);
-  const [likedProductIds, setLikedProductIds] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [likedItems, setLikedItems] = useState([]);
   const [profile, setProfile] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [availableExternalAuthProviders, setAvailableExternalAuthProviders] = useState({
@@ -376,16 +375,16 @@ export default function ProfilePage() {
 
       setLoading(true);
       try {
-        const [, likesRes, productsRes, profileRes, publicSettings] = await Promise.all([
+        const [, likesRes, profileRes, publicSettings] = await Promise.all([
           loadOrders(),
           FLOW.getUserLikes({ input: {} }),
-          FLOW.getAllProducts({ input: {} }),
           FLOW.getProfile({ input: {} }),
           fetchPublicSettings().catch(() => ({})),
         ]);
 
-        if (Array.isArray(likesRes)) setLikedProductIds(likesRes.map((like) => like.productId));
-        if (Array.isArray(productsRes)) setProducts(productsRes);
+        if (Array.isArray(likesRes)) {
+          setLikedItems(likesRes.filter((like) => like?.product));
+        }
         if (profileRes) {
           const shippingAddresses = sanitizeProfileAddresses(profileRes.shippingAddresses, profileRes.shippingAddress);
           setProfile({
@@ -922,7 +921,14 @@ export default function ProfilePage() {
     }, { replace: true });
   };
 
-  const likedProducts = products.filter((product) => likedProductIds.includes(product._id));
+  const likedProducts = likedItems
+    .map((item) => item?.product)
+    .filter(Boolean);
+
+  const handleWishlistLikeChange = (liked, product) => {
+    if (liked) return;
+    setLikedItems((prev) => prev.filter((item) => item.productId !== product._id));
+  };
 
   if (loading) return (
     <>
@@ -1151,7 +1157,15 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {likedProducts.map((product) => <ProductCard key={product._id} product={product} />)}
+                  {likedProducts.map((product) => (
+                    <ProductCard
+                      key={product._id}
+                      product={product}
+                      allowQuickAdd={!product.isHidden}
+                      initialLiked
+                      onLikeChange={handleWishlistLikeChange}
+                    />
+                  ))}
                 </div>
               )}
             </TabsContent>

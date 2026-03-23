@@ -213,7 +213,14 @@ const sortProducts = (products, sortBy) => {
   } else if (sortBy === "price-desc") {
     sorted.sort((a, b) => b.price - a.price);
   } else if (sortBy === "popular") {
-    sorted.sort((a, b) => (b.likesCount || 0) - (a.likesCount || 0));
+    sorted.sort((a, b) => {
+      const popularityDiff = (b.popularityScore || 0) - (a.popularityScore || 0);
+      if (popularityDiff !== 0) {
+        return popularityDiff;
+      }
+
+      return (b.likesCount || 0) - (a.likesCount || 0);
+    });
   } else if (sortBy === "new") {
     sorted.sort((a, b) => (b._creationTime || 0) - (a._creationTime || 0));
   } else if (sortBy === "sale") {
@@ -241,11 +248,22 @@ const normalizeProduct = (product) => {
     id: productId,
     images,
     media,
+    catalogImageUrl: toAbsoluteMediaUrl(product?.catalogImageUrl),
   };
 };
 
 const normalizeProducts = (products) =>
   Array.isArray(products) ? products.map(normalizeProduct) : [];
+
+const normalizeCartItem = (item) => ({
+  ...item,
+  product: normalizeProduct(item?.product),
+});
+
+const normalizeLikeItem = (item) => ({
+  ...item,
+  product: normalizeProduct(item?.product),
+});
 
 const normalizeGalleryImage = (image) => {
   if (!image) return image;
@@ -451,7 +469,10 @@ export const FLOW = {
     method: "POST",
   }),
 
-  getUserLikes: async () => request("/likes"),
+  getUserLikes: async () => {
+    const result = await request("/likes");
+    return Array.isArray(result) ? result.map(normalizeLikeItem) : [];
+  },
 
   checkLike: async ({ input }) => {
     const likes = await request("/likes");
@@ -460,7 +481,16 @@ export const FLOW = {
 
   getProfile: async () => request("/profile"),
 
-  getCart: async () => request("/cart"),
+  getCart: async () => {
+    const result = await request("/cart");
+    return Array.isArray(result) ? result.map(normalizeCartItem) : [];
+  },
+
+  trackProductView: async ({ input }) => request(`/products/${encodeURIComponent(input.productId)}/view`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visitorId: input.visitorId ?? null }),
+  }),
 
   addToCart: async ({ input }) => request("/cart", {
     method: "POST",
@@ -811,6 +841,14 @@ export const FLOW = {
     const query = params.toString();
     const result = await request(query ? `/admin/orders?${query}` : "/admin/orders");
     return normalizeOrdersPage(result);
+  },
+
+  adminGetAnalytics: async ({ input } = {}) => {
+    const params = new URLSearchParams();
+    if (input?.dateFrom) params.set("dateFrom", input.dateFrom);
+    if (input?.dateTo) params.set("dateTo", input.dateTo);
+    const query = params.toString();
+    return request(query ? `/admin/analytics?${query}` : "/admin/analytics");
   },
 
   adminUpdateOrder: async ({ input }) => request(`/admin/orders/${input.orderId}`, {

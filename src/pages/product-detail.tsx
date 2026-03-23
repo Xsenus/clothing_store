@@ -32,6 +32,12 @@ import { getProductDetailImageDisplayClasses, getProductDetailMediaPageLayoutCla
 import { optimizeFilesForUpload } from '@/lib/image-upload-optimization';
 import { fetchPublicSettings, getCachedPublicSettings } from '@/lib/site-settings';
 import { formatProductPrice } from '@/lib/price-format';
+import { getOrCreateVisitorId } from '@/lib/visitor-id';
+import {
+  getCachedProductLikeState,
+  setCachedProductLikeState,
+  subscribeProductLikeState,
+} from '@/lib/product-like-state';
 
 interface ProductReview {
   id: string;
@@ -334,6 +340,18 @@ export default function ProductDetailPage() {
     void fetchReviews(product._id, reviewsPage);
   }, [product?._id, reviewsPage, isAuthenticated]);
 
+  useEffect(() => {
+    if (!product?._id) return;
+
+    const visitorId = getOrCreateVisitorId();
+    void FLOW.trackProductView({
+      input: {
+        productId: product._id,
+        visitorId,
+      },
+    }).catch(() => {});
+  }, [product?._id]);
+
   const mediaItems = product
     ? (product.media && product.media.length > 0
         ? product.media
@@ -397,19 +415,41 @@ export default function ProductDetailPage() {
   }, [selectedSize, product, hasSizeStockInfo]);
 
   useEffect(() => {
+    if (!product?._id) return;
+
+    const cachedLikeState = getCachedProductLikeState(product._id);
+    if (typeof cachedLikeState?.liked === "boolean") {
+      setIsLiked(cachedLikeState.liked);
+    }
+
+    return subscribeProductLikeState(product._id, (nextSnapshot) => {
+      if (typeof nextSnapshot.liked === "boolean") {
+        setIsLiked(nextSnapshot.liked);
+      }
+    });
+  }, [product?._id]);
+
+  useEffect(() => {
     if (!product || !isAuthenticated) {
       setIsLiked(false);
       return;
     }
+
+    const cachedLikeState = getCachedProductLikeState(product._id);
+    if (typeof cachedLikeState?.liked === "boolean") {
+      setIsLiked(cachedLikeState.liked);
+    }
+
     const checkUserLike = async () => {
       try {
         const result = await FLOW.checkLike({ input: { productId: product._id } });
-        setIsLiked(!!result?.liked);
+        setCachedProductLikeState(product._id, { liked: !!result?.liked });
       } catch (e) {
-        setIsLiked(false);
+        setCachedProductLikeState(product._id, { liked: false });
       }
     };
-    checkUserLike();
+
+    void checkUserLike();
   }, [product?._id, isAuthenticated]);
 
   const handleAddToCart = async () => {
@@ -453,7 +493,28 @@ export default function ProductDetailPage() {
     try {
       const result = await FLOW.toggleLike({ input: { productId: product._id } });
       const nextLiked = !!result?.liked;
-      setIsLiked(nextLiked);
+      const cachedLikeState = getCachedProductLikeState(product._id);
+      const baseLikesCount = typeof result?.likesCount === "number"
+        ? result.likesCount
+        : typeof cachedLikeState?.likesCount === "number"
+          ? cachedLikeState.likesCount
+          : Number(product.likesCount || 0);
+      const nextLikesCount = typeof result?.likesCount === "number"
+        ? Math.max(0, Number(result.likesCount))
+        : Math.max(0, baseLikesCount + (nextLiked ? 1 : -1));
+
+      setCachedProductLikeState(product._id, {
+        liked: nextLiked,
+        likesCount: nextLikesCount,
+      });
+      setProduct((prev) => (
+        prev
+          ? {
+              ...prev,
+              likesCount: nextLikesCount,
+            }
+          : prev
+      ));
       toast.success(nextLiked ? "Добавлено в избранное" : "Удалено из избранного");
       // Could re-fetch product to update likes count
     } catch (error) {
@@ -810,15 +871,6 @@ export default function ProductDetailPage() {
             >
               В КОРЗИНУ
             </Button>
-
-            <div className="space-y-4">
-              <div className="text-sm text-gray-600">
-                Если у вас остались вопросы по товару - вы можете обратиться к продавцу
-              </div>
-              <Button variant="outline" className="w-full uppercase font-bold tracking-widest">
-                Написать продавцу
-              </Button>
-            </div>
 
             <Dialog>
               <DialogTrigger asChild>

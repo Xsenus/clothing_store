@@ -22,6 +22,7 @@ export function CartProvider({ children }) {
         setCartItems(items.map((item) => ({
           ...item,
           cartId: item.cartId || item.id,
+          product: item.product || null,
         })));
       }
     } catch (error) {
