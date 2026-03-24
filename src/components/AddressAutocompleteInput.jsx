@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAddressSuggestions } from "@/hooks/useAddressSuggestions";

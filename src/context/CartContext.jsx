@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useConvexAuth } from "@/context/AuthContext";
 import { notify } from "@/lib/notify";
 

@@ -281,7 +281,7 @@ export default function ProductCard({
           alt={product.name}
           loading="lazy"
           decoding="async"
-          fetchPriority="low"
+          fetchpriority="low"
           className={`relative z-[1] h-full w-full transition-transform duration-500 ${canOpenProduct ? cardHoverScaleClassName : ""} ${cardImageDisplay.objectFitClassName} ${cardImageDisplay.paddingClassName} ${cardImageDisplay.scaleClassName}`.trim()}
           onError={() => setImageError(true)}
         />

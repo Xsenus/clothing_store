@@ -35,6 +35,7 @@ export default [
       "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
       "no-undef": "error",
       "react/jsx-uses-vars": "error",
+      "react/jsx-uses-react": "error",
       "react/react-in-jsx-scope": "off",
     },
   },

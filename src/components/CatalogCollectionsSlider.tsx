@@ -105,7 +105,7 @@ const renderCollectionVisual = (
               alt=""
               loading="lazy"
               decoding="async"
-              fetchPriority="low"
+              fetchpriority="low"
               className="h-full w-full object-cover transition duration-700 group-hover/slide:scale-105"
             />
           </div>
@@ -122,7 +122,7 @@ const renderCollectionVisual = (
           alt={item.label}
           loading="lazy"
           decoding="async"
-          fetchPriority="low"
+          fetchpriority="low"
           className="h-full w-full object-cover transition duration-700 group-hover/slide:scale-[1.03]"
         />
       </div>
