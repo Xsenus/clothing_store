@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import globals from "globals";
 
 export default [
   {
@@ -17,15 +18,13 @@ export default [
         },
       },
       globals: {
-        window: "readonly",
-        document: "readonly",
-        localStorage: "readonly",
-        FormData: "readonly",
+        ...globals.browser,
+        ...globals.es2021,
       },
     },
     rules: {
       "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-      "no-undef": "off"
+      "no-undef": "error"
     },
   },
 ];
