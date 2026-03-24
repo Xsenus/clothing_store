@@ -87,6 +87,14 @@ internal static class AdminAnalyticsSupport
         public int UniqueViewers { get; set; }
 
         public int LoginsCount { get; set; }
+
+        public int SiteVisitorsCount { get; set; }
+
+        public int SiteVisitEventsCount { get; set; }
+
+        public int UniquePurchasersCount { get; set; }
+
+        public double PurchaseConversionRate { get; set; }
     }
 
     internal static (string DateFrom, string DateTo, long FromTimestamp, long ToTimestamp, int PeriodDays) ResolveRange(string? dateFrom, string? dateTo)
@@ -298,6 +306,17 @@ internal static class AdminAnalyticsSupport
     internal static int ToDayKey(DateOnly date)
         => date.Year * 10_000 + date.Month * 100 + date.Day;
 
+    internal static double CalculatePurchaseConversionRate(int uniquePurchasersCount, int uniqueVisitorsCount)
+    {
+        if (uniqueVisitorsCount <= 0 || uniquePurchasersCount <= 0)
+            return 0d;
+
+        return Math.Round(
+            uniquePurchasersCount * 100d / uniqueVisitorsCount,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
     internal static IEnumerable<object> BuildTimelinePayload(IReadOnlyDictionary<int, AnalyticsTimelinePoint> timeline)
     {
         return timeline.Values
@@ -317,7 +336,11 @@ internal static class AdminAnalyticsSupport
                 point.FavoritesRemovedCount,
                 point.TotalViewEvents,
                 point.UniqueViewers,
-                point.LoginsCount
+                point.LoginsCount,
+                point.SiteVisitorsCount,
+                point.SiteVisitEventsCount,
+                point.UniquePurchasersCount,
+                purchaseConversionRate = Math.Round(point.PurchaseConversionRate, 2, MidpointRounding.AwayFromZero)
             });
     }
 

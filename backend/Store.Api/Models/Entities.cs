@@ -1060,6 +1060,41 @@ public class ProductView
     public long LastViewedAt { get; set; }
 }
 
+[Table("site_visits")]
+public class SiteVisit
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
+    [Column("visitor_id")]
+    public string? VisitorId { get; set; }
+
+    [Column("viewer_key")]
+    public string ViewerKey { get; set; } = string.Empty;
+
+    [Column("day_key")]
+    public int DayKey { get; set; }
+
+    [Column("visit_count")]
+    public int VisitCount { get; set; }
+
+    [Column("first_visited_at")]
+    public long FirstVisitedAt { get; set; }
+
+    [Column("last_visited_at")]
+    public long LastVisitedAt { get; set; }
+
+    [Column("entry_path")]
+    public string? EntryPath { get; set; }
+
+    [Column("last_path")]
+    public string? LastPath { get; set; }
+}
+
 [Table("orders")]
 public class Order
 {
@@ -1103,11 +1138,23 @@ public class Order
     [Column("purchase_channel")]
     public string PurchaseChannel { get; set; } = "web";
 
+    [Column("visitor_id")]
+    public string? VisitorId { get; set; }
+
+    [Column("viewer_key")]
+    public string? ViewerKey { get; set; }
+
     [Column("shipping_method")]
     public string ShippingMethod { get; set; } = "home";
 
     [Column("shipping_amount")]
     public double ShippingAmount { get; set; }
+
+    [Column("promo_code")]
+    public string? PromoCode { get; set; }
+
+    [Column("promo_discount_amount")]
+    public double PromoDiscountAmount { get; set; }
 
     [Column("pickup_point_id")]
     public string? PickupPointId { get; set; }

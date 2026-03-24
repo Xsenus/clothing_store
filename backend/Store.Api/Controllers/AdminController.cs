@@ -192,6 +192,7 @@ public class AdminController : ControllerBase
                 EF.Functions.ILike(x.Status, pattern) ||
                 EF.Functions.ILike(x.PaymentMethod, pattern) ||
                 EF.Functions.ILike(x.PurchaseChannel, pattern) ||
+                EF.Functions.ILike(x.PromoCode ?? string.Empty, pattern) ||
                 EF.Functions.ILike(x.ItemsJson, pattern) ||
                 matchingUserIds.Contains(x.UserId) ||
                 matchingProfileUserIds.Contains(x.UserId));
@@ -268,6 +269,8 @@ public class AdminController : ControllerBase
                         },
                     o.TotalAmount,
                     o.ShippingAmount,
+                    o.PromoCode,
+                    o.PromoDiscountAmount,
                     o.Status,
                     o.PaymentMethod,
                     o.PurchaseChannel,
@@ -573,7 +576,100 @@ public class AdminController : ControllerBase
             .AsNoTracking()
             .Where(x => x.LastViewedAt >= previousFromTimestamp && x.LastViewedAt <= previousToTimestamp)
             .ToListAsync();
+        var siteVisitRows = await _db.SiteVisits
+            .AsNoTracking()
+            .Where(x => x.LastVisitedAt >= fromTimestamp && x.LastVisitedAt <= toTimestamp)
+            .ToListAsync();
+        var previousSiteVisitRows = await _db.SiteVisits
+            .AsNoTracking()
+            .Where(x => x.LastVisitedAt >= previousFromTimestamp && x.LastVisitedAt <= previousToTimestamp)
+            .ToListAsync();
+
+        var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
+        var todayDate = utcToday.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var (_, _, todayFromTimestamp, todayToTimestamp, _) = AdminAnalyticsSupport.ResolveRange(todayDate, todayDate);
+        var (yesterdayDate, _, yesterdayFromTimestamp, yesterdayToTimestamp, _) =
+            AdminAnalyticsSupport.ResolvePreviousRange(todayFromTimestamp, 1);
+        var todayOrders = await _db.Orders
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= todayFromTimestamp && x.CreatedAt <= todayToTimestamp)
+            .ToListAsync();
+        var yesterdayOrders = await _db.Orders
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= yesterdayFromTimestamp && x.CreatedAt <= yesterdayToTimestamp)
+            .ToListAsync();
+        var todaySiteVisitRows = await _db.SiteVisits
+            .AsNoTracking()
+            .Where(x => x.LastVisitedAt >= todayFromTimestamp && x.LastVisitedAt <= todayToTimestamp)
+            .ToListAsync();
+        var yesterdaySiteVisitRows = await _db.SiteVisits
+            .AsNoTracking()
+            .Where(x => x.LastVisitedAt >= yesterdayFromTimestamp && x.LastVisitedAt <= yesterdayToTimestamp)
+            .ToListAsync();
         var timeline = AdminAnalyticsSupport.CreateTimeline(fromTimestamp, toTimestamp);
+
+        static (
+            int OrdersCount,
+            int SuccessfulOrdersCount,
+            int SoldUnits,
+            double RevenueAmount,
+            double AverageOrderValue,
+            int UniqueVisitorsCount,
+            int VisitEventsCount,
+            int UniquePurchasersCount,
+            double PurchaseConversionRate)
+            BuildVisitPurchaseSummary(
+                IReadOnlyCollection<Order> ordersSource,
+                IReadOnlyCollection<SiteVisit> siteVisitsSource)
+        {
+            var visitorKeys = siteVisitsSource
+                .Select(item => item.ViewerKey)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            var visitEventsCount = siteVisitsSource.Sum(item => Math.Max(0, item.VisitCount));
+            var successfulOrdersCount = 0;
+            var soldUnits = 0;
+            var revenueAmount = 0d;
+            var uniquePurchaserKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var order in ordersSource)
+            {
+                if (!AdminAnalyticsSupport.IsSuccessfulOrderStatus(order.Status))
+                    continue;
+
+                successfulOrdersCount++;
+                revenueAmount += order.TotalAmount;
+
+                foreach (var item in OrderPresentation.ParseStoredOrderItems(order.ItemsJson))
+                {
+                    if (item.Quantity > 0)
+                        soldUnits += item.Quantity;
+                }
+
+                if (AdminAnalyticsSupport.NormalizePurchaseChannel(order.PurchaseChannel) != "web")
+                    continue;
+
+                var viewerKey = order.ViewerKey?.Trim();
+                if (!string.IsNullOrWhiteSpace(viewerKey) && visitorKeys.Contains(viewerKey))
+                    uniquePurchaserKeys.Add(viewerKey);
+            }
+
+            var averageOrderValue = successfulOrdersCount > 0
+                ? Math.Round(revenueAmount / successfulOrdersCount, 2, MidpointRounding.AwayFromZero)
+                : 0d;
+
+            return (
+                ordersSource.Count,
+                successfulOrdersCount,
+                soldUnits,
+                Math.Round(revenueAmount, 2, MidpointRounding.AwayFromZero),
+                averageOrderValue,
+                visitorKeys.Count,
+                visitEventsCount,
+                uniquePurchaserKeys.Count,
+                AdminAnalyticsSupport.CalculatePurchaseConversionRate(uniquePurchaserKeys.Count, visitorKeys.Count));
+        }
 
         var productMetrics = new Dictionary<string, AdminAnalyticsSupport.AnalyticsProductMetric>(StringComparer.Ordinal);
         foreach (var pair in likeCountsByProduct)
@@ -643,6 +739,9 @@ public class AdminController : ControllerBase
         var previousSoldUnits = 0;
         var previousRevenueAmount = 0d;
         var previousShippingRevenueAmount = 0d;
+        var successfulWebPurchaserKeys = new HashSet<string>(StringComparer.Ordinal);
+        var previousSuccessfulWebPurchaserKeys = new HashSet<string>(StringComparer.Ordinal);
+        var successfulWebPurchasersByDay = new Dictionary<int, HashSet<string>>();
 
         foreach (var order in orders)
         {
@@ -680,6 +779,20 @@ public class AdminController : ControllerBase
             shippingRevenueAmount += order.ShippingAmount;
             timelinePoint.RevenueAmount = Math.Round(timelinePoint.RevenueAmount + order.TotalAmount, 2, MidpointRounding.AwayFromZero);
             timelinePoint.ShippingRevenueAmount = Math.Round(timelinePoint.ShippingRevenueAmount + order.ShippingAmount, 2, MidpointRounding.AwayFromZero);
+
+            var orderViewerKey = order.ViewerKey?.Trim();
+            if (normalizedPurchaseChannel == "web" && !string.IsNullOrWhiteSpace(orderViewerKey))
+            {
+                successfulWebPurchaserKeys.Add(orderViewerKey);
+
+                if (!successfulWebPurchasersByDay.TryGetValue(timelinePoint.DayKey, out var purchaserKeys))
+                {
+                    purchaserKeys = new HashSet<string>(StringComparer.Ordinal);
+                    successfulWebPurchasersByDay[timelinePoint.DayKey] = purchaserKeys;
+                }
+
+                purchaserKeys.Add(orderViewerKey);
+            }
 
             AdminAnalyticsSupport.AccumulateBucket(statusBucket, 0, order.TotalAmount, order.ShippingAmount);
             AdminAnalyticsSupport.AccumulateBucket(
@@ -799,6 +912,13 @@ public class AdminController : ControllerBase
             previousRevenueAmount += previousOrder.TotalAmount;
             previousShippingRevenueAmount += previousOrder.ShippingAmount;
 
+            if (AdminAnalyticsSupport.NormalizePurchaseChannel(previousOrder.PurchaseChannel) == "web")
+            {
+                var previousOrderViewerKey = previousOrder.ViewerKey?.Trim();
+                if (!string.IsNullOrWhiteSpace(previousOrderViewerKey))
+                    previousSuccessfulWebPurchaserKeys.Add(previousOrderViewerKey);
+            }
+
             foreach (var item in OrderPresentation.ParseStoredOrderItems(previousOrder.ItemsJson))
             {
                 if (string.IsNullOrWhiteSpace(item.ProductId) || item.Quantity <= 0)
@@ -855,6 +975,30 @@ public class AdminController : ControllerBase
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
             .Count();
+        var totalSiteVisitors = await _db.SiteVisits
+            .AsNoTracking()
+            .Select(x => x.ViewerKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .CountAsync();
+        var uniqueVisitorKeys = siteVisitRows
+            .Select(x => x.ViewerKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+        var previousUniqueVisitorKeys = previousSiteVisitRows
+            .Select(x => x.ViewerKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+        var uniqueVisitorsCount = uniqueVisitorKeys.Count;
+        var previousUniqueVisitorsCount = previousUniqueVisitorKeys.Count;
+        var visitEventsCount = siteVisitRows.Sum(x => Math.Max(0, x.VisitCount));
+        var previousVisitEventsCount = previousSiteVisitRows.Sum(x => Math.Max(0, x.VisitCount));
+        var uniquePurchasersCount = successfulWebPurchaserKeys.Count(key => uniqueVisitorKeys.Contains(key));
+        var previousUniquePurchasersCount = previousSuccessfulWebPurchaserKeys.Count(key => previousUniqueVisitorKeys.Contains(key));
+        var purchaseConversionRate = AdminAnalyticsSupport.CalculatePurchaseConversionRate(uniquePurchasersCount, uniqueVisitorsCount);
+        var previousPurchaseConversionRate = AdminAnalyticsSupport.CalculatePurchaseConversionRate(previousUniquePurchasersCount, previousUniqueVisitorsCount);
         foreach (var favoriteGroup in favoriteEventsInPeriod.GroupBy(x => AdminAnalyticsSupport.ToDayKey(x.CreatedAt)))
         {
             if (!timeline.TryGetValue(favoriteGroup.Key, out var favoriteTimelinePoint))
@@ -875,6 +1019,32 @@ public class AdminController : ControllerBase
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.Ordinal)
                 .Count();
+        }
+        foreach (var siteVisitGroup in siteVisitRows.GroupBy(
+                     x => x.DayKey > 0 ? x.DayKey : AdminAnalyticsSupport.ToDayKey(x.LastVisitedAt)))
+        {
+            if (!timeline.TryGetValue(siteVisitGroup.Key, out var timelinePoint))
+                continue;
+
+            timelinePoint.SiteVisitEventsCount = siteVisitGroup.Sum(item => Math.Max(0, item.VisitCount));
+            timelinePoint.SiteVisitorsCount = siteVisitGroup
+                .Select(item => item.ViewerKey)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+        }
+        foreach (var purchaserDay in successfulWebPurchasersByDay)
+        {
+            if (!timeline.TryGetValue(purchaserDay.Key, out var timelinePoint))
+                continue;
+
+            timelinePoint.UniquePurchasersCount = purchaserDay.Value.Count(key => !string.IsNullOrWhiteSpace(key));
+        }
+        foreach (var timelinePoint in timeline.Values)
+        {
+            timelinePoint.PurchaseConversionRate = AdminAnalyticsSupport.CalculatePurchaseConversionRate(
+                timelinePoint.UniquePurchasersCount,
+                timelinePoint.SiteVisitorsCount);
         }
         var viewedProductsCount = productViewRows
             .Select(x => x.ProductId)
@@ -919,6 +1089,8 @@ public class AdminController : ControllerBase
         var previousAverageItemsPerOrder = previousSuccessfulOrdersCount > 0
             ? Math.Round((double)previousSoldUnits / previousSuccessfulOrdersCount, 2, MidpointRounding.AwayFromZero)
             : 0d;
+        var todayVisitPurchaseSummary = BuildVisitPurchaseSummary(todayOrders, todaySiteVisitRows);
+        var previousDayVisitPurchaseSummary = BuildVisitPurchaseSummary(yesterdayOrders, yesterdaySiteVisitRows);
 
         return Results.Ok(new
         {
@@ -958,7 +1130,32 @@ public class AdminController : ControllerBase
                     loginEventsCount = previousLoginEventsCount,
                     totalViewEvents = previousTotalViewEvents,
                     totalUniqueViewers = previousTotalUniqueViewers,
-                    viewedProductsCount = previousViewedProductsCount
+                    viewedProductsCount = previousViewedProductsCount,
+                    uniqueVisitorsCount = previousUniqueVisitorsCount,
+                    visitEventsCount = previousVisitEventsCount,
+                    uniquePurchasersCount = previousUniquePurchasersCount,
+                    purchaseConversionRate = previousPurchaseConversionRate
+                },
+                previousDay = new
+                {
+                    dateFrom = yesterdayDate,
+                    dateTo = yesterdayDate,
+                    fromTimestamp = yesterdayFromTimestamp,
+                    toTimestamp = yesterdayToTimestamp,
+                    days = 1
+                },
+                previousDaySummary = new
+                {
+                    date = yesterdayDate,
+                    ordersCount = previousDayVisitPurchaseSummary.OrdersCount,
+                    successfulOrdersCount = previousDayVisitPurchaseSummary.SuccessfulOrdersCount,
+                    soldUnits = previousDayVisitPurchaseSummary.SoldUnits,
+                    revenueAmount = previousDayVisitPurchaseSummary.RevenueAmount,
+                    averageOrderValue = previousDayVisitPurchaseSummary.AverageOrderValue,
+                    uniqueVisitorsCount = previousDayVisitPurchaseSummary.UniqueVisitorsCount,
+                    visitEventsCount = previousDayVisitPurchaseSummary.VisitEventsCount,
+                    uniquePurchasersCount = previousDayVisitPurchaseSummary.UniquePurchasersCount,
+                    purchaseConversionRate = previousDayVisitPurchaseSummary.PurchaseConversionRate
                 }
             },
             snapshot = new
@@ -972,7 +1169,21 @@ public class AdminController : ControllerBase
                 lowStockVisibleProducts,
                 totalFavorites,
                 uniqueFavoriteUsers,
-                totalUsers = await _db.Users.AsNoTracking().CountAsync()
+                totalUsers = await _db.Users.AsNoTracking().CountAsync(),
+                totalSiteVisitors
+            },
+            todaySummary = new
+            {
+                date = todayDate,
+                ordersCount = todayVisitPurchaseSummary.OrdersCount,
+                successfulOrdersCount = todayVisitPurchaseSummary.SuccessfulOrdersCount,
+                soldUnits = todayVisitPurchaseSummary.SoldUnits,
+                revenueAmount = todayVisitPurchaseSummary.RevenueAmount,
+                averageOrderValue = todayVisitPurchaseSummary.AverageOrderValue,
+                uniqueVisitorsCount = todayVisitPurchaseSummary.UniqueVisitorsCount,
+                visitEventsCount = todayVisitPurchaseSummary.VisitEventsCount,
+                uniquePurchasersCount = todayVisitPurchaseSummary.UniquePurchasersCount,
+                purchaseConversionRate = todayVisitPurchaseSummary.PurchaseConversionRate
             },
             periodSummary = new
             {
@@ -992,7 +1203,11 @@ public class AdminController : ControllerBase
                 loginEventsCount,
                 totalViewEvents,
                 totalUniqueViewers,
-                viewedProductsCount
+                viewedProductsCount,
+                uniqueVisitorsCount,
+                visitEventsCount,
+                uniquePurchasersCount,
+                purchaseConversionRate
             },
             orders = new
             {

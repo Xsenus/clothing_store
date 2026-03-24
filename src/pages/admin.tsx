@@ -1,6 +1,7 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
+import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
 import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
 import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { Button } from '@/components/ui/button';
@@ -487,6 +488,8 @@ interface AdminOrder {
   } | null;
   totalAmount: number;
   shippingAmount?: number;
+  promoCode?: string | null;
+  promoDiscountAmount?: number | null;
   status: string;
   createdAt?: string | number;
   itemsJson?: string;
@@ -941,7 +944,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
-const SETTINGS_GROUP_VALUES = ["orders", "auth", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
+const SETTINGS_GROUP_VALUES = ["orders", "auth", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "dadata", "yandex"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
@@ -2474,6 +2477,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
 
     return formatRubles(numeric);
+  };
+
+  const getOrderPromoCodeValue = (order?: Pick<AdminOrder, "promoCode"> | null) => {
+    const normalized = String(order?.promoCode || "").trim();
+    return normalized || "";
+  };
+
+  const getOrderPromoDiscountValue = (order?: Pick<AdminOrder, "promoDiscountAmount"> | null) => {
+    const numeric = Number(order?.promoDiscountAmount ?? 0);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
   };
 
   const formatDeliveryDaysLabel = (value?: number | null) => {
@@ -6483,7 +6496,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {selectedUserOrders.map((order) => (
                                 <TableRow key={order.id}>
                                   <TableCell className="font-mono">{formatAdminOrderNumber(order)}</TableCell>
-                                  <TableCell>{formatRubles(order.totalAmount)}</TableCell>
+                                  <TableCell>
+                                    <div>{formatRubles(order.totalAmount)}</div>
+                                    {getOrderPromoCodeValue(order) ? (
+                                      <div className="mt-1 text-xs text-muted-foreground">
+                                        Промокод: <span className="font-mono text-foreground">{getOrderPromoCodeValue(order)}</span>
+                                      </div>
+                                    ) : null}
+                                  </TableCell>
                                   <TableCell>{formatOrderStatus(order.status)}</TableCell>
                                   <TableCell>{order.createdAt ? new Date(order.createdAt).toLocaleString() : "—"}</TableCell>
                                 </TableRow>
@@ -6708,6 +6728,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       const customer = resolveOrderCustomerSnapshot(order);
                       const items = getOrderItemsDetails(order);
                       const isTerminalOrder = TERMINAL_ORDER_STATUSES.has(normalizeOrderStatusValue(order.status));
+                      const promoCode = getOrderPromoCodeValue(order);
+                      const promoDiscount = getOrderPromoDiscountValue(order);
 
                       return (
                         <div key={order.id} className="border border-gray-200 bg-white p-4 shadow-sm" style={getOrderRowStyle(order.status)}>
@@ -6734,6 +6756,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div>
                                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Сумма</div>
                                 <div className="mt-1 text-lg font-black">{formatRubles(order.totalAmount)}</div>
+                                {promoCode ? (
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    Промокод: <span className="font-mono text-foreground">{promoCode}</span>
+                                  </div>
+                                ) : null}
+                                {promoDiscount > 0 ? (
+                                  <div className="text-xs text-emerald-700">Скидка: -{formatRubles(promoDiscount)}</div>
+                                ) : null}
                                 <div className="text-xs text-muted-foreground">
                                   {formatPaymentMethod(order.paymentMethod)} · {formatShippingMethod(order.shippingMethod)}
                                 </div>
@@ -6882,6 +6912,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           const customer = resolveOrderCustomerSnapshot(order);
                           const items = getOrderItemsDetails(order);
                           const isTerminalOrder = TERMINAL_ORDER_STATUSES.has(normalizeOrderStatusValue(order.status));
+                          const promoCode = getOrderPromoCodeValue(order);
+                          const promoDiscount = getOrderPromoDiscountValue(order);
 
                           return (
                             <TableRow key={order.id} style={getOrderRowStyle(order.status)}>
@@ -6988,7 +7020,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 if (column.id === "amount") {
                                   return (
                                     <TableCell key={column.id} className="whitespace-nowrap align-top font-semibold" style={getOrderTableColumnCellStyle(column.id)}>
-                                      {formatRubles(order.totalAmount)}
+                                      <div>{formatRubles(order.totalAmount)}</div>
+                                      {promoCode ? (
+                                        <div className="mt-1 text-xs font-normal text-muted-foreground">
+                                          Промокод: <span className="font-mono text-foreground">{promoCode}</span>
+                                        </div>
+                                      ) : null}
+                                      {promoDiscount > 0 ? (
+                                        <div className="text-xs font-normal text-emerald-700">Скидка: -{formatRubles(promoDiscount)}</div>
+                                      ) : null}
                                     </TableCell>
                                   );
                                 }
@@ -7217,6 +7257,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Сумма</div>
                                 <div className="font-semibold">{formatRubles(editingOrder.totalAmount)}</div>
+                                {getOrderPromoCodeValue(editingOrder) ? (
+                                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                                    <div>
+                                      Промокод: <span className="font-mono text-foreground">{getOrderPromoCodeValue(editingOrder)}</span>
+                                    </div>
+                                    {getOrderPromoDiscountValue(editingOrder) > 0 ? (
+                                      <div>Скидка: -{formatRubles(getOrderPromoDiscountValue(editingOrder))}</div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Создан</div>
@@ -8091,6 +8141,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           {group.label}
                         </Button>
                       ))}
+                      <Button
+                        key="promo-codes"
+                        variant={selectedSettingsGroup === "promo-codes" ? "default" : "outline"}
+                        className="h-auto min-h-11 justify-start whitespace-normal break-words px-3 py-3 text-left leading-snug"
+                        onClick={() => setSelectedSettingsGroup("promo-codes")}
+                      >
+                        Промокоды
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -8359,6 +8417,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {selectedSettingsGroup === "promo-codes" && (
+                    <AdminPromoCodesSettings />
                   )}
 
                   {selectedSettingsGroup === "orders" && (

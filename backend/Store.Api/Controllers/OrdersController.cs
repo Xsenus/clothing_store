@@ -22,6 +22,7 @@ public class OrdersController : ControllerBase
     private readonly AuthService _auth;
     private readonly IOrderEmailQueue _orderEmailQueue;
     private readonly IOrderPaymentService _orderPaymentService;
+    private readonly PromoCodeService _promoCodeService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
     private readonly UserIdentityService _userIdentityService;
 
@@ -35,6 +36,7 @@ public class OrdersController : ControllerBase
         AuthService auth,
         IOrderEmailQueue orderEmailQueue,
         IOrderPaymentService orderPaymentService,
+        PromoCodeService promoCodeService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService,
         UserIdentityService userIdentityService)
     {
@@ -42,6 +44,7 @@ public class OrdersController : ControllerBase
         _auth = auth;
         _orderEmailQueue = orderEmailQueue;
         _orderPaymentService = orderPaymentService;
+        _promoCodeService = promoCodeService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
         _userIdentityService = userIdentityService;
     }
@@ -112,6 +115,8 @@ public class OrdersController : ControllerBase
                 }),
                 order.TotalAmount,
                 order.ShippingAmount,
+                order.PromoCode,
+                order.PromoDiscountAmount,
                 order.Status,
                 order.PaymentMethod,
                 order.ShippingMethod,
@@ -234,7 +239,27 @@ public class OrdersController : ControllerBase
                 .ToList();
             var computedItemsAmount = Math.Round(serializedItems.Sum(item => item.unitPrice * item.quantity), 2, MidpointRounding.AwayFromZero);
             var resolvedShippingAmount = Math.Max(0d, Math.Round(payload.ShippingAmount ?? 0d, 2, MidpointRounding.AwayFromZero));
-            var resolvedTotalAmount = Math.Round(computedItemsAmount + resolvedShippingAmount, 2, MidpointRounding.AwayFromZero);
+            var resolvedPromoCode = PromoCodeService.NormalizeCode(payload.PromoCode);
+            var promoCodeDiscountAmount = 0d;
+            if (!string.IsNullOrWhiteSpace(resolvedPromoCode))
+            {
+                var promoCodeResult = await _promoCodeService.ApplyAsync(
+                    resolvedPromoCode,
+                    computedItemsAmount,
+                    now,
+                    HttpContext.RequestAborted);
+                if (!promoCodeResult.IsValid)
+                {
+                    return Results.BadRequest(new { detail = promoCodeResult.Error ?? "Промокод недействителен." });
+                }
+
+                promoCodeDiscountAmount = promoCodeResult.DiscountAmount;
+            }
+
+            var resolvedTotalAmount = Math.Round(
+                computedItemsAmount - promoCodeDiscountAmount + resolvedShippingAmount,
+                2,
+                MidpointRounding.AwayFromZero);
 
             var resolvedPaymentMethod = string.IsNullOrWhiteSpace(payload.PaymentMethod)
                 ? "cod"
@@ -248,6 +273,8 @@ public class OrdersController : ControllerBase
             var resolvedPurchaseChannel = string.IsNullOrWhiteSpace(payload.PurchaseChannel)
                 ? "web"
                 : payload.PurchaseChannel.Trim().ToLowerInvariant();
+            var resolvedVisitorId = VisitorTrackingSupport.NormalizeVisitorId(payload.VisitorId);
+            var resolvedViewerKey = VisitorTrackingSupport.ResolveViewerKey(user, resolvedVisitorId);
             var normalizedShippingMethod = payload.ShippingMethod?.Trim().ToLowerInvariant();
             var resolvedShippingMethod = normalizedShippingMethod switch
             {
@@ -287,8 +314,12 @@ public class OrdersController : ControllerBase
                 Status = resolvedStatus,
                 PaymentMethod = resolvedPaymentMethod,
                 PurchaseChannel = resolvedPurchaseChannel,
+                VisitorId = resolvedVisitorId,
+                ViewerKey = resolvedViewerKey,
                 ShippingMethod = resolvedShippingMethod,
                 ShippingAmount = resolvedShippingAmount,
+                PromoCode = resolvedPromoCode,
+                PromoDiscountAmount = promoCodeDiscountAmount,
                 PickupPointId = resolvedPickupPointId,
                 ShippingAddress = resolvedShippingAddress,
                 CustomerName = resolvedCustomerName,

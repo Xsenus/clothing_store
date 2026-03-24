@@ -56,6 +56,7 @@ builder.Services.AddScoped<IYooMoneyPaymentService, YooMoneyPaymentService>();
 builder.Services.AddScoped<IYooKassaPaymentService, YooKassaPaymentService>();
 builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
 builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
+builder.Services.AddScoped<PromoCodeService>();
 builder.Services.AddScoped<TransactionalEmailService>();
 builder.Services.AddScoped<TelegramNotificationService>();
 builder.Services.AddSingleton<DatabaseBackupService>();

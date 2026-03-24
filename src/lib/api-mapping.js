@@ -554,6 +554,12 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  validatePromoCode: async ({ input }) => request("/promo-codes/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   getOrderPaymentCheckout: async ({ input }) => request(`/orders/${encodeURIComponent(input.orderId)}/payment/checkout`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -582,6 +588,15 @@ export const FLOW = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ visitorId: input.visitorId ?? null }),
+  }),
+
+  trackSiteVisit: async ({ input }) => request("/tracking/visit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      visitorId: input.visitorId ?? null,
+      path: input.path ?? null,
+    }),
   }),
 
   addToCart,
@@ -968,6 +983,24 @@ export const FLOW = {
 
   adminCheckTelegramBot: async ({ input }) => request(`/admin/telegram-bots/${input.id}/check`, {
     method: "POST",
+  }),
+
+  adminGetPromoCodes: async () => request("/admin/promo-codes"),
+
+  adminCreatePromoCode: async ({ input }) => request("/admin/promo-codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminUpdatePromoCode: async ({ input }) => request(`/admin/promo-codes/${input.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input.payload),
+  }),
+
+  adminDeletePromoCode: async ({ input }) => request(`/admin/promo-codes/${input.id}`, {
+    method: "DELETE",
   }),
 
 

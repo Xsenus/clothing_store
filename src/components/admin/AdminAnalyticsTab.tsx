@@ -57,6 +57,35 @@ export interface AdminAnalyticsDailyPoint {
   totalViewEvents?: number;
   uniqueViewers?: number;
   loginsCount?: number;
+  siteVisitorsCount?: number;
+  siteVisitEventsCount?: number;
+  uniquePurchasersCount?: number;
+  purchaseConversionRate?: number;
+}
+
+export interface AdminAnalyticsSummary {
+  date?: string;
+  ordersCount?: number;
+  successfulOrdersCount?: number;
+  deliveredOrdersCount?: number;
+  canceledOrdersCount?: number;
+  soldUnits?: number;
+  revenueAmount?: number;
+  shippingRevenueAmount?: number;
+  averageOrderValue?: number;
+  averageItemsPerOrder?: number;
+  newUsersCount?: number;
+  favoritesAddedCount?: number;
+  favoritesRemovedCount?: number;
+  favoriteUsersCount?: number;
+  loginEventsCount?: number;
+  totalViewEvents?: number;
+  totalUniqueViewers?: number;
+  viewedProductsCount?: number;
+  uniqueVisitorsCount?: number;
+  visitEventsCount?: number;
+  uniquePurchasersCount?: number;
+  purchaseConversionRate?: number;
 }
 
 export interface AdminAnalyticsResponse {
@@ -93,7 +122,19 @@ export interface AdminAnalyticsResponse {
       totalViewEvents?: number;
       totalUniqueViewers?: number;
       viewedProductsCount?: number;
+      uniqueVisitorsCount?: number;
+      visitEventsCount?: number;
+      uniquePurchasersCount?: number;
+      purchaseConversionRate?: number;
     };
+    previousDay?: {
+      dateFrom?: string;
+      dateTo?: string;
+      fromTimestamp?: number;
+      toTimestamp?: number;
+      days?: number;
+    };
+    previousDaySummary?: AdminAnalyticsSummary;
   };
   snapshot?: {
     totalProducts?: number;
@@ -106,26 +147,10 @@ export interface AdminAnalyticsResponse {
     totalFavorites?: number;
     uniqueFavoriteUsers?: number;
     totalUsers?: number;
+    totalSiteVisitors?: number;
   };
-  periodSummary?: {
-    ordersCount?: number;
-    successfulOrdersCount?: number;
-    deliveredOrdersCount?: number;
-    canceledOrdersCount?: number;
-    soldUnits?: number;
-    revenueAmount?: number;
-    shippingRevenueAmount?: number;
-    averageOrderValue?: number;
-    averageItemsPerOrder?: number;
-    newUsersCount?: number;
-    favoritesAddedCount?: number;
-    favoritesRemovedCount?: number;
-    favoriteUsersCount?: number;
-    loginEventsCount?: number;
-    totalViewEvents?: number;
-    totalUniqueViewers?: number;
-    viewedProductsCount?: number;
-  };
+  todaySummary?: AdminAnalyticsSummary;
+  periodSummary?: AdminAnalyticsSummary;
   orders?: {
     byStatus?: AdminAnalyticsBucketItem[];
     byPurchaseChannel?: AdminAnalyticsBucketItem[];
@@ -172,6 +197,8 @@ const formatDecimal = (value?: number | null) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(Number(value ?? 0));
+
+const formatPercent = (value?: number | null) => `${formatDecimal(value)}%`;
 
 const getComparisonMeta = (currentValue?: number | null, previousValue?: number | null) => {
   const current = Number(currentValue ?? 0);
@@ -494,7 +521,7 @@ const TrendChartCard = ({
         <div className="space-y-1 sm:max-w-[220px] sm:text-right">
           <div className="text-2xl font-black">{formatValue(total)}</div>
           <div className="text-xs text-muted-foreground">
-            Пик: {peakItem ? `${peakItem.label} · ${formatValue(maxValue)}` : "—"}
+            Пик: {peakItem ? `${peakItem.label} · ${formatValue(maxValue)}` : "-"}
           </div>
         </div>
       </div>
@@ -574,9 +601,12 @@ export default function AdminAnalyticsTab({
   formatRubles,
 }: AdminAnalyticsTabProps) {
   const snapshot = analytics?.snapshot;
+  const todaySummary = analytics?.todaySummary;
   const periodSummary = analytics?.periodSummary;
   const previousPeriod = analytics?.comparison?.previousPeriod;
   const previousSummary = analytics?.comparison?.previousSummary;
+  const previousDay = analytics?.comparison?.previousDay;
+  const previousDaySummary = analytics?.comparison?.previousDaySummary;
   const dailyTrend = Array.isArray(analytics?.trends?.daily) ? analytics.trends.daily : [];
 
   if (loading && !analytics) {
@@ -648,6 +678,62 @@ export default function AdminAnalyticsTab({
         </div>
       ) : null}
 
+      <div className="border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 className="text-lg font-black uppercase">Сегодня</h3>
+            <p className="text-sm text-muted-foreground">
+              Быстрая сводка по текущему дню, чтобы не выбирать даты вручную.
+            </p>
+          </div>
+          <div className="space-y-1 text-sm text-muted-foreground lg:text-right">
+            <div>
+              Дата: <span className="font-medium text-black">{todaySummary?.date || "-"}</span>
+            </div>
+            {previousDay ? (
+              <div>
+                Сравнение со вчера: <span className="font-medium text-black">{previousDay.dateFrom}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            icon={<Users className="h-5 w-5" />}
+            title="Посетителей сайта"
+            value={formatInteger(todaySummary?.uniqueVisitorsCount)}
+            hint={`${formatInteger(todaySummary?.visitEventsCount)} визитов сегодня · всего ${formatInteger(snapshot?.totalSiteVisitors)}`}
+            comparisonText={getComparisonMeta(todaySummary?.uniqueVisitorsCount, previousDaySummary?.uniqueVisitorsCount)?.text}
+            comparisonTone={getComparisonMeta(todaySummary?.uniqueVisitorsCount, previousDaySummary?.uniqueVisitorsCount)?.tone}
+          />
+          <MetricCard
+            icon={<ShoppingCart className="h-5 w-5" />}
+            title="Покупателей сегодня"
+            value={formatInteger(todaySummary?.uniquePurchasersCount)}
+            hint={`${formatInteger(todaySummary?.successfulOrdersCount)} успешных заказов`}
+            comparisonText={getComparisonMeta(todaySummary?.uniquePurchasersCount, previousDaySummary?.uniquePurchasersCount)?.text}
+            comparisonTone={getComparisonMeta(todaySummary?.uniquePurchasersCount, previousDaySummary?.uniquePurchasersCount)?.tone}
+          />
+          <MetricCard
+            icon={<BarChart3 className="h-5 w-5" />}
+            title="Конверсия в покупку"
+            value={formatPercent(todaySummary?.purchaseConversionRate)}
+            hint={`${formatInteger(todaySummary?.uniquePurchasersCount)} из ${formatInteger(todaySummary?.uniqueVisitorsCount)} посетителей`}
+            comparisonText={getComparisonMeta(todaySummary?.purchaseConversionRate, previousDaySummary?.purchaseConversionRate)?.text}
+            comparisonTone={getComparisonMeta(todaySummary?.purchaseConversionRate, previousDaySummary?.purchaseConversionRate)?.tone}
+          />
+          <MetricCard
+            icon={<Wallet className="h-5 w-5" />}
+            title="Выручка сегодня"
+            value={formatRubles(todaySummary?.revenueAmount)}
+            hint={`Средний чек ${formatRubles(todaySummary?.averageOrderValue)}`}
+            comparisonText={getComparisonMeta(todaySummary?.revenueAmount, previousDaySummary?.revenueAmount)?.text}
+            comparisonTone={getComparisonMeta(todaySummary?.revenueAmount, previousDaySummary?.revenueAmount)?.tone}
+          />
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <MetricCard
           icon={<Package className="h-5 w-5" />}
@@ -680,6 +766,22 @@ export default function AdminAnalyticsTab({
           comparisonTone={getComparisonMeta(periodSummary?.newUsersCount, previousSummary?.newUsersCount)?.tone}
         />
         <MetricCard
+          icon={<Users className="h-5 w-5" />}
+          title="Посетителей за период"
+          value={formatInteger(periodSummary?.uniqueVisitorsCount)}
+          hint={`${formatInteger(periodSummary?.visitEventsCount)} визитов · всего ${formatInteger(snapshot?.totalSiteVisitors)}`}
+          comparisonText={getComparisonMeta(periodSummary?.uniqueVisitorsCount, previousSummary?.uniqueVisitorsCount)?.text}
+          comparisonTone={getComparisonMeta(periodSummary?.uniqueVisitorsCount, previousSummary?.uniqueVisitorsCount)?.tone}
+        />
+        <MetricCard
+          icon={<BarChart3 className="h-5 w-5" />}
+          title="Конверсия в покупку"
+          value={formatPercent(periodSummary?.purchaseConversionRate)}
+          hint={`${formatInteger(periodSummary?.uniquePurchasersCount)} покупателей из ${formatInteger(periodSummary?.uniqueVisitorsCount)} посетителей`}
+          comparisonText={getComparisonMeta(periodSummary?.purchaseConversionRate, previousSummary?.purchaseConversionRate)?.text}
+          comparisonTone={getComparisonMeta(periodSummary?.purchaseConversionRate, previousSummary?.purchaseConversionRate)?.tone}
+        />
+        <MetricCard
           icon={<Heart className="h-5 w-5" />}
           title="Товаров в избранном"
           value={formatInteger(snapshot?.totalFavorites)}
@@ -687,7 +789,7 @@ export default function AdminAnalyticsTab({
         />
         <MetricCard
           icon={<MousePointerClick className="h-5 w-5" />}
-          title="Клики по товарам"
+          title="Просмотры товаров"
           value={formatInteger(periodSummary?.totalViewEvents)}
           hint={`${formatInteger(periodSummary?.totalUniqueViewers)} уникальных зрителей`}
           comparisonText={getComparisonMeta(periodSummary?.totalViewEvents, previousSummary?.totalViewEvents)?.text}
@@ -735,6 +837,22 @@ export default function AdminAnalyticsTab({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <TrendChartCard
+          title="Посетители сайта"
+          description="Сколько уникальных посетителей заходило на сайт каждый день."
+          items={dailyTrend}
+          getValue={(item) => Number(item.siteVisitorsCount || 0)}
+          formatValue={(value) => formatInteger(value)}
+          accentClassName="text-cyan-700"
+        />
+        <TrendChartCard
+          title="Конверсия в покупку"
+          description="Доля посетителей дня, которые дошли до успешной покупки."
+          items={dailyTrend}
+          getValue={(item) => Number(item.purchaseConversionRate || 0)}
+          formatValue={(value) => formatPercent(value)}
+          accentClassName="text-fuchsia-700"
+        />
         <TrendChartCard
           title="Выручка по дням"
           description="Динамика успешных заказов в рублях."

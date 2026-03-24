@@ -52,6 +52,8 @@ public record CartUpdatePayload(int Quantity);
 /// </summary>
 public record LikeTogglePayload(string ProductId);
 public record ProductViewPayload(string? VisitorId);
+public record SiteVisitPayload(string? VisitorId, string? Path);
+public record PromoCodeValidationPayload(string Code, double Subtotal);
 
 /// <summary>
 /// Данные отзыва.
@@ -75,7 +77,33 @@ public record OrderPayload(
     string? ShippingAddress,
     string? PaymentMethod,
     string? PurchaseChannel,
-    string? PaymentReturnUrl);
+    string? PaymentReturnUrl,
+    string? VisitorId,
+    string? PromoCode);
+
+public record AdminPromoCodePayload(
+    string Code,
+    string? Description,
+    string DiscountType,
+    double DiscountValue,
+    double? MinimumSubtotal,
+    double? MaximumDiscountAmount,
+    int? UsageLimit,
+    bool IsActive,
+    long? StartsAt,
+    long? ExpiresAt);
+
+public record AdminPromoCodePatchPayload(
+    string? Code,
+    string? Description,
+    string? DiscountType,
+    double? DiscountValue,
+    double? MinimumSubtotal,
+    double? MaximumDiscountAmount,
+    int? UsageLimit,
+    bool? IsActive,
+    long? StartsAt,
+    long? ExpiresAt);
 
 public record OrderPaymentCheckoutPayload(string? ReturnUrl);
 

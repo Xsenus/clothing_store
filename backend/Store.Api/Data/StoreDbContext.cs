@@ -64,6 +64,7 @@ public class StoreDbContext : DbContext
     public DbSet<FavoriteEvent> FavoriteEvents => Set<FavoriteEvent>();
     public DbSet<AuthEvent> AuthEvents => Set<AuthEvent>();
     public DbSet<ProductView> ProductViews => Set<ProductView>();
+    public DbSet<SiteVisit> SiteVisits => Set<SiteVisit>();
     /// <summary>
     /// Возвращает набор заказов.
     /// </summary>
@@ -100,6 +101,9 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<AuthEvent>().HasIndex(x => new { x.UserId, x.CreatedAt });
         modelBuilder.Entity<ProductView>().HasIndex(x => new { x.ProductId, x.ViewerKey, x.DayKey }).IsUnique();
         modelBuilder.Entity<ProductView>().HasIndex(x => new { x.ProductId, x.LastViewedAt });
+        modelBuilder.Entity<SiteVisit>().HasIndex(x => new { x.ViewerKey, x.DayKey }).IsUnique();
+        modelBuilder.Entity<SiteVisit>().HasIndex(x => x.LastVisitedAt);
+        modelBuilder.Entity<SiteVisit>().HasIndex(x => x.DayKey);
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
         modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Name).IsUnique();
@@ -245,6 +249,12 @@ public class StoreDbContext : DbContext
             .WithMany()
             .HasForeignKey(x => x.ProductId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SiteVisit>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<ProductSizeStock>()
             .HasOne<Product>()

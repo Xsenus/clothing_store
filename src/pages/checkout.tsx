@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
 
 import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
@@ -8,13 +8,13 @@ import PageSeo from '@/components/PageSeo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Authenticated, useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
 import { formatProductPrice } from '@/lib/price-format';
 import { fetchPublicSettings } from '@/lib/site-settings';
 import { cn } from '@/lib/utils';
+import { getOrCreateVisitorId } from '@/lib/visitor-id';
 import {
   getYooKassaCapabilities,
   getYooMoneyCapabilities,
@@ -53,6 +53,17 @@ interface DeliveryQuoteResponse {
   homeDelivery?: DeliveryQuoteOption | null;
   pickupPointDelivery?: DeliveryQuoteOption | null;
   nearestPickupPointDelivery?: DeliveryQuoteOption | null;
+}
+
+interface PromoCodeValidationResult {
+  code: string;
+  description?: string | null;
+  discountType?: string | null;
+  discountValue?: number | null;
+  minimumSubtotal?: number | null;
+  maximumDiscountAmount?: number | null;
+  discountAmount?: number | null;
+  discountedSubtotal?: number | null;
 }
 
 const DELIVERY_CALCULATION_ERROR_MESSAGE = 'Не удалось выполнить расчет стоимости доставки.';
@@ -184,6 +195,29 @@ const PaymentOptionCard = ({
   );
 };
 
+interface DeliveryOptionIndicatorProps {
+  selected: boolean;
+  disabled?: boolean;
+}
+
+const DeliveryOptionIndicator = ({ selected, disabled = false }: DeliveryOptionIndicatorProps) => (
+  <span
+    aria-hidden="true"
+    className={cn(
+      'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition',
+      selected ? 'border-black' : 'border-primary',
+      disabled ? 'opacity-50' : '',
+    )}
+  >
+    <span
+      className={cn(
+        'h-2 w-2 rounded-full transition',
+        selected ? 'bg-black' : 'bg-transparent',
+      )}
+    />
+  </span>
+);
+
 export default function CheckoutPage() {
   const { cartItems, totalItems, clearCart } = useCart();
   const { user } = useAuth();
@@ -197,6 +231,10 @@ export default function CheckoutPage() {
   const [address, setAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('self_pickup');
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [promoCodeLoading, setPromoCodeLoading] = useState(false);
+  const [promoCodeError, setPromoCodeError] = useState('');
+  const [appliedPromoCode, setAppliedPromoCode] = useState<PromoCodeValidationResult | null>(null);
   const [yooMoneyCapabilities, setYooMoneyCapabilities] = useState(() => ({
     enabled: false,
     allowBankCards: false,
@@ -339,6 +377,7 @@ export default function CheckoutPage() {
   });
 
   const requestedWeightKg = Math.max(0.3, Number((totalItems * 0.3).toFixed(3)));
+  const promoDiscount = Math.min(subtotal, Number(appliedPromoCode?.discountAmount ?? 0));
 
   useEffect(() => {
     if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0) {
@@ -561,21 +600,21 @@ export default function CheckoutPage() {
       if (selectedDeliveryMethod !== 'self_pickup') {
         setSelectedDeliveryMethod('self_pickup');
       }
-      return;
     }
-
-    if (selectedDeliveryMethod === 'home' && !homeDelivery?.available && pickupDelivery?.available) {
-      setSelectedDeliveryMethod('pickup');
-    }
-  }, [homeDelivery?.available, isYandexDeliveryEnabled, pickupDelivery?.available, selectedDeliveryMethod]);
+  }, [isYandexDeliveryEnabled, selectedDeliveryMethod]);
 
   const selectedDeliveryOption = selectedDeliveryMethod === 'pickup'
     ? pickupDelivery
     : selectedDeliveryMethod === 'self_pickup'
       ? selfPickupDelivery
       : homeDelivery;
+  const isPickupSelected = selectedDeliveryMethod === 'pickup';
+  const isSelfPickupSelected = selectedDeliveryMethod === 'self_pickup';
+  const isHomeSelected = selectedDeliveryMethod === 'home';
+  const isHomeMethodDisabled = !isYandexDeliveryEnabled || !address.trim();
+  const isPickupMethodDisabled = !isYandexDeliveryEnabled || !address.trim();
   const shipping = Number(selectedDeliveryOption?.estimatedCost ?? 0);
-  const total = subtotal + shipping;
+  const total = subtotal - promoDiscount + shipping;
   const visibleHomeDeliveryError = getVisibleDeliveryError(homeDeliveryError, isAdmin);
   const visiblePickupPointsError = pickupPointsError
     ? getVisibleDeliveryError(pickupPointsError, isAdmin)
@@ -591,6 +630,7 @@ export default function CheckoutPage() {
   const canSubmit = cartItems.length > 0
     && !hasUnavailableItems
     && !loading
+    && !promoCodeLoading
     && !isShippingLoading
     && (
       selectedDeliveryMethod === 'self_pickup'
@@ -619,6 +659,140 @@ export default function CheckoutPage() {
 
     return `${window.location.origin}/profile?tab=orders`;
   };
+
+  const handleDeliveryMethodSelect = (method: DeliveryMethod, disabled = false) => {
+    if (disabled) {
+      return;
+    }
+
+    setSelectedDeliveryMethod(method);
+  };
+
+  const handleDeliveryMethodKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    method: DeliveryMethod,
+    disabled = false,
+  ) => {
+    if (disabled) {
+      return;
+    }
+
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      setSelectedDeliveryMethod(method);
+    }
+  };
+
+  const applyPromoCode = async (rawCode?: string) => {
+    const normalizedCode = String(rawCode ?? promoCodeInput).trim().toUpperCase();
+    if (!normalizedCode) {
+      setPromoCodeError('Введите промокод.');
+      setAppliedPromoCode(null);
+      return;
+    }
+
+    setPromoCodeLoading(true);
+    setPromoCodeError('');
+
+    try {
+      const result = await FLOW.validatePromoCode({
+        input: {
+          code: normalizedCode,
+          subtotal,
+        },
+      });
+
+      const nextPromoCode = {
+        code: String(result?.code || normalizedCode),
+        description: result?.description ?? null,
+        discountType: result?.discountType ?? null,
+        discountValue: Number(result?.discountValue ?? 0),
+        minimumSubtotal: result?.minimumSubtotal ?? null,
+        maximumDiscountAmount: result?.maximumDiscountAmount ?? null,
+        discountAmount: Number(result?.discountAmount ?? 0),
+        discountedSubtotal: Number(result?.discountedSubtotal ?? subtotal),
+      } satisfies PromoCodeValidationResult;
+
+      setAppliedPromoCode(nextPromoCode);
+      setPromoCodeInput(nextPromoCode.code);
+      toast.success(`Промокод ${nextPromoCode.code} применен.`);
+    } catch (error) {
+      setAppliedPromoCode(null);
+      setPromoCodeError(getErrorMessage(error, 'Не удалось проверить промокод.'));
+    } finally {
+      setPromoCodeLoading(false);
+    }
+  };
+
+  const removePromoCode = () => {
+    setAppliedPromoCode(null);
+    setPromoCodeError('');
+  };
+
+  useEffect(() => {
+    if (!appliedPromoCode?.code) {
+      return;
+    }
+
+    if (subtotal <= 0) {
+      setAppliedPromoCode(null);
+      setPromoCodeError('');
+      return;
+    }
+
+    const validatedSubtotal = Number(appliedPromoCode.discountedSubtotal ?? 0) + Number(appliedPromoCode.discountAmount ?? 0);
+    if (Math.abs(validatedSubtotal - subtotal) < 0.01) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const revalidatePromoCode = async () => {
+      setPromoCodeLoading(true);
+      setPromoCodeError('');
+
+      try {
+        const result = await FLOW.validatePromoCode({
+          input: {
+            code: appliedPromoCode.code,
+            subtotal,
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setAppliedPromoCode({
+          code: String(result?.code || appliedPromoCode.code),
+          description: result?.description ?? null,
+          discountType: result?.discountType ?? null,
+          discountValue: Number(result?.discountValue ?? 0),
+          minimumSubtotal: result?.minimumSubtotal ?? null,
+          maximumDiscountAmount: result?.maximumDiscountAmount ?? null,
+          discountAmount: Number(result?.discountAmount ?? 0),
+          discountedSubtotal: Number(result?.discountedSubtotal ?? subtotal),
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setAppliedPromoCode(null);
+        setPromoCodeError(getErrorMessage(error, 'Промокод больше не подходит к текущему заказу.'));
+      } finally {
+        if (!cancelled) {
+          setPromoCodeLoading(false);
+        }
+      }
+    };
+
+    void revalidatePromoCode();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedPromoCode?.code, subtotal]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -655,6 +829,7 @@ export default function CheckoutPage() {
     setLoading(true);
 
     try {
+      const visitorId = getOrCreateVisitorId();
       const order = await FLOW.createOrder({
         input: {
           customerName: name,
@@ -668,6 +843,8 @@ export default function CheckoutPage() {
           pickupPointId: selectedPickupPoint?.id || null,
           totalAmount: total,
           paymentReturnUrl: buildPaymentReturnUrl(),
+          visitorId,
+          promoCode: appliedPromoCode?.code || null,
         },
       });
 
@@ -856,29 +1033,33 @@ export default function CheckoutPage() {
                     </p>
                   )}
 
-                  <RadioGroup value={selectedDeliveryMethod} onValueChange={(value) => setSelectedDeliveryMethod(value as DeliveryMethod)}>
+                  <div className="grid gap-2" role="radiogroup" aria-label="Способ доставки">
                     <div
+                      role="radio"
+                      aria-checked={isSelfPickupSelected}
+                      tabIndex={0}
                       className={cn(
                         'space-y-3 rounded-none border p-4 transition',
-                        selectedDeliveryMethod === 'self_pickup'
+                        isSelfPickupSelected
                           ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
                           : 'cursor-pointer border-gray-200 hover:border-black/40',
                       )}
-                      onClick={() => setSelectedDeliveryMethod('self_pickup')}
+                      onClick={() => handleDeliveryMethodSelect('self_pickup')}
+                      onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'self_pickup')}
                     >
                       <div className="flex items-start gap-3">
-                        <RadioGroupItem value="self_pickup" id="delivery-self-pickup" />
+                        <DeliveryOptionIndicator selected={isSelfPickupSelected} />
                         <div className="flex-1 space-y-2">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <Label htmlFor="delivery-self-pickup" className="font-bold">Самовывоз</Label>
                             <span className={cn(
                               'font-black',
-                              selectedDeliveryMethod === 'self_pickup' ? 'text-black' : '',
+                              isSelfPickupSelected ? 'text-black' : '',
                             )}>0 ₽</span>
                           </div>
                           <div className={cn(
                             'text-sm text-muted-foreground',
-                            selectedDeliveryMethod === 'self_pickup' ? 'text-black/70' : '',
+                            isSelfPickupSelected ? 'text-black/70' : '',
                           )}>
                             Заберете заказ самостоятельно. После оформления мы свяжемся с вами и подтвердим детали выдачи.
                           </div>
@@ -888,18 +1069,23 @@ export default function CheckoutPage() {
 
                     {isYandexDeliveryEnabled && (
                       <div
+                        role="radio"
+                        aria-checked={isHomeSelected}
+                        aria-disabled={isHomeMethodDisabled}
+                        tabIndex={isHomeMethodDisabled ? -1 : 0}
                         className={cn(
                           'space-y-3 rounded-none border p-4 transition',
-                          selectedDeliveryMethod === 'home'
+                          isHomeSelected
                             ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
-                            : address.trim() && homeDelivery?.available
+                            : !isHomeMethodDisabled
                               ? 'cursor-pointer border-gray-200 hover:border-black/40'
-                              : 'border-gray-200',
+                              : 'border-gray-200 opacity-80',
                         )}
-                        onClick={address.trim() && homeDelivery?.available ? () => setSelectedDeliveryMethod('home') : undefined}
+                        onClick={!isHomeMethodDisabled ? () => handleDeliveryMethodSelect('home') : undefined}
+                        onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'home', isHomeMethodDisabled)}
                       >
                           <div className="flex items-start gap-3">
-                            <RadioGroupItem value="home" id="delivery-home" disabled={!address.trim() || !homeDelivery?.available} />
+                            <DeliveryOptionIndicator selected={isHomeSelected} disabled={isHomeMethodDisabled} />
                             <div className="flex-1 space-y-2">
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <Label htmlFor="delivery-home" className="font-bold">До двери</Label>
@@ -930,18 +1116,23 @@ export default function CheckoutPage() {
 
                     {isYandexDeliveryEnabled && (
                       <div
+                        role="radio"
+                        aria-checked={isPickupSelected}
+                        aria-disabled={isPickupMethodDisabled}
+                        tabIndex={isPickupMethodDisabled ? -1 : 0}
                         className={cn(
                           'space-y-4 rounded-none border p-4 transition',
-                          selectedDeliveryMethod === 'pickup'
+                          isPickupSelected
                             ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
-                            : address.trim() && (pickupPointsLoading || pickupPoints.length > 0)
+                            : !isPickupMethodDisabled
                               ? 'cursor-pointer border-gray-200 hover:border-black/40'
-                              : 'border-gray-200',
+                              : 'border-gray-200 opacity-80',
                         )}
-                        onClick={address.trim() && (pickupPointsLoading || pickupPoints.length > 0) ? () => setSelectedDeliveryMethod('pickup') : undefined}
+                        onClick={!isPickupMethodDisabled ? () => handleDeliveryMethodSelect('pickup') : undefined}
+                        onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'pickup', isPickupMethodDisabled)}
                       >
                           <div className="flex items-start gap-3">
-                            <RadioGroupItem value="pickup" id="delivery-pickup" disabled={!address.trim() || (!pickupPointsLoading && pickupPoints.length === 0)} />
+                            <DeliveryOptionIndicator selected={isPickupSelected} disabled={isPickupMethodDisabled} />
                             <div className="flex-1 space-y-3">
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <Label htmlFor="delivery-pickup" className="font-bold">ПВЗ</Label>
@@ -960,7 +1151,7 @@ export default function CheckoutPage() {
                                 </span>
                               </div>
 
-                              {selectedPickupPoint?.id ? (
+                              {isPickupSelected && selectedPickupPoint?.id ? (
                                 <div className="space-y-1 text-sm text-muted-foreground">
                                   <p className="font-medium text-foreground">Выбранный ПВЗ</p>
                                   <p>{selectedPickupPoint.address}</p>
@@ -982,25 +1173,25 @@ export default function CheckoutPage() {
                                 </p>
                               )}
 
-                              {pickupPointsLoading && (
+                              {isPickupSelected && pickupPointsLoading && (
                                 <p className="text-sm text-muted-foreground">
                                   Подбираем ПВЗ рядом с вашим адресом...
                                 </p>
                               )}
 
-                              {pickupDeliveryError && selectedPickupPoint?.id && !pickupDeliveryLoading && (
+                              {isPickupSelected && pickupDeliveryError && selectedPickupPoint?.id && !pickupDeliveryLoading && (
                                 <p className="text-sm text-red-700">
                                   {visiblePickupDeliveryError}
                                 </p>
                               )}
 
-                              {pickupPointsError && (
+                              {isPickupSelected && pickupPointsError && (
                                 <p className="text-sm text-red-700">
                                   {visiblePickupPointsError}
                                 </p>
                               )}
 
-                              {pickupPoints.length > 0 && (
+                              {isPickupSelected && pickupPoints.length > 0 && (
                                 <div className="space-y-2 border border-black/10 bg-white p-3">
                                   <div className="text-xs uppercase tracking-wide text-muted-foreground">
                                     Пункты выдачи для вашего адреса
@@ -1013,7 +1204,8 @@ export default function CheckoutPage() {
                                         <button
                                           key={point.id}
                                           type="button"
-                                          onClick={() => {
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             setSelectedPickupPointId(point.id);
                                             setSelectedDeliveryMethod('pickup');
                                           }}
@@ -1077,7 +1269,7 @@ export default function CheckoutPage() {
                           </div>
                       </div>
                     )}
-                  </RadioGroup>
+                  </div>
                 </div>
 
                 <Button
@@ -1119,11 +1311,83 @@ export default function CheckoutPage() {
                 })}
               </div>
 
+              <div className="mb-6 space-y-3 border border-black/10 bg-white p-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-bold uppercase tracking-[0.2em]">Промокод</div>
+                  <p className="text-xs text-muted-foreground">
+                    Введите код скидки, если он у вас есть.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={promoCodeInput}
+                    onChange={(event) => {
+                      const nextValue = event.target.value.toUpperCase();
+                      setPromoCodeInput(nextValue);
+                      setPromoCodeError('');
+                      if (appliedPromoCode?.code && nextValue.trim() !== appliedPromoCode.code) {
+                        setAppliedPromoCode(null);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void applyPromoCode();
+                      }
+                    }}
+                    placeholder="Например, DEMON10"
+                    className="rounded-none border-black bg-white focus-visible:ring-black"
+                    disabled={promoCodeLoading}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none border-black px-4"
+                    disabled={promoCodeLoading || !promoCodeInput.trim()}
+                    onClick={() => void applyPromoCode()}
+                  >
+                    {promoCodeLoading ? 'Проверка...' : appliedPromoCode ? 'Обновить' : 'Применить'}
+                  </Button>
+                </div>
+                {promoCodeError ? (
+                  <p className="text-sm text-red-600">{promoCodeError}</p>
+                ) : null}
+                {appliedPromoCode ? (
+                  <div className="space-y-2 border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold">{appliedPromoCode.code}</div>
+                        {appliedPromoCode.description ? (
+                          <p className="text-muted-foreground">{appliedPromoCode.description}</p>
+                        ) : null}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="rounded-none px-2 text-sm text-muted-foreground"
+                        onClick={removePromoCode}
+                      >
+                        Убрать
+                      </Button>
+                    </div>
+                    <div className="text-emerald-700">
+                      Скидка: {formatProductPrice(promoDiscount)}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
               <div className="space-y-2 border-t border-gray-200 pt-4">
                 <div className="flex justify-between text-sm">
                   <span>Промежуточный итог</span>
                   <span className="font-bold">{formatProductPrice(subtotal)}</span>
                 </div>
+                {appliedPromoCode ? (
+                  <div className="flex justify-between text-sm text-emerald-700">
+                    <span>Скидка по промокоду</span>
+                    <span className="font-bold">- {formatProductPrice(promoDiscount)}</span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between text-sm">
                   <span>Доставка{isShippingLoading ? ' (расчет...)' : ''}</span>
                   <span className="font-bold">

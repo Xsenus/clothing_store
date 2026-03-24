@@ -490,10 +490,8 @@ public class ProductsController : ControllerBase
             return Results.NotFound(new { detail = "Product not found" });
 
         var user = await _auth.RequireUserAsync(Request);
-        var visitorId = NormalizeVisitorId(payload?.VisitorId);
-        var viewerKey = user is not null
-            ? $"user:{user.Id}"
-            : (visitorId is { Length: > 0 } ? $"visitor:{visitorId}" : null);
+        var visitorId = VisitorTrackingSupport.NormalizeVisitorId(payload?.VisitorId);
+        var viewerKey = VisitorTrackingSupport.ResolveViewerKey(user, visitorId);
 
         if (string.IsNullOrWhiteSpace(viewerKey))
             return Results.Ok(new { tracked = false });
@@ -513,7 +511,7 @@ public class ProductsController : ControllerBase
             {
                 ProductId = productId,
                 UserId = user?.Id,
-                VisitorId = user is null ? visitorId : null,
+                VisitorId = visitorId,
                 ViewerKey = viewerKey,
                 DayKey = dayKey,
                 ViewCount = 1,
@@ -528,8 +526,10 @@ public class ProductsController : ControllerBase
             if (user is not null && string.IsNullOrWhiteSpace(existing.UserId))
             {
                 existing.UserId = user.Id;
-                existing.VisitorId = null;
             }
+
+            if (!string.IsNullOrWhiteSpace(visitorId) && string.IsNullOrWhiteSpace(existing.VisitorId))
+                existing.VisitorId = visitorId;
         }
 
         await _db.SaveChangesAsync();
@@ -1255,17 +1255,6 @@ public class ProductsController : ControllerBase
                     group.Select(item => item.ViewerKey).Distinct(StringComparer.Ordinal).Count(),
                     group.Max(item => (long?)item.LastViewedAt)),
                 StringComparer.Ordinal);
-    }
-
-    private static string? NormalizeVisitorId(string? visitorId)
-    {
-        var normalized = visitorId?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-
-        return normalized.Length > 120
-            ? normalized[..120]
-            : normalized;
     }
 
     private static void ApplyDictionaryOrdering(JsonObject json, DictionaryOrderMaps maps)

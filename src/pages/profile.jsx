@@ -229,6 +229,16 @@ const formatRubles = (raw) => {
   }).format(value)} ₽`;
 };
 
+const getOrderPromoCodeValue = (order) => {
+  const normalized = String(order?.promoCode || "").trim();
+  return normalized || "";
+};
+
+const getOrderPromoDiscountValue = (order) => {
+  const value = Number(order?.promoDiscountAmount ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
 const formatOrderDisplayNumber = (order) => {
   const explicitDisplayNumber = String(order?.displayOrderNumber || "").trim();
   if (explicitDisplayNumber) return explicitDisplayNumber;
@@ -1065,6 +1075,16 @@ export default function ProfilePage() {
                             <div className="text-left xl:text-right">
                               <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Итого</p>
                               <p className="text-2xl font-black leading-none">{formatRubles(order.totalAmount)}</p>
+                              {getOrderPromoCodeValue(order) ? (
+                                <div className="mt-2 space-y-1 text-xs text-gray-500">
+                                  <div>
+                                    Промокод: <span className="font-mono text-gray-900">{getOrderPromoCodeValue(order)}</span>
+                                  </div>
+                                  {getOrderPromoDiscountValue(order) > 0 ? (
+                                    <div className="text-emerald-700">Скидка: -{formatRubles(getOrderPromoDiscountValue(order))}</div>
+                                  ) : null}
+                                </div>
+                              ) : null}
                               <div className="mt-2 text-xs text-gray-500">
                                 Доставка: {SHIPPING_METHOD_LABELS[order.shippingMethod] || order.shippingMethod || "—"}
                                 {Number.isFinite(Number(order.shippingAmount))
