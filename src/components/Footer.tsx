@@ -2,28 +2,28 @@ import { Link } from "react-router";
 
 export default function Footer() {
   return (
-    <footer className="bg-black text-white py-12 md:py-16">
+    <footer className="bg-black py-12 text-white md:py-16">
       <div className="container mx-auto px-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-4 md:gap-12">
           <div className="md:col-span-2">
-            <h2 className="text-2xl font-black mb-4 tracking-tighter uppercase">
+            <h2 className="mb-4 text-2xl font-black uppercase tracking-tighter">
               FASHION_DEMON
             </h2>
-            <p className="max-w-sm mb-6 text-gray-300">
+            <p className="mb-6 max-w-sm text-gray-300">
               Переосмысляем уличную моду с смелой эстетикой и премиальным
               качеством. Создано для тех, кто не боится выделяться.
             </p>
           </div>
 
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-widest mb-4">
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-widest">
               Магазин
             </h3>
             <ul className="space-y-2 text-gray-300">
               <li>
                 <Link
                   to="/catalog"
-                  className="hover:text-white transition-colors"
+                  className="transition-colors hover:text-white"
                 >
                   Все товары
                 </Link>
@@ -31,7 +31,7 @@ export default function Footer() {
               <li>
                 <Link
                   to="/catalog?sort=new"
-                  className="hover:text-white transition-colors"
+                  className="transition-colors hover:text-white"
                 >
                   Новинки
                 </Link>
@@ -39,7 +39,7 @@ export default function Footer() {
               <li>
                 <Link
                   to="/catalog?sort=popular"
-                  className="hover:text-white transition-colors"
+                  className="transition-colors hover:text-white"
                 >
                   В тренде
                 </Link>
@@ -48,35 +48,27 @@ export default function Footer() {
           </div>
 
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-widest mb-4">
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-widest">
               Поддержка
             </h3>
             <ul className="space-y-2 text-gray-300">
               <li>
                 <Link
                   to="/profile"
-                  className="hover:text-white transition-colors"
+                  className="transition-colors hover:text-white"
                 >
                   Мой аккаунт
                 </Link>
               </li>
               <li>
-                <Link to="/cart" className="hover:text-white transition-colors">
+                <Link to="/cart" className="transition-colors hover:text-white">
                   Корзина
                 </Link>
               </li>
               <li>
                 <Link
-                  to="/checkout"
-                  className="hover:text-white transition-colors"
-                >
-                  Доставка
-                </Link>
-              </li>
-              <li>
-                <Link
                   to="/returns"
-                  className="hover:text-white transition-colors"
+                  className="transition-colors hover:text-white"
                 >
                   Условия возврата
                 </Link>
@@ -89,14 +81,14 @@ export default function Footer() {
           <p className="text-center md:text-left">
             &copy; {new Date().getFullYear()} FASHION_DEMON. Все права защищены.
           </p>
-          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-6 text-center md:text-left">
-            <Link to="/privacy" className="hover:text-white transition-colors">
+          <div className="flex flex-col items-center gap-2 text-center sm:flex-row sm:gap-6 md:text-left">
+            <Link to="/privacy" className="transition-colors hover:text-white">
               Политика конфиденциальности
             </Link>
-            <Link to="/terms" className="hover:text-white transition-colors">
+            <Link to="/terms" className="transition-colors hover:text-white">
               Пользовательское соглашение
             </Link>
-            <Link to="/offer" className="hover:text-white transition-colors">
+            <Link to="/offer" className="transition-colors hover:text-white">
               Публичная оферта
             </Link>
           </div>
