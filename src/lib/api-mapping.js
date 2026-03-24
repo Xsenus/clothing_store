@@ -499,7 +499,10 @@ export const signOut = async () => {
   return true;
 };
 
-export const getPublicSettings = async () => request("/settings/public");
+export const getPublicSettings = async () => request("/settings/public-shell");
+
+export const getPublicLegalDocument = async (key) =>
+  request(`/settings/public-legal/${encodeURIComponent(key)}`);
 
 export const FLOW = {
   getNewProducts,
@@ -1103,6 +1106,8 @@ export const FLOW = {
   adminDownloadDatabaseBackup: async ({ input }) => downloadRequest(`/admin/database-backups/download?relativePath=${encodeURIComponent(input.relativePath)}`),
 
   getPublicSettings,
+
+  getPublicLegalDocument,
 
   adminLogout: async () => {
     try {

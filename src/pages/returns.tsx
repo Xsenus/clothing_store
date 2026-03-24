@@ -1,8 +1,8 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { RETURN_POLICY } from '@/lib/legal-texts';
+import { RETURN_POLICY } from '@/lib/legal-defaults/return-policy';
 import { useEffect, useState } from 'react';
-import { fetchPublicSettings } from '@/lib/site-settings';
+import { fetchPublicLegalText } from '@/lib/site-settings';
 import PageSeo from '@/components/PageSeo';
 
 export default function ReturnsPage() {
@@ -10,9 +10,9 @@ export default function ReturnsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const settings = await fetchPublicSettings();
-      if (settings?.return_policy) {
-        setText(settings.return_policy);
+      const nextText = await fetchPublicLegalText("return_policy");
+      if (nextText) {
+        setText(nextText);
       }
     };
 

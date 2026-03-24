@@ -1,8 +1,8 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { USER_AGREEMENT } from '@/lib/legal-texts';
+import { USER_AGREEMENT } from '@/lib/legal-defaults/user-agreement';
 import { useEffect, useState } from 'react';
-import { fetchPublicSettings } from '@/lib/site-settings';
+import { fetchPublicLegalText } from '@/lib/site-settings';
 import PageSeo from '@/components/PageSeo';
 
 export default function TermsPage() {
@@ -10,9 +10,9 @@ export default function TermsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const settings = await fetchPublicSettings();
-      if (settings?.user_agreement) {
-        setText(settings.user_agreement);
+      const nextText = await fetchPublicLegalText("user_agreement");
+      if (nextText) {
+        setText(nextText);
       }
     };
     load();

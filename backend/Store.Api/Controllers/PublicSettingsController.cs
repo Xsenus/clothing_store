@@ -8,13 +8,8 @@ namespace Store.Api.Controllers;
 [Route("settings")]
 public class PublicSettingsController : ControllerBase
 {
-    private static readonly string[] PublicKeys =
+    private static readonly string[] ShellPublicKeys =
     [
-        "privacy_policy",
-        "user_agreement",
-        "public_offer",
-        "return_policy",
-        "cookie_consent_text",
         "metrics_yandex_metrika_enabled",
         "metrics_yandex_metrika_code",
         "metrics_google_analytics_enabled",
@@ -62,6 +57,23 @@ public class PublicSettingsController : ControllerBase
         "image_upload_telegram_bot_quality"
     ];
 
+    private static readonly string[] LegalPublicKeys =
+    [
+        "privacy_policy",
+        "user_agreement",
+        "public_offer",
+        "return_policy",
+        "cookie_consent_text"
+    ];
+
+    private static readonly HashSet<string> LegalPublicKeySet = LegalPublicKeys
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] PublicKeys = ShellPublicKeys
+        .Concat(LegalPublicKeys)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
 
@@ -74,87 +86,188 @@ public class PublicSettingsController : ControllerBase
     [HttpGet("public")]
     public async Task<IResult> GetPublic()
     {
+        var result = await BuildPublicSettingsAsync(PublicKeys);
+        ApplyShortTermPublicCaching();
+        return Results.Ok(result);
+    }
+
+    [HttpGet("public-shell")]
+    public async Task<IResult> GetPublicShell()
+    {
+        var result = await BuildPublicSettingsAsync(ShellPublicKeys);
+        ApplyShortTermPublicCaching();
+        return Results.Ok(result);
+    }
+
+    [HttpGet("public-legal/{key}")]
+    public async Task<IResult> GetPublicLegal(string key)
+    {
+        var normalizedKey = key?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedKey) || !LegalPublicKeySet.Contains(normalizedKey))
+            return Results.NotFound(new { detail = "Legal document not found" });
+
+        var result = await BuildPublicSettingsAsync([normalizedKey]);
+        ApplyShortTermPublicCaching();
+        return Results.Ok(new
+        {
+            key = normalizedKey,
+            value = result.GetValueOrDefault(normalizedKey, string.Empty)
+        });
+    }
+
+    private async Task<Dictionary<string, string>> BuildPublicSettingsAsync(IEnumerable<string> keys)
+    {
+        var requestedKeys = keys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (requestedKeys.Length == 0)
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         var settings = await _db.AppSettings
-            .Where(x => PublicKeys.Contains(x.Key))
+            .Where(x => requestedKeys.Contains(x.Key))
             .ToListAsync();
 
-        var result = settings.ToDictionary(x => x.Key, x => x.Value);
+        var result = settings.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        await ApplyDynamicPublicSettingsAsync(result, requestedKeys);
+        return result;
+    }
 
-        var loginBotUsername = await _db.TelegramBots
-            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Username))
-            .OrderByDescending(x => x.UpdatedAt)
-            .Select(x => x.Username)
-            .FirstOrDefaultAsync();
+    private async Task ApplyDynamicPublicSettingsAsync(
+        Dictionary<string, string> result,
+        IReadOnlyCollection<string> requestedKeys)
+    {
+        var requested = requestedKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrWhiteSpace(loginBotUsername))
-            result["telegram_bot_username"] = loginBotUsername!;
-
-        if (!result.TryGetValue("telegram_bot_username", out var configuredLoginBotUsername) || string.IsNullOrWhiteSpace(configuredLoginBotUsername))
+        if (requested.Contains("telegram_bot_username"))
         {
-            var fallbackUsername = await _db.TelegramBots
-                .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Username))
-                .OrderByDescending(x => x.UseForLogin)
-                .ThenByDescending(x => x.UpdatedAt)
+            var loginBotUsername = await _db.TelegramBots
+                .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Username))
+                .OrderByDescending(x => x.UpdatedAt)
                 .Select(x => x.Username)
                 .FirstOrDefaultAsync();
 
-            if (!string.IsNullOrWhiteSpace(fallbackUsername))
-                result["telegram_bot_username"] = fallbackUsername!;
+            if (!string.IsNullOrWhiteSpace(loginBotUsername))
+                result["telegram_bot_username"] = loginBotUsername!;
+
+            if (!result.TryGetValue("telegram_bot_username", out var configuredLoginBotUsername) || string.IsNullOrWhiteSpace(configuredLoginBotUsername))
+            {
+                var fallbackUsername = await _db.TelegramBots
+                    .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Username))
+                    .OrderByDescending(x => x.UseForLogin)
+                    .ThenByDescending(x => x.UpdatedAt)
+                    .Select(x => x.Username)
+                    .FirstOrDefaultAsync();
+
+                if (!string.IsNullOrWhiteSpace(fallbackUsername))
+                    result["telegram_bot_username"] = fallbackUsername!;
+            }
         }
 
-        result["telegram_login_enabled"] = await IsTelegramLoginReadyAsync() ? "true" : "false";
-        result["telegram_widget_enabled"] = await IsTelegramWidgetReadyAsync() ? "true" : "false";
-        result["google_login_enabled"] = await IsExternalProviderReadyAsync(
-            "google_login_enabled",
-            "Auth:Google:Enabled",
-            "google_auth_client_id",
-            "Auth:Google:ClientId",
-            "google_auth_client_secret",
-            "Auth:Google:ClientSecret") ? "true" : "false";
-        result["yandex_login_enabled"] = await IsExternalProviderReadyAsync(
-            "yandex_login_enabled",
-            "Auth:Yandex:Enabled",
-            "yandex_auth_client_id",
-            "Auth:Yandex:ClientId",
-            "yandex_auth_client_secret",
-            "Auth:Yandex:ClientSecret") ? "true" : "false";
-        result["payments_yoomoney_enabled"] = await GetBooleanSettingAsync(
-            "payments_yoomoney_enabled",
-            "Integrations:YooMoney:Enabled",
-            fallback: false) ? "true" : "false";
-        result["yoomoney_allow_bank_cards"] = await GetBooleanSettingAsync(
-            "yoomoney_allow_bank_cards",
-            "Integrations:YooMoney:AllowBankCards",
-            fallback: true) ? "true" : "false";
-        result["yoomoney_allow_wallet"] = await GetBooleanSettingAsync(
-            "yoomoney_allow_wallet",
-            "Integrations:YooMoney:AllowWallet",
-            fallback: false) ? "true" : "false";
-        result["payments_yoomoney_ready"] = await IsYooMoneyReadyAsync() ? "true" : "false";
+        if (requested.Contains("telegram_login_enabled"))
+            result["telegram_login_enabled"] = await IsTelegramLoginReadyAsync() ? "true" : "false";
 
-        result["payments_yookassa_enabled"] = await GetBooleanSettingAsync(
-            "payments_yookassa_enabled",
-            "Integrations:YooKassa:Enabled",
-            fallback: false) ? "true" : "false";
-        result["yookassa_allow_bank_cards"] = await GetBooleanSettingAsync(
-            "yookassa_allow_bank_cards",
-            "Integrations:YooKassa:AllowBankCards",
-            fallback: true) ? "true" : "false";
-        result["yookassa_allow_sbp"] = await GetBooleanSettingAsync(
-            "yookassa_allow_sbp",
-            "Integrations:YooKassa:AllowSbp",
-            fallback: true) ? "true" : "false";
-        result["yookassa_allow_yoomoney"] = await GetBooleanSettingAsync(
-            "yookassa_allow_yoomoney",
-            "Integrations:YooKassa:AllowYooMoney",
-            fallback: true) ? "true" : "false";
-        result["payments_yookassa_ready"] = await IsYooKassaReadyAsync() ? "true" : "false";
-        result["yandex_delivery_enabled"] = await GetBooleanSettingAsync(
-            "yandex_delivery_enabled",
-            "Integrations:YandexDelivery:Enabled",
-            fallback: true) ? "true" : "false";
+        if (requested.Contains("telegram_widget_enabled"))
+            result["telegram_widget_enabled"] = await IsTelegramWidgetReadyAsync() ? "true" : "false";
 
-        return Results.Ok(result);
+        if (requested.Contains("google_login_enabled"))
+        {
+            result["google_login_enabled"] = await IsExternalProviderReadyAsync(
+                "google_login_enabled",
+                "Auth:Google:Enabled",
+                "google_auth_client_id",
+                "Auth:Google:ClientId",
+                "google_auth_client_secret",
+                "Auth:Google:ClientSecret") ? "true" : "false";
+        }
+
+        if (requested.Contains("yandex_login_enabled"))
+        {
+            result["yandex_login_enabled"] = await IsExternalProviderReadyAsync(
+                "yandex_login_enabled",
+                "Auth:Yandex:Enabled",
+                "yandex_auth_client_id",
+                "Auth:Yandex:ClientId",
+                "yandex_auth_client_secret",
+                "Auth:Yandex:ClientSecret") ? "true" : "false";
+        }
+
+        if (requested.Contains("payments_yoomoney_enabled"))
+        {
+            result["payments_yoomoney_enabled"] = await GetBooleanSettingAsync(
+                "payments_yoomoney_enabled",
+                "Integrations:YooMoney:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("yoomoney_allow_bank_cards"))
+        {
+            result["yoomoney_allow_bank_cards"] = await GetBooleanSettingAsync(
+                "yoomoney_allow_bank_cards",
+                "Integrations:YooMoney:AllowBankCards",
+                fallback: true) ? "true" : "false";
+        }
+
+        if (requested.Contains("yoomoney_allow_wallet"))
+        {
+            result["yoomoney_allow_wallet"] = await GetBooleanSettingAsync(
+                "yoomoney_allow_wallet",
+                "Integrations:YooMoney:AllowWallet",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("payments_yoomoney_ready"))
+            result["payments_yoomoney_ready"] = await IsYooMoneyReadyAsync() ? "true" : "false";
+
+        if (requested.Contains("payments_yookassa_enabled"))
+        {
+            result["payments_yookassa_enabled"] = await GetBooleanSettingAsync(
+                "payments_yookassa_enabled",
+                "Integrations:YooKassa:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("yookassa_allow_bank_cards"))
+        {
+            result["yookassa_allow_bank_cards"] = await GetBooleanSettingAsync(
+                "yookassa_allow_bank_cards",
+                "Integrations:YooKassa:AllowBankCards",
+                fallback: true) ? "true" : "false";
+        }
+
+        if (requested.Contains("yookassa_allow_sbp"))
+        {
+            result["yookassa_allow_sbp"] = await GetBooleanSettingAsync(
+                "yookassa_allow_sbp",
+                "Integrations:YooKassa:AllowSbp",
+                fallback: true) ? "true" : "false";
+        }
+
+        if (requested.Contains("yookassa_allow_yoomoney"))
+        {
+            result["yookassa_allow_yoomoney"] = await GetBooleanSettingAsync(
+                "yookassa_allow_yoomoney",
+                "Integrations:YooKassa:AllowYooMoney",
+                fallback: true) ? "true" : "false";
+        }
+
+        if (requested.Contains("payments_yookassa_ready"))
+            result["payments_yookassa_ready"] = await IsYooKassaReadyAsync() ? "true" : "false";
+
+        if (requested.Contains("yandex_delivery_enabled"))
+        {
+            result["yandex_delivery_enabled"] = await GetBooleanSettingAsync(
+                "yandex_delivery_enabled",
+                "Integrations:YandexDelivery:Enabled",
+                fallback: true) ? "true" : "false";
+        }
+    }
+
+    private void ApplyShortTermPublicCaching()
+    {
+        Response.Headers["Cache-Control"] = "public, max-age=300";
+        Response.Headers["Vary"] = "Accept-Encoding";
     }
 
     private async Task<bool> IsYooMoneyReadyAsync()

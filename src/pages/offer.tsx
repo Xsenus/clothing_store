@@ -1,8 +1,8 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { PUBLIC_OFFER } from '@/lib/legal-texts';
+import { PUBLIC_OFFER } from '@/lib/legal-defaults/public-offer';
 import { useEffect, useState } from 'react';
-import { fetchPublicSettings } from '@/lib/site-settings';
+import { fetchPublicLegalText } from '@/lib/site-settings';
 import PageSeo from '@/components/PageSeo';
 
 export default function OfferPage() {
@@ -10,9 +10,9 @@ export default function OfferPage() {
 
   useEffect(() => {
     const load = async () => {
-      const settings = await fetchPublicSettings();
-      if (settings?.public_offer) {
-        setText(settings.public_offer);
+      const nextText = await fetchPublicLegalText("public_offer");
+      if (nextText) {
+        setText(nextText);
       }
     };
     load();

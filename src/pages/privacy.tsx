@@ -1,8 +1,8 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { PRIVACY_POLICY } from '@/lib/legal-texts';
+import { PRIVACY_POLICY } from '@/lib/legal-defaults/privacy-policy';
 import { useEffect, useState } from 'react';
-import { fetchPublicSettings } from '@/lib/site-settings';
+import { fetchPublicLegalText } from '@/lib/site-settings';
 import PageSeo from '@/components/PageSeo';
 
 export default function PrivacyPage() {
@@ -10,9 +10,9 @@ export default function PrivacyPage() {
 
   useEffect(() => {
     const load = async () => {
-      const settings = await fetchPublicSettings();
-      if (settings?.privacy_policy) {
-        setText(settings.privacy_policy);
+      const nextText = await fetchPublicLegalText("privacy_policy");
+      if (nextText) {
+        setText(nextText);
       }
     };
     load();
