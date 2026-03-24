@@ -1,5 +1,6 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import "./admin.css";
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
 import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
 import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
@@ -6402,6 +6403,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input
                             id="user-edit-email"
                             name="email"
+                            autoComplete="email"
                             aria-label="Email пользователя"
                             value={userEditForm.email}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, email: e.target.value }))}
@@ -6418,6 +6420,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input
                             id="user-edit-name"
                             name="name"
+                            autoComplete="name"
                             aria-label="Имя пользователя"
                             value={userEditForm.name}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -6429,6 +6432,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <Input
                             id="user-edit-nickname"
                             name="nickname"
+                            autoComplete="username"
                             aria-label="Telegram или ник пользователя"
                             value={userEditForm.nickname}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, nickname: e.target.value }))}
@@ -9935,7 +9939,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <div className="rounded-none border border-gray-200 p-3">
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
-                                <Label className="text-sm font-semibold uppercase tracking-[0.12em]">Автобэкапы</Label>
+                                <Label htmlFor="database-backup-enabled" className="text-sm font-semibold uppercase tracking-[0.12em]">Автобэкапы</Label>
                                 <p className="text-xs leading-5 text-muted-foreground">
                                   Если включено, сервис будет создавать новые копии по расписанию и чистить старые `.dump` файлы.
                                 </p>
@@ -10164,7 +10168,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <div className="rounded-none border border-gray-200 p-3">
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-1">
-                            <Label className="text-sm font-semibold uppercase tracking-[0.12em]">Анимация загрузки сайта</Label>
+                            <Label htmlFor="site-loading-animation-enabled" className="text-sm font-semibold uppercase tracking-[0.12em]">Анимация загрузки сайта</Label>
                             <p className="text-xs leading-5 text-muted-foreground">
                               Легкий стартовый экран для переходов между страницами и первой загрузки сайта.
                             </p>

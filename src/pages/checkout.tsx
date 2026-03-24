@@ -1034,12 +1034,13 @@ export default function CheckoutPage() {
                   )}
 
                   <div className="grid gap-2" role="radiogroup" aria-label="Способ доставки">
-                    <div
-                      role="radio"
-                      aria-checked={isSelfPickupSelected}
-                      tabIndex={0}
-                      className={cn(
-                        'space-y-3 rounded-none border p-4 transition',
+                      <div
+                        role="radio"
+                        aria-checked={isSelfPickupSelected}
+                        aria-labelledby="checkout-delivery-self-pickup-label"
+                        tabIndex={0}
+                        className={cn(
+                          'space-y-3 rounded-none border p-4 transition',
                         isSelfPickupSelected
                           ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
                           : 'cursor-pointer border-gray-200 hover:border-black/40',
@@ -1051,7 +1052,7 @@ export default function CheckoutPage() {
                         <DeliveryOptionIndicator selected={isSelfPickupSelected} />
                         <div className="flex-1 space-y-2">
                           <div className="flex flex-wrap items-center justify-between gap-3">
-                            <Label htmlFor="delivery-self-pickup" className="font-bold">Самовывоз</Label>
+                            <span id="checkout-delivery-self-pickup-label" className="font-bold">Самовывоз</span>
                             <span className={cn(
                               'font-black',
                               isSelfPickupSelected ? 'text-black' : '',
@@ -1071,6 +1072,7 @@ export default function CheckoutPage() {
                       <div
                         role="radio"
                         aria-checked={isHomeSelected}
+                        aria-labelledby="checkout-delivery-home-label"
                         aria-disabled={isHomeMethodDisabled}
                         tabIndex={isHomeMethodDisabled ? -1 : 0}
                         className={cn(
@@ -1088,7 +1090,7 @@ export default function CheckoutPage() {
                             <DeliveryOptionIndicator selected={isHomeSelected} disabled={isHomeMethodDisabled} />
                             <div className="flex-1 space-y-2">
                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                <Label htmlFor="delivery-home" className="font-bold">До двери</Label>
+                                <span id="checkout-delivery-home-label" className="font-bold">До двери</span>
                                 <span className="font-black">
                                   {!address.trim()
                                     ? 'Нужен адрес'
@@ -1118,6 +1120,7 @@ export default function CheckoutPage() {
                       <div
                         role="radio"
                         aria-checked={isPickupSelected}
+                        aria-labelledby="checkout-delivery-pickup-label"
                         aria-disabled={isPickupMethodDisabled}
                         tabIndex={isPickupMethodDisabled ? -1 : 0}
                         className={cn(
@@ -1135,7 +1138,7 @@ export default function CheckoutPage() {
                             <DeliveryOptionIndicator selected={isPickupSelected} disabled={isPickupMethodDisabled} />
                             <div className="flex-1 space-y-3">
                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                <Label htmlFor="delivery-pickup" className="font-bold">ПВЗ</Label>
+                                <span id="checkout-delivery-pickup-label" className="font-bold">ПВЗ</span>
                                 <span className="font-black">
                                   {!address.trim()
                                     ? 'Нужен адрес'
