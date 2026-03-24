@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 const CookieBanner = lazy(() => import("@/components/CookieBanner"));
 const MetricsScripts = lazy(() => import("@/components/MetricsScripts"));

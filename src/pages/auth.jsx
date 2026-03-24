@@ -1,4 +1,3 @@
-import React from "react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -303,13 +302,13 @@ export default function AuthPage() {
           try {
             const nested = JSON.parse(parsed.detail);
             return mapKnownErrorMessage(nested?.message || parsed.detail);
-          } catch (innerError) {
+          } catch {
             return mapKnownErrorMessage(parsed.detail);
           }
         }
         return mapKnownErrorMessage(parsed.detail);
       }
-    } catch (e) {
+    } catch {
       return mapKnownErrorMessage(message) || fallback;
     }
     return fallback;

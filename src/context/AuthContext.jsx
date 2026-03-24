@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clearProductLikeStateCache } from "@/lib/product-like-state";
 
 const AuthContext = createContext(undefined);
@@ -53,7 +53,7 @@ export function AuthProvider({ children }) {
         const { getProfile } = await loadAuthApi();
         const me = await getProfile();
         setUser(normalizeAuthUser(me));
-      } catch (err) {
+      } catch {
         setUser(null);
       } finally {
         setIsLoading(false);

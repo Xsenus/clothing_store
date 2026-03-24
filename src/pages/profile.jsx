@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -558,7 +558,7 @@ export default function ProfilePage() {
             toast.error("Сессия подтверждения телефона истекла");
           }
         }
-      } catch (error) {
+      } catch {
         setPhoneVerifyState("");
         clearInterval(timer);
         toast.error("Не удалось проверить статус подтверждения телефона");
@@ -1183,7 +1183,7 @@ export default function ProfilePage() {
 
                         <div className="space-y-2">
                           <Label htmlFor="profile-nickname">Ник</Label>
-                          <Input id="profile-nickname" name="nickname" autoComplete="nickname" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
+                          <Input id="profile-nickname" name="nickname" autoComplete="off" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
                         </div>
 
                         <div className="space-y-2">

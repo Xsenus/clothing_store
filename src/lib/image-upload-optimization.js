@@ -168,7 +168,6 @@ export const optimizeImageFileForUpload = async (file, settings, context, overri
     const scale = Math.min(1, widthRatio, heightRatio);
     const targetWidth = Math.max(1, Math.round(imageSource.width * scale));
     const targetHeight = Math.max(1, Math.round(imageSource.height * scale));
-    const resized = targetWidth !== imageSource.width || targetHeight !== imageSource.height;
     const targetMimeType = getTargetMimeType(file, overrides.forceMimeType);
 
     const canvas = document.createElement("canvas");

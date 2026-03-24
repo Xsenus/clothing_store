@@ -6319,7 +6319,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="space-y-6">
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="space-y-1">
-                          <Label>Email</Label>
+                          <Label htmlFor="user-edit-email">Email</Label>
                           <Input
                             id="user-edit-email"
                             name="email"
@@ -6331,11 +6331,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>ID</Label>
+                          <Label htmlFor="user-edit-id">ID</Label>
                           <Input id="user-edit-id" name="user_id" aria-label="ID пользователя" value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
                         </div>
                         <div className="space-y-1">
-                          <Label>Имя</Label>
+                          <Label htmlFor="user-edit-name">Имя</Label>
                           <Input
                             id="user-edit-name"
                             name="name"
@@ -6346,7 +6346,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Telegram / Ник</Label>
+                          <Label htmlFor="user-edit-nickname">Telegram / Ник</Label>
                           <Input
                             id="user-edit-nickname"
                             name="nickname"
@@ -6357,7 +6357,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Телефон</Label>
+                          <Label htmlFor="user-edit-phone">Телефон</Label>
                           <Input
                             id="user-edit-phone"
                             name="tel"
@@ -6370,7 +6370,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label>Новый пароль</Label>
+                          <Label htmlFor="user-edit-password">Новый пароль</Label>
                           <Input
                             id="user-edit-password"
                             name="new_password"
@@ -6384,7 +6384,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                         <div className="space-y-1 md:col-span-2">
-                          <Label>Адрес доставки</Label>
+                          <Label htmlFor="user-edit-shipping-address">Адрес доставки</Label>
                           <Textarea
                             id="user-edit-shipping-address"
                             name="shipping_address"
@@ -6999,7 +6999,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         : `Показано ${Math.min((ordersPage - 1) * ordersPageSize + 1, ordersTotalItems)}-${Math.min(ordersPage * ordersPageSize, ordersTotalItems)} из ${ordersTotalItems}`}
                     </span>
                     <div className="flex items-center gap-2">
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">Строк на странице</Label>
+                      <Label htmlFor="orders-page-size" className="text-xs uppercase tracking-wide text-muted-foreground">Строк на странице</Label>
                       <select
                         id="orders-page-size"
                         name="orders_page_size"
@@ -7303,7 +7303,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                             <div className="grid gap-4 md:grid-cols-2">
                               <div className="space-y-2">
-                                <Label>Статус заказа</Label>
+                                <Label htmlFor="order-status">Статус заказа</Label>
                                 <select
                                   id="order-status"
                                   name="order_status"
@@ -7322,7 +7322,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2">
-                                <Label>Способ оплаты</Label>
+                                <Label htmlFor="order-payment-method">Способ оплаты</Label>
                                 <select
                                   id="order-payment-method"
                                   name="order_payment_method"
@@ -7341,7 +7341,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2">
-                                <Label>Получатель</Label>
+                                <Label htmlFor="order-customer-name">Получатель</Label>
                                 <Input
                                   id="order-customer-name"
                                   name="customer_name"
@@ -7354,7 +7354,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2">
-                                <Label>Email</Label>
+                                <Label htmlFor="order-customer-email">Email</Label>
                                 <Input
                                   id="order-customer-email"
                                   name="customer_email"
@@ -7368,7 +7368,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2">
-                                <Label>Телефон</Label>
+                                <Label htmlFor="order-customer-phone">Телефон</Label>
                                 <Input
                                   id="order-customer-phone"
                                   name="customer_phone"
@@ -7382,7 +7382,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2 md:col-span-2">
-                                <Label>Адрес доставки</Label>
+                                <Label htmlFor="order-shipping-address">Адрес доставки</Label>
                                 <Textarea
                                   id="order-shipping-address"
                                   name="shipping_address"
@@ -7395,7 +7395,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2 md:col-span-2">
-                                <Label>Yandex request ID</Label>
+                                <Label htmlFor="order-yandex-request-id">Yandex request ID</Label>
                                 <Input
                                   id="order-yandex-request-id"
                                   name="yandex_request_id"
@@ -7411,7 +7411,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
 
                               <div className="space-y-2 md:col-span-2">
-                                <Label>Комментарий к изменению</Label>
+                                <Label htmlFor="order-manager-comment">Комментарий к изменению</Label>
                                 <Textarea
                                   id="order-manager-comment"
                                   name="manager_comment"
@@ -7781,7 +7781,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               )}
                               <div className="grid items-end gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_160px_minmax(0,0.95fr)_180px]">
                                 <div className="flex h-full flex-col gap-1">
-                                  <Label className="block text-xs">Название *</Label>
+                                  <Label htmlFor={`dict-name-${item.id}`} className="block text-xs">Название *</Label>
                                   <Input
                                     id={`dict-name-${item.id}`}
                                     name={`dict_name_${item.id}`}
@@ -7792,7 +7792,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   />
                                 </div>
                                 <div className="flex h-full flex-col gap-1">
-                                  <Label className="block text-xs">Slug *</Label>
+                                  <Label htmlFor={`dict-slug-${item.id}`} className="block text-xs">Slug *</Label>
                                   <Input
                                     id={`dict-slug-${item.id}`}
                                     name={`dict_slug_${item.id}`}
@@ -7804,7 +7804,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   />
                                 </div>
                                 <div className="flex h-full flex-col gap-1">
-                                  <Label className="block text-xs">Порядок</Label>
+                                  <Label htmlFor={`dict-sort-order-${item.id}`} className="block text-xs">Порядок</Label>
                                   <Input
                                     id={`dict-sort-order-${item.id}`}
                                     name={`dict_sort_order_${item.id}`}
@@ -7819,7 +7819,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   />
                                 </div>
                                 <div className="flex h-full flex-col gap-1">
-                                  <Label className="block text-xs">Цвет</Label>
+                                  <Label htmlFor={`dict-color-${item.id}`} className="block text-xs">Цвет</Label>
                                   <div className="grid items-stretch grid-cols-[minmax(0,1fr)_48px] gap-2">
                                     <Input
                                       id={`dict-color-${item.id}`}
@@ -7854,7 +7854,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 </div>
                               </div>
                               <div className="space-y-1">
-                                <Label className="mb-1 block text-xs">Описание</Label>
+                                <Label htmlFor={`dict-description-${item.id}`} className="mb-1 block text-xs">Описание</Label>
                                 <Textarea
                                   id={`dict-description-${item.id}`}
                                   name={`dict_description_${item.id}`}
@@ -7868,12 +7868,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {selectedDictionaryGroup === "collections" && (
                                 <div className="space-y-3 rounded-none border border-slate-200 p-3">
                                   <div className="space-y-1">
-                                    <Label className="mb-1 block text-xs">Режим изображения коллекции</Label>
+                                    <Label htmlFor={`dict-preview-mode-${item.id}`} className="mb-1 block text-xs">Режим изображения коллекции</Label>
                                     <Select
                                       value={draft.previewMode}
                                       onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMode: value as CollectionPreviewMode } }))}
                                     >
-                                      <SelectTrigger className="h-11 rounded-none border-slate-300">
+                                      <SelectTrigger id={`dict-preview-mode-${item.id}`} className="h-11 rounded-none border-slate-300">
                                         <SelectValue placeholder="Выберите режим" />
                                       </SelectTrigger>
                                       <SelectContent>
@@ -9602,7 +9602,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         ["cookie_consent_text", "Текст cookie-согласия"]
                       ].map(([key, label]) => (
                         <div key={key} className="space-y-2 rounded-none border border-gray-200 p-3">
-                          <Label className="block leading-snug">{label}</Label>
+                          <Label htmlFor={`legal-setting-${key}`} className="block leading-snug">{label}</Label>
                           <Textarea
                             id={`legal-setting-${key}`}
                             name={String(key)}
@@ -10283,7 +10283,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-3">
-                      <Label>Название бота *</Label>
+                      <Label htmlFor="telegram-bot-name">Название бота *</Label>
                       <span className="text-xs text-muted-foreground">
                         {telegramBotForm.name.trim().length}/{TELEGRAM_BOT_LIMITS.name}
                       </span>
@@ -10300,7 +10300,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-3">
-                      <Label>Username</Label>
+                      <Label htmlFor="telegram-bot-username-field">Username</Label>
                       <span className="text-xs text-muted-foreground">
                         {telegramBotForm.username.trim().length}/{TELEGRAM_BOT_LIMITS.username}
                       </span>
@@ -10318,7 +10318,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <div className="space-y-2">
-                  <Label>URL картинки</Label>
+                  <Label htmlFor="telegram-bot-image-url">URL картинки</Label>
                   <Input
                     id="telegram-bot-image-url"
                     name="telegram_bot_image_url"
@@ -10351,7 +10351,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Токен бота *</Label>
+                  <Label htmlFor="telegram-bot-token-field">Токен бота *</Label>
                   <Input
                     id="telegram-bot-token-field"
                     name="telegram_bot_token"
@@ -10411,7 +10411,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-3">
-                    <Label>Описание</Label>
+                    <Label htmlFor="telegram-bot-description">Описание</Label>
                     <span className="text-xs text-muted-foreground">
                       {telegramBotForm.description.trim().length}/{TELEGRAM_BOT_LIMITS.description}
                     </span>
@@ -10429,7 +10429,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-3">
-                    <Label>Краткое описание</Label>
+                    <Label htmlFor="telegram-bot-short-description">Краткое описание</Label>
                     <span className="text-xs text-muted-foreground">
                       {telegramBotForm.shortDescription.trim().length}/{TELEGRAM_BOT_LIMITS.shortDescription}
                     </span>
@@ -10462,7 +10462,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <div key={`command-${index}`} className="grid grid-cols-1 gap-3 rounded border p-3 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto]">
                         <div className="space-y-1">
                           <div className="flex items-center justify-between gap-3">
-                            <Label>Команда</Label>
+                            <Label htmlFor={`telegram-bot-command-${index}`}>Команда</Label>
                             <span className="text-xs text-muted-foreground">
                               {normalizeTelegramCommandForValidation(command.command).length}/{TELEGRAM_BOT_LIMITS.command}
                             </span>
@@ -10480,7 +10480,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </div>
                         <div className="space-y-1">
                           <div className="flex items-center justify-between gap-3">
-                            <Label>Описание</Label>
+                            <Label htmlFor={`telegram-bot-command-description-${index}`}>Описание</Label>
                             <span className="text-xs text-muted-foreground">
                               {command.description.trim().length}/{TELEGRAM_BOT_LIMITS.commandDescription}
                             </span>

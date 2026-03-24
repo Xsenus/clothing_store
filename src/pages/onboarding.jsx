@@ -1,4 +1,3 @@
-import React from "react";
 import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -28,7 +27,7 @@ export default function OnboardingPage() {
         const data = JSON.parse(stored);
         if (data.name) setName(data.name);
         if (data.email) setEmail(data.email);
-      } catch (e) {
+      } catch {
         console.error("Failed to parse pending user data");
       }
     }
