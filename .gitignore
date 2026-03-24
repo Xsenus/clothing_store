@@ -46,6 +46,7 @@ Thumbs.db
 
 # runtime uploads cache
 backend/uploads/
+backend/backups/
 
 # local tooling artifacts
 .codex-temp/
