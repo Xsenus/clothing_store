@@ -21,13 +21,15 @@ const hasNamedDialogChild = (
       return false;
     }
 
-    const childType = child.type as { displayName?: string; name?: string };
-    const childDisplayName = childType.displayName || childType.name || '';
+    const childType = child.type as
+      | { displayName?: string; name?: string }
+      | undefined;
+    const childDisplayName = childType?.displayName || childType?.name || '';
     if (displayNames.includes(childDisplayName)) {
       return true;
     }
 
-    if ('children' in child.props) {
+    if (child.props && 'children' in child.props) {
       return hasNamedDialogChild(child.props.children, displayNames);
     }
 
