@@ -1,0 +1,42 @@
+.profile-settings-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.profile-settings-main {
+  min-width: 0;
+  width: 100%;
+}
+
+.profile-settings-addresses {
+  min-width: 0;
+  width: 100%;
+}
+
+.profile-settings-main-panel,
+.profile-settings-addresses-panel {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 1.5rem;
+}
+
+@media (min-width: 1100px) {
+  .profile-settings-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 2rem;
+  }
+
+  .profile-settings-addresses {
+    position: sticky;
+    top: 6rem;
+  }
+}
+
+@media (min-width: 1380px) {
+  .profile-settings-layout {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  }
+}

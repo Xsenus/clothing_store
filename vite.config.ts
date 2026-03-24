@@ -1,18 +1,9 @@
 import path from "path";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 export default defineConfig({
-  plugins: [
-    react(),
-    nodePolyfills({
-      globals: { global: true, process: true, Buffer: true },
-      overrides: {
-        path: "path-browserify-win32",
-      },
-    }),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -35,10 +26,6 @@ export default defineConfig({
 
           if (id.includes("recharts")) {
             return "charts-vendor";
-          }
-
-          if (id.includes("@stripe") || id.includes("stripe")) {
-            return "payments-vendor";
           }
 
           if (id.includes("react-router")) {

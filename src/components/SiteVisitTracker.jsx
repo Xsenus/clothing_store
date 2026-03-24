@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router";
 
-import { FLOW } from "@/lib/api-mapping";
+import { apiRequest } from "@/lib/public-http";
 import { getOrCreateVisitorId } from "@/lib/visitor-id";
 
 const LAST_TRACKED_VISIT_KEY = "fashion_demon_last_site_visit_track";
@@ -36,7 +36,10 @@ const shouldSkipRecentDuplicate = (trackKey) => {
     const parsedValue = JSON.parse(rawValue);
     const lastKey = typeof parsedValue?.key === "string" ? parsedValue.key : "";
     const trackedAt = Number(parsedValue?.trackedAt ?? 0);
-    return lastKey === trackKey && Date.now() - trackedAt <= STRICT_MODE_DEDUP_WINDOW_MS;
+    return (
+      lastKey === trackKey &&
+      Date.now() - trackedAt <= STRICT_MODE_DEDUP_WINDOW_MS
+    );
   } catch {
     return false;
   }
@@ -48,13 +51,30 @@ const persistTrackedVisit = (trackKey) => {
   }
 
   try {
-    window.sessionStorage.setItem(LAST_TRACKED_VISIT_KEY, JSON.stringify({
-      key: trackKey,
-      trackedAt: Date.now(),
-    }));
+    window.sessionStorage.setItem(
+      LAST_TRACKED_VISIT_KEY,
+      JSON.stringify({
+        key: trackKey,
+        trackedAt: Date.now(),
+      }),
+    );
   } catch {
     // Ignore storage write failures and keep tracking lightweight.
   }
+};
+
+const scheduleVisitTracking = (callback) => {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  if ("requestIdleCallback" in window) {
+    const idleId = window.requestIdleCallback(callback, { timeout: 1500 });
+    return () => window.cancelIdleCallback(idleId);
+  }
+
+  const timeoutId = window.setTimeout(callback, 450);
+  return () => window.clearTimeout(timeoutId);
 };
 
 export default function SiteVisitTracker() {
@@ -64,23 +84,29 @@ export default function SiteVisitTracker() {
     const pathname = location.pathname || "/";
     const search = location.search || "";
     if (!shouldTrackLocation(pathname, search)) {
-      return;
+      return undefined;
     }
 
     const trackKey = `${pathname}${search}`;
     if (shouldSkipRecentDuplicate(trackKey)) {
-      return;
+      return undefined;
     }
 
     persistTrackedVisit(trackKey);
     const visitorId = getOrCreateVisitorId();
-    void FLOW.trackSiteVisit({
-      input: {
-        visitorId,
-        path: trackKey,
-      },
-    }).catch(() => {
-      // Site visit tracking should never break navigation.
+
+    return scheduleVisitTracking(() => {
+      void apiRequest("/tracking/visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId,
+          path: trackKey,
+        }),
+        keepalive: true,
+      }).catch(() => {
+        // Site visit tracking should never break navigation.
+      });
     });
   }, [location.pathname, location.search]);
 

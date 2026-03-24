@@ -1,33 +1,37 @@
+import { useEffect, useState, type ComponentType } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import {
-  ShoppingBag,
-  User,
-  Menu,
-  LogOut,
-  Package,
-  Settings2,
-} from "lucide-react";
-import { useState, useEffect } from "react";
+import { Menu, ShoppingBag, User } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useCart } from "@/context/CartContext";
 import { useAuth, useAuthActions } from "@/context/AuthContext";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
+import { cn } from "@/lib/utils";
+
+interface HeaderNavLink {
+  name: string;
+  path: string;
+}
+
+interface HeaderMobileMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  navLinks: HeaderNavLink[];
+  activePathname: string;
+  isAuthenticated: boolean;
+  userPrimaryLabel: string;
+  userSecondaryLabel: string;
+  onSignOut: () => Promise<void>;
+}
+
+interface HeaderAccountMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  userPrimaryLabel: string;
+  userCompactLabel: string;
+  userSecondaryLabel: string;
+  onSignOut: () => Promise<void>;
+}
 
 const getUserPrimaryLabel = (
   user: { nickname?: string; name?: string; email?: string } | null,
@@ -90,165 +94,145 @@ const getUserSecondaryLabel = (
   return "Личный кабинет";
 };
 
+const loadHeaderMobileMenu = () => import("@/components/HeaderMobileMenu");
+const loadHeaderAccountMenu = () => import("@/components/HeaderAccountMenu");
+
 export default function Header() {
   const { totalItems } = useCart();
   const { user, isAuthenticated } = useAuth();
-  const [isScrolled, setIsScrolled] = useState(false);
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [isOpen, setIsOpen] = useState(false);
   const { signOut } = useAuthActions();
   const confirmAction = useConfirmDialog();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [MobileMenuComponent, setMobileMenuComponent] =
+    useState<ComponentType<HeaderMobileMenuProps> | null>(null);
+  const [AccountMenuComponent, setAccountMenuComponent] =
+    useState<ComponentType<HeaderAccountMenuProps> | null>(null);
 
   const userPrimaryLabel = getUserPrimaryLabel(user);
   const userCompactLabel = getUserCompactLabel(user);
   const userSecondaryLabel = getUserSecondaryLabel(user, userPrimaryLabel);
-  const shouldHideDesktopAccountTrigger =
-    location.pathname === "/" && !isScrolled;
+  const isHeroHeader = location.pathname === "/" && !isScrolled;
+  const shouldHideDesktopAccountTrigger = isHeroHeader;
   const cartLabel =
     totalItems > 0 ? `Корзина, товаров: ${totalItems}` : "Корзина";
-
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 0);
-    };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   const navLinks = [
     { name: "ГЛАВНАЯ", path: "/" },
     { name: "КАТАЛОГ", path: "/catalog" },
   ];
 
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 0);
+    };
+
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   const handleSignOut = async () => {
     const confirmed = await confirmAction({
       title: "Выйти из аккаунта?",
-      description: "Текущая сессия будет завершена на этом устройстве.",
+      description:
+        "Текущая сессия будет завершена на этом устройстве.",
       confirmText: "Выйти",
     });
-    if (!confirmed) return false;
+    if (!confirmed) return;
 
     await signOut();
     navigate("/", { replace: true });
-    return true;
+  };
+
+  const ensureMobileMenuLoaded = async () => {
+    if (MobileMenuComponent) {
+      return MobileMenuComponent;
+    }
+
+    const module = await loadHeaderMobileMenu();
+    setMobileMenuComponent(() => module.default);
+    return module.default;
+  };
+
+  const ensureAccountMenuLoaded = async () => {
+    if (AccountMenuComponent) {
+      return AccountMenuComponent;
+    }
+
+    const module = await loadHeaderAccountMenu();
+    setAccountMenuComponent(() => module.default);
+    return module.default;
+  };
+
+  const openMobileMenu = async () => {
+    await ensureMobileMenuLoaded();
+    setIsMobileMenuOpen(true);
+  };
+
+  const openAccountMenu = async () => {
+    await ensureAccountMenuLoaded();
+    setIsAccountMenuOpen(true);
   };
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled
-          ? "bg-background/80 backdrop-blur-md border-b"
-          : "bg-transparent"
-      }`}
+      data-hero-header={isHeroHeader ? "true" : "false"}
+      className={cn(
+        "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
+        isScrolled ? "border-b bg-background/80 backdrop-blur-md" : "bg-transparent",
+        "text-foreground",
+      )}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:h-20">
-        {/* Mobile Menu */}
         <div className="md:hidden">
-          <Sheet open={isOpen} onOpenChange={setIsOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Открыть меню"
-                title="Открыть меню"
-              >
-                <Menu className="h-6 w-6" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="bg-background border-r-border">
-              <SheetHeader className="sr-only">
-                <SheetTitle>Навигационное меню</SheetTitle>
-                <SheetDescription>
-                  Основные разделы сайта и быстрые действия для аккаунта.
-                </SheetDescription>
-              </SheetHeader>
-              <nav className="flex flex-col gap-6 mt-10">
-                {navLinks.map((link) => (
-                  <Link
-                    key={link.path}
-                    to={link.path}
-                    className={`text-2xl font-bold hover:text-muted-foreground transition-colors ${
-                      location.pathname === link.path
-                        ? "underline decoration-2 underline-offset-4"
-                        : ""
-                    }`}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    {link.name}
-                  </Link>
-                ))}
-                {isAuthenticated ? (
-                  <>
-                    <div className="border-t border-border pt-6">
-                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">
-                        Аккаунт
-                      </p>
-                      <p className="mt-2 text-lg font-bold">
-                        {userPrimaryLabel}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {userSecondaryLabel}
-                      </p>
-                    </div>
-                    <Link
-                      to="/profile?tab=settings"
-                      className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Settings2 className="h-6 w-6" />
-                      ПРОФИЛЬ
-                    </Link>
-                    <Link
-                      to="/profile"
-                      className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Package className="h-6 w-6" />
-                      ЗАКАЗЫ
-                    </Link>
-                    <button
-                      onClick={async () => {
-                        const signedOut = await handleSignOut();
-                        if (signedOut) {
-                          setIsOpen(false);
-                        }
-                      }}
-                      className="text-2xl font-bold text-left hover:text-muted-foreground transition-colors flex items-center gap-2"
-                    >
-                      <LogOut className="h-6 w-6" />
-                      ВЫЙТИ
-                    </button>
-                  </>
-                ) : (
-                  <Link
-                    to="/auth"
-                    className="text-2xl font-bold hover:text-muted-foreground transition-colors"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    ВОЙТИ
-                  </Link>
-                )}
-              </nav>
-            </SheetContent>
-          </Sheet>
+          {MobileMenuComponent ? (
+            <MobileMenuComponent
+              open={isMobileMenuOpen}
+              onOpenChange={setIsMobileMenuOpen}
+              navLinks={navLinks}
+              activePathname={location.pathname}
+              isAuthenticated={isAuthenticated}
+              userPrimaryLabel={userPrimaryLabel}
+              userSecondaryLabel={userSecondaryLabel}
+              onSignOut={handleSignOut}
+            />
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="site-header-menu-button"
+            aria-label="Открыть меню"
+            title="Открыть меню"
+            onMouseEnter={() => {
+              void ensureMobileMenuLoaded();
+            }}
+            onFocus={() => {
+              void ensureMobileMenuLoaded();
+            }}
+            onClick={() => {
+              void openMobileMenu();
+            }}
+          >
+            <Menu className="h-6 w-6" />
+          </Button>
         </div>
 
-        {/* Logo */}
         <Link
           to="/"
-          className="max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-none md:text-3xl"
+          className="site-header-brand max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-none md:text-3xl"
         >
           FASHION_DEMON
         </Link>
 
-        {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-8">
           {navLinks.map((link) => (
             <Link
               key={link.path}
               to={link.path}
-              className={`text-sm font-bold tracking-widest hover:text-muted-foreground transition-colors ${
+              className={`site-header-nav-link text-sm font-bold tracking-widest hover:text-muted-foreground transition-colors ${
                 location.pathname === link.path
                   ? "underline decoration-2 underline-offset-4"
                   : ""
@@ -259,15 +243,32 @@ export default function Header() {
           ))}
         </nav>
 
-        {/* Actions */}
         <div className="flex items-center gap-2 md:gap-4">
           <div className="hidden md:block">
             {isAuthenticated && !shouldHideDesktopAccountTrigger ? (
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
+              <>
+                {AccountMenuComponent ? (
+                  <AccountMenuComponent
+                    open={isAccountMenuOpen}
+                    onOpenChange={setIsAccountMenuOpen}
+                    userPrimaryLabel={userPrimaryLabel}
+                    userCompactLabel={userCompactLabel}
+                    userSecondaryLabel={userSecondaryLabel}
+                    onSignOut={handleSignOut}
+                  />
+                ) : (
                   <Button
                     variant="ghost"
                     className="h-auto rounded-full px-0 py-0 text-left hover:bg-transparent"
+                    onMouseEnter={() => {
+                      void ensureAccountMenuLoaded();
+                    }}
+                    onFocus={() => {
+                      void ensureAccountMenuLoaded();
+                    }}
+                    onClick={() => {
+                      void openAccountMenu();
+                    }}
                   >
                     <div className="flex items-center gap-3 rounded-full px-1 py-1 transition-colors hover:bg-black/[0.035]">
                       <div className="max-w-[126px] text-right leading-tight">
@@ -283,65 +284,18 @@ export default function Header() {
                       </span>
                     </div>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  sideOffset={10}
-                  className="w-[292px] rounded-[24px] border border-black/8 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.14)]"
-                >
-                  <DropdownMenuLabel className="rounded-[18px] bg-stone-50 px-3 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white">
-                        <User className="h-5 w-5" />
-                      </span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[17px] font-semibold leading-none">
-                          {userPrimaryLabel}
-                        </div>
-                        <div className="truncate pt-1.5 text-sm font-medium normal-case text-muted-foreground">
-                          {userSecondaryLabel}
-                        </div>
-                      </div>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator className="mx-2 my-2 bg-black/8" />
-                  <DropdownMenuItem
-                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
-                    onSelect={() => navigate("/profile?tab=settings")}
-                  >
-                    <Settings2 className="mr-3 h-4 w-4" />
-                    Профиль
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
-                    onSelect={() => navigate("/profile")}
-                  >
-                    <Package className="mr-3 h-4 w-4" />
-                    Заказы
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="mx-2 my-2 bg-black/8" />
-                  <DropdownMenuItem
-                    className="rounded-[16px] px-3 py-3 text-[15px] font-medium text-red-600 focus:bg-red-50 focus:text-red-600"
-                    onSelect={async (event) => {
-                      event.preventDefault();
-                      await handleSignOut();
-                    }}
-                  >
-                    <LogOut className="mr-3 h-4 w-4" />
-                    Выйти
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                )}
+              </>
             ) : !isAuthenticated ? (
-              <Button asChild variant="ghost" size="sm" className="font-bold">
+              <Button asChild variant="ghost" size="sm" className="site-header-auth-button font-bold">
                 <Link to="/auth" aria-label="Войти в аккаунт">
-                  ВОЙТИ
+                  Войти
                 </Link>
               </Button>
             ) : null}
           </div>
 
-          <Button asChild variant="ghost" size="icon" className="relative">
+          <Button asChild variant="ghost" size="icon" className="site-header-cart-button relative">
             <Link
               to="/cart"
               id="cart-icon-target"
@@ -352,7 +306,7 @@ export default function Header() {
               {totalItems > 0 && (
                 <span
                   key={totalItems}
-                  className="site-cart-badge-pop absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
+                  className="site-cart-badge-pop site-header-cart-badge absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
                   aria-hidden="true"
                 >
                   {totalItems}

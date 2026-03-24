@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { getCachedPublicSettings } from "@/lib/site-settings";
+import "./LoadingSpinner.css";
 
 const isLoadingAnimationEnabled = (value: unknown) => {
   if (typeof value !== "string") {

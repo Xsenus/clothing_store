@@ -1,9 +1,8 @@
 import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate } from "react-router";
 import LoadingSpinner from "@/components/LoadingSpinner";
-import SiteVisitTracker from "@/components/SiteVisitTracker";
+import HomePage from "./pages/home";
 
-const HomePage = lazy(() => import("./pages/home"));
 const CatalogPage = lazy(() => import("./pages/catalog"));
 const ProductDetailPage = lazy(() => import("./pages/product-detail"));
 const CartPage = lazy(() => import("./pages/cart"));
@@ -27,7 +26,6 @@ const routeFallback = (
 export default function App() {
   return (
     <Suspense fallback={routeFallback}>
-      <SiteVisitTracker />
       <Routes>
         <Route index element={<HomePage />} />
         <Route path="/catalog" element={<CatalogPage />} />
