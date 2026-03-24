@@ -5,7 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { FLOW } from '@/lib/api-mapping';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -834,6 +841,12 @@ export default function CatalogPage() {
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-[300px]">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Фильтры каталога</SheetTitle>
+                <SheetDescription>
+                  Панель сортировки и фильтрации товаров каталога.
+                </SheetDescription>
+              </SheetHeader>
               <div className="mt-8">
                 <FilterContent
                   sortOptions={sortOptions}

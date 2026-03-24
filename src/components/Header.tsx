@@ -9,7 +9,14 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -150,6 +157,12 @@ export default function Header() {
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="bg-background border-r-border">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Навигационное меню</SheetTitle>
+                <SheetDescription>
+                  Основные разделы сайта и быстрые действия для аккаунта.
+                </SheetDescription>
+              </SheetHeader>
               <nav className="flex flex-col gap-6 mt-10">
                 {navLinks.map((link) => (
                   <Link
