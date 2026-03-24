@@ -106,8 +106,9 @@ export default function ProductCard({
 
   const imageRef = useRef<HTMLImageElement>(null);
   const { addToCart } = useCart();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = Boolean(user?.isAdmin);
 
   const hasStockInfo = Boolean(
     product.sizeStock && Object.keys(product.sizeStock).length > 0,
@@ -116,7 +117,8 @@ export default function ProductCard({
     !hasStockInfo ||
     Object.values(product.sizeStock || {}).some((value) => Number(value) > 0);
   const isHiddenProduct = product.isHidden === true;
-  const isUnavailable = isHiddenProduct || !hasAvailableStock;
+  const isOutOfStock = !isHiddenProduct && !hasAvailableStock;
+  const isUnavailable = isHiddenProduct || isOutOfStock;
   const canOpenProduct = !isHiddenProduct && Boolean(product.slug);
   const productHref = canOpenProduct ? `/product/${product.slug}` : null;
   const productCardImage = product.catalogImageUrl || product.images[0] || "";
@@ -301,7 +303,12 @@ export default function ProductCard({
             Новинка
           </Badge>
         )}
-        {isUnavailable && (
+        {isHiddenProduct && isAdmin && (
+          <Badge className="bg-amber-500 text-black hover:bg-amber-500 uppercase tracking-widest text-[10px] py-1 px-2 border-none">
+            Скрыт с витрины
+          </Badge>
+        )}
+        {isOutOfStock && (
           <Badge className="bg-black text-white hover:bg-black uppercase tracking-widest text-[10px] py-1 px-2 border-none">
             Закончился
           </Badge>
@@ -418,7 +425,12 @@ export default function ProductCard({
           <span>{likesCount}</span>
         </div>
       </div>
-      {isUnavailable && (
+      {isHiddenProduct && isAdmin && (
+        <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+          Скрыт с витрины: видно только админу
+        </div>
+      )}
+      {isOutOfStock && (
         <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-red-600">
           Товар закончился
         </div>
