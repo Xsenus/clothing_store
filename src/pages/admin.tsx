@@ -1,6 +1,7 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
+import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
 import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -116,6 +117,10 @@ interface AdminYandexDeliveryTestPickupPoint {
   address?: string;
   instruction?: string | null;
   distanceKm?: number | null;
+  pointType?: string | null;
+  availableForDropoff?: boolean | null;
+  availableForC2cDropoff?: boolean | null;
+  paymentMethods?: string[] | null;
   available?: boolean;
   estimatedCost?: number | null;
   deliveryDays?: number | null;
@@ -1474,6 +1479,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [yandexDeliveryTestRunning, setYandexDeliveryTestRunning] = useState(false);
   const [yandexDeliveryTestError, setYandexDeliveryTestError] = useState("");
   const [yandexDeliveryTestResult, setYandexDeliveryTestResult] = useState<AdminYandexDeliveryTestResult | null>(null);
+  const [yandexDeliveryPointSearchQuery, setYandexDeliveryPointSearchQuery] = useState("630099, Новосибирск, Красный проспект, 25");
+  const [yandexDeliveryPointSearchType, setYandexDeliveryPointSearchType] = useState("warehouse");
+  const [yandexDeliveryPointSearchLimit, setYandexDeliveryPointSearchLimit] = useState("10");
+  const [yandexDeliveryPointSearchRunning, setYandexDeliveryPointSearchRunning] = useState(false);
+  const [yandexDeliveryPointSearchError, setYandexDeliveryPointSearchError] = useState("");
+  const [yandexDeliveryPointSearchResults, setYandexDeliveryPointSearchResults] = useState<AdminYandexDeliveryTestPickupPoint[]>([]);
   const [databaseBackupsOverview, setDatabaseBackupsOverview] = useState<AdminDatabaseBackupsOverview | null>(null);
   const [databaseBackupsLoading, setDatabaseBackupsLoading] = useState(false);
   const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
@@ -2471,6 +2482,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return numeric === 1 ? "1 день" : `${numeric} дн.`;
   };
 
+  const formatYandexPointTypeLabel = (value?: string | null) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "warehouse") return "Сортцентр / самопривоз";
+    if (normalized === "terminal") return "Терминал";
+    return "ПВЗ";
+  };
+
   const formatAdminOrderNumber = (order?: AdminOrder | null) => {
     const explicitDisplayNumber = String(order?.displayOrderNumber || "").trim();
     if (explicitDisplayNumber) return explicitDisplayNumber;
@@ -3366,6 +3384,54 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     } finally {
       setYandexDeliveryTestRunning(false);
     }
+  };
+
+  const runYandexDeliveryPointSearch = async () => {
+    const query = yandexDeliveryPointSearchQuery.trim();
+    if (!query) {
+      toast.error("Укажите адрес или населенный пункт для поиска точек Яндекс.Доставки");
+      return;
+    }
+
+    const normalizedLimit = Number.parseInt(yandexDeliveryPointSearchLimit, 10);
+    const limit = Number.isFinite(normalizedLimit) ? Math.min(Math.max(normalizedLimit, 1), 20) : 10;
+
+    setYandexDeliveryPointSearchRunning(true);
+    setYandexDeliveryPointSearchError("");
+    setYandexDeliveryPointSearchResults([]);
+
+    try {
+      const result = await FLOW.adminSearchYandexDeliveryPoints({
+        input: {
+          useTestEnvironment: isSettingEnabled("yandex_delivery_use_test_environment"),
+          apiToken: settings["yandex_delivery_api_token"] || "",
+          query,
+          pointType: yandexDeliveryPointSearchType,
+          limit,
+        },
+      });
+
+      const points = Array.isArray(result?.points) ? result.points : [];
+      setYandexDeliveryPointSearchResults(points);
+      toast.success(points.length > 0 ? `Найдено точек: ${points.length}` : "Подходящие точки не найдены");
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось получить список точек Яндекс.Доставки");
+      setYandexDeliveryPointSearchError(message);
+      toast.error(message);
+    } finally {
+      setYandexDeliveryPointSearchRunning(false);
+    }
+  };
+
+  const applyYandexSourceStationId = (stationId: string, label?: string | null) => {
+    const normalizedStationId = String(stationId || "").trim();
+    if (!normalizedStationId) {
+      toast.error("У точки нет platform_station_id для подстановки");
+      return;
+    }
+
+    updateSetting("yandex_delivery_source_station_id", normalizedStationId);
+    toast.success(label ? `SourceStationId подставлен из точки «${label}»` : "SourceStationId подставлен");
   };
 
   const updateDictionaryFilterVisibility = async (kind: DictionaryKind, enabled: boolean) => {
@@ -9348,11 +9414,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_120px_180px_auto]">
                                 <div className="space-y-1">
                                   <Label htmlFor="yandex-delivery-test-address">Тестовый адрес</Label>
-                                  <Input
+                                  <AddressAutocompleteInput
                                     id="yandex-delivery-test-address"
                                     value={yandexDeliveryTestAddress}
-                                    onChange={(e) => setYandexDeliveryTestAddress(e.target.value)}
+                                    name="yandex_delivery_test_address"
+                                    onValueChange={setYandexDeliveryTestAddress}
                                     placeholder="Например: 630099, Новосибирск, Красный проспект, 25"
+                                    inputClassName="rounded-none"
+                                    suggestionsClassName="rounded-none"
                                   />
                                 </div>
                                 <div className="space-y-1">
@@ -9473,6 +9542,148 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       )}
                                     </div>
                                   </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-3 border border-black/10 bg-slate-50 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Поиск platform_station_id через API</div>
+                                <p className="text-xs text-muted-foreground">
+                                  Для собственного склада боевой `Source platform_station_id` Яндекс обычно выдает через менеджера. Но этим поиском удобно получать список ПВЗ, терминалов и складов Яндекса, смотреть их ID и использовать их для диагностики или как ориентир при настройке.
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.2fr)_220px_120px_auto]">
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-point-search-query">Адрес или населенный пункт</Label>
+                                  <AddressAutocompleteInput
+                                    id="yandex-delivery-point-search-query"
+                                    value={yandexDeliveryPointSearchQuery}
+                                    name="yandex_delivery_point_search_query"
+                                    onValueChange={setYandexDeliveryPointSearchQuery}
+                                    placeholder="Например: Новосибирск, Красный проспект, 25"
+                                    inputClassName="h-11 rounded-none"
+                                    suggestionsClassName="rounded-none"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-point-search-type">Что искать</Label>
+                                  <Select value={yandexDeliveryPointSearchType} onValueChange={setYandexDeliveryPointSearchType}>
+                                    <SelectTrigger id="yandex-delivery-point-search-type" className="h-11 rounded-none">
+                                      <SelectValue placeholder="Выберите тип точки" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="warehouse">Склад / самопривоз</SelectItem>
+                                      <SelectItem value="pickup_point">ПВЗ</SelectItem>
+                                      <SelectItem value="terminal">Терминал</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <Label htmlFor="yandex-delivery-point-search-limit">Лимит</Label>
+                                  <Input
+                                    id="yandex-delivery-point-search-limit"
+                                    value={yandexDeliveryPointSearchLimit}
+                                    onChange={(e) => setYandexDeliveryPointSearchLimit(e.target.value)}
+                                    inputMode="numeric"
+                                    placeholder="10"
+                                    className="h-11 rounded-none"
+                                  />
+                                </div>
+
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-11 w-full rounded-none px-4 md:w-auto"
+                                    onClick={runYandexDeliveryPointSearch}
+                                    disabled={yandexDeliveryPointSearchRunning}
+                                  >
+                                    {yandexDeliveryPointSearchRunning ? "Ищем..." : "Найти точки"}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="rounded-none border border-black/10 bg-white p-3 text-xs leading-5 text-muted-foreground">
+                                <div>Режим поиска: {isSettingEnabled("yandex_delivery_use_test_environment") ? "тестовый контур" : "боевой контур"}</div>
+                                <div>Подсказка: для поиска кандидатов на source station чаще всего нужен тип «Склад / самопривоз», а для списка клиентских точек выдачи — «ПВЗ».</div>
+                              </div>
+
+                              {yandexDeliveryPointSearchError && (
+                                <div className="rounded-none border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                  {yandexDeliveryPointSearchError}
+                                </div>
+                              )}
+
+                              {yandexDeliveryPointSearchResults.length > 0 && (
+                                <div className="space-y-3">
+                                  {yandexDeliveryPointSearchResults.map((point, index) => (
+                                    <div
+                                      key={`${point.id || "point"}-${index}`}
+                                      className="rounded-none border border-black/10 bg-white p-3"
+                                    >
+                                      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                                        <div className="min-w-0 space-y-1">
+                                          <div className="break-words font-medium">{point.name || "Точка Яндекс.Доставки"}</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            {formatYandexPointTypeLabel(point.pointType)}
+                                            {point.availableForDropoff === true ? " · принимает самопривоз" : ""}
+                                            {point.availableForC2cDropoff === true ? " · доступен c2c dropoff" : ""}
+                                          </div>
+                                          <div className="break-words text-sm">{point.address || "—"}</div>
+                                          {point.instruction && (
+                                            <div className="text-xs text-muted-foreground">
+                                              {point.instruction}
+                                            </div>
+                                          )}
+                                          <div className="break-all text-xs">
+                                            <span className="text-muted-foreground">platform_station_id:</span>{" "}
+                                            <span className="font-mono">{point.id || "—"}</span>
+                                          </div>
+                                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                            {Number.isFinite(Number(point.distanceKm)) && (
+                                              <span>Расстояние: {Number(point.distanceKm).toFixed(1)} км</span>
+                                            )}
+                                            {Array.isArray(point.paymentMethods) && point.paymentMethods.length > 0 && (
+                                              <span>Оплата: {point.paymentMethods.join(", ")}</span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2 xl:justify-end">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="rounded-none"
+                                            disabled={!point.id}
+                                            onClick={async () => {
+                                              if (!point.id) return;
+                                              try {
+                                                await navigator.clipboard.writeText(point.id);
+                                                toast.success("platform_station_id скопирован");
+                                              } catch {
+                                                toast.error("Не удалось скопировать platform_station_id");
+                                              }
+                                            }}
+                                          >
+                                            <Copy className="mr-2 h-4 w-4" />
+                                            Скопировать ID
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            className="rounded-none"
+                                            disabled={!point.id}
+                                            onClick={() => applyYandexSourceStationId(point.id || "", point.name)}
+                                          >
+                                            Подставить в Source ID
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
                               )}
                             </div>

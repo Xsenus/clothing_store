@@ -1055,6 +1055,12 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  adminSearchYandexDeliveryPoints: async ({ input }) => request("/admin/settings/yandex-delivery/search-points", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminGetDatabaseBackups: async () => request("/admin/database-backups"),
 
   adminCreateDatabaseBackup: async () => request("/admin/database-backups", {

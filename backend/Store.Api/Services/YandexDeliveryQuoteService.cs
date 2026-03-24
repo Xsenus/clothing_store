@@ -15,6 +15,8 @@ public interface IYandexDeliveryQuoteService
     Task<YandexDeliveryWidgetConfigResult> GetWidgetConfigAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(YandexDeliveryPickupPointsPayload payload, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(YandexDeliveryPickupPointsPayload payload, YandexDeliveryIntegrationOverrides? overrides, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<YandexPickupPointSummary>> SearchPlatformPointsAsync(YandexDeliveryPointSearchPayload payload, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<YandexPickupPointSummary>> SearchPlatformPointsAsync(YandexDeliveryPointSearchPayload payload, YandexDeliveryIntegrationOverrides? overrides, CancellationToken cancellationToken = default);
     Task<YandexDeliveryQuoteResult> CalculateAsync(YandexDeliveryCalculatePayload payload, CancellationToken cancellationToken = default);
     Task<YandexDeliveryQuoteResult> CalculateAsync(YandexDeliveryCalculatePayload payload, YandexDeliveryIntegrationOverrides? overrides, CancellationToken cancellationToken = default);
 }
@@ -64,6 +66,9 @@ public sealed record YandexPickupPointSummary(
     double? Latitude,
     double? Longitude,
     double? DistanceKm,
+    string? PointType = null,
+    bool? AvailableForDropoff = null,
+    bool? AvailableForC2cDropoff = null,
     IReadOnlyList<string>? PaymentMethods = null,
     bool Available = false,
     decimal? EstimatedCost = null,
@@ -83,7 +88,8 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -124,6 +130,11 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         CancellationToken cancellationToken = default)
         => await ListPickupPointsAsync(payload, overrides: null, cancellationToken);
 
+    public async Task<IReadOnlyList<YandexPickupPointSummary>> SearchPlatformPointsAsync(
+        YandexDeliveryPointSearchPayload payload,
+        CancellationToken cancellationToken = default)
+        => await SearchPlatformPointsAsync(payload, overrides: null, cancellationToken);
+
     public async Task<IReadOnlyList<YandexPickupPointSummary>> ListPickupPointsAsync(
         YandexDeliveryPickupPointsPayload payload,
         YandexDeliveryIntegrationOverrides? overrides,
@@ -141,12 +152,51 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             ?? destinationAddress;
         var limit = Math.Clamp(payload.Limit ?? 12, 1, 30);
 
-        var points = await GetPickupPointsAsync(
+        var points = await SearchPointsAsync(
             locationSearchText,
             resolvedAddress,
             apiToken,
             useTestEnvironment,
-            paymentMethod,
+            "pickup_point",
+            [paymentMethod],
+            cancellationToken);
+
+        return points
+            .Where(static point => !string.IsNullOrWhiteSpace(point.Id))
+            .Select(point => MapPickupPointSummary(point, resolvedAddress))
+            .OrderBy(point => point.DistanceKm ?? double.MaxValue)
+            .ThenBy(point => point.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<YandexPickupPointSummary>> SearchPlatformPointsAsync(
+        YandexDeliveryPointSearchPayload payload,
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken = default)
+    {
+        var query = payload.Query?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(query))
+            throw new InvalidOperationException("Заполните адрес или населенный пункт для поиска точек Яндекс.Доставки.");
+
+        var limit = payload.Limit.GetValueOrDefault(10);
+        limit = Math.Clamp(limit <= 0 ? 10 : limit, 1, 20);
+
+        var pointType = NormalizePointType(payload.PointType);
+        var (useTestEnvironment, apiToken) = await ResolveSearchOptionsAsync(overrides, cancellationToken);
+        var resolvedAddress = await TryResolveAddressAsync(query, cancellationToken);
+        var locationSearchText = resolvedAddress?.Settlement
+            ?? resolvedAddress?.City
+            ?? resolvedAddress?.Region
+            ?? query;
+
+        var points = await SearchPointsAsync(
+            locationSearchText,
+            resolvedAddress,
+            apiToken,
+            useTestEnvironment,
+            pointType,
+            [],
             cancellationToken);
 
         return points
@@ -282,6 +332,42 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         return (useTestEnvironment, sourceStationId, apiToken);
     }
 
+    private async Task<(bool UseTestEnvironment, string ApiToken)> ResolveSearchOptionsAsync(
+        YandexDeliveryIntegrationOverrides? overrides,
+        CancellationToken cancellationToken)
+    {
+        bool useTestEnvironment;
+        string? apiToken;
+
+        if (overrides is not null)
+        {
+            useTestEnvironment = overrides.UseTestEnvironment;
+            apiToken = NormalizeOptionalText(overrides.ApiToken);
+        }
+        else
+        {
+            useTestEnvironment = await GetBooleanSettingAsync(
+                "yandex_delivery_use_test_environment",
+                "Integrations:YandexDelivery:UseTestEnvironment",
+                fallback: false,
+                cancellationToken);
+            apiToken = await GetSettingOrConfigAsync(
+                "yandex_delivery_api_token",
+                "Integrations:YandexDelivery:ApiToken",
+                cancellationToken);
+        }
+
+        if (useTestEnvironment)
+        {
+            apiToken = string.IsNullOrWhiteSpace(apiToken) ? GetBuiltInTestApiToken() : apiToken;
+        }
+
+        if (string.IsNullOrWhiteSpace(apiToken))
+            throw new InvalidOperationException("Не настроен API token Яндекс.Доставки.");
+
+        return (useTestEnvironment, apiToken);
+    }
+
     private async Task<DaDataAddressSuggestion?> TryResolveAddressAsync(string address, CancellationToken cancellationToken)
     {
         try
@@ -392,7 +478,7 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
                     PickupPointIds: [pickupPointId],
                     GeoId: null,
                     Type: "pickup_point",
-                    PaymentMethods: []),
+                    PaymentMethods: null),
                 apiToken,
                 useTestEnvironment,
                 cancellationToken);
@@ -408,14 +494,19 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         }
     }
 
-    private async Task<List<PickupPointDto>> GetPickupPointsAsync(
+    private async Task<List<PickupPointDto>> SearchPointsAsync(
         string locationSearchText,
         DaDataAddressSuggestion? resolvedAddress,
         string apiToken,
         bool useTestEnvironment,
-        string paymentMethod,
+        string pointType,
+        List<string>? paymentMethods,
         CancellationToken cancellationToken)
     {
+        var normalizedPaymentMethods = paymentMethods is { Count: > 0 }
+            ? paymentMethods
+            : null;
+
         var latitude = ParseCoordinate(resolvedAddress?.GeoLat);
         var longitude = ParseCoordinate(resolvedAddress?.GeoLon);
 
@@ -426,8 +517,8 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
                 new PickupPointsListRequest(
                     PickupPointIds: null,
                     GeoId: null,
-                    Type: "pickup_point",
-                    PaymentMethods: [paymentMethod],
+                    Type: pointType,
+                    PaymentMethods: normalizedPaymentMethods,
                     Latitude: BuildCoordinateInterval(latitude.Value, 0.35d, -90d, 90d),
                     Longitude: BuildCoordinateInterval(longitude.Value, 0.35d, -180d, 180d)),
                 apiToken,
@@ -447,8 +538,8 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             new PickupPointsListRequest(
                 PickupPointIds: null,
                 GeoId: geoId,
-                Type: "pickup_point",
-                PaymentMethods: [paymentMethod]),
+                Type: pointType,
+                PaymentMethods: normalizedPaymentMethods),
             apiToken,
             useTestEnvironment,
             cancellationToken);
@@ -856,6 +947,9 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             Latitude: point.Position?.Latitude,
             Longitude: point.Position?.Longitude,
             DistanceKm: CalculateDistanceKm(point.Position, resolvedAddress),
+            PointType: NormalizeOptionalText(point.Type),
+            AvailableForDropoff: point.AvailableForDropoff,
+            AvailableForC2cDropoff: point.AvailableForC2cDropoff,
             PaymentMethods: point.PaymentMethods?
                 .Where(static method => !string.IsNullOrWhiteSpace(method))
                 .Select(static method => method!.Trim())
@@ -942,6 +1036,17 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             "cash" => "card_on_receipt",
             "card_on_receipt" => "card_on_receipt",
             _ => "already_paid"
+        };
+    }
+
+    private static string NormalizePointType(string? pointType)
+    {
+        var normalized = pointType?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "warehouse" => "warehouse",
+            "terminal" => "terminal",
+            _ => "pickup_point"
         };
     }
 
@@ -1078,7 +1183,7 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         [property: JsonPropertyName("type")]
         string Type,
         [property: JsonPropertyName("payment_methods")]
-        List<string> PaymentMethods,
+        List<string>? PaymentMethods,
         [property: JsonPropertyName("latitude")]
         CoordinateInterval? Latitude = null,
         [property: JsonPropertyName("longitude")]
@@ -1099,12 +1204,18 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         string? Id,
         [property: JsonPropertyName("name")]
         string? Name,
+        [property: JsonPropertyName("type")]
+        string? Type,
         [property: JsonPropertyName("position")]
         PickupPointGeoPositionDto? Position,
         [property: JsonPropertyName("address")]
         PickupPointAddressDto? Address,
         [property: JsonPropertyName("instruction")]
         string? Instruction,
+        [property: JsonPropertyName("available_for_dropoff")]
+        bool? AvailableForDropoff,
+        [property: JsonPropertyName("available_for_c2c_dropoff")]
+        bool? AvailableForC2cDropoff,
         [property: JsonPropertyName("payment_methods")]
         List<string?>? PaymentMethods);
 

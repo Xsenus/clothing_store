@@ -182,6 +182,13 @@ public record YandexDeliveryPickupPointsPayload(
     decimal? WeightKg = null,
     decimal? DeclaredCost = null);
 
+public record YandexDeliveryPointSearchPayload(
+    bool UseTestEnvironment,
+    string? ApiToken,
+    string Query,
+    string? PointType = null,
+    int? Limit = null);
+
 public record TelegramBotCommandPayload(string Command, string Description);
 
 public record TelegramBotReplyTemplatePayload(

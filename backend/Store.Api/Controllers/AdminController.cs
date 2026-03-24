@@ -1677,6 +1677,48 @@ public class AdminController : ControllerBase
         }
     }
 
+    [HttpPost("settings/yandex-delivery/search-points")]
+    public async Task<IResult> SearchYandexDeliveryPoints([FromBody] YandexDeliveryPointSearchPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var overrides = new YandexDeliveryIntegrationOverrides(
+                Enabled: true,
+                UseTestEnvironment: payload.UseTestEnvironment,
+                ApiToken: payload.ApiToken,
+                SourceStationId: null,
+                PackageLengthCm: null,
+                PackageHeightCm: null,
+                PackageWidthCm: null);
+
+            var points = await _yandexDeliveryQuoteService.SearchPlatformPointsAsync(payload, overrides, cancellationToken);
+
+            return Results.Ok(new
+            {
+                points = points.Select(point => new
+                {
+                    id = point.Id,
+                    name = point.Name,
+                    address = point.Address,
+                    instruction = point.Instruction,
+                    latitude = point.Latitude,
+                    longitude = point.Longitude,
+                    distanceKm = point.DistanceKm,
+                    pointType = point.PointType,
+                    availableForDropoff = point.AvailableForDropoff,
+                    availableForC2cDropoff = point.AvailableForC2cDropoff,
+                    paymentMethods = point.PaymentMethods
+                })
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
 
 
     [HttpGet("dictionaries")]
