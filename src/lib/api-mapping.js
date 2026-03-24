@@ -406,14 +406,109 @@ const uploadWithProgress = ({ path, body, onProgress, headers = {} }) => new Pro
   xhr.send(body);
 });
 
-export const FLOW = {
-  getNewProducts: async () => normalizeProducts(await request("/products/new")),
+export const getNewProducts = async () => normalizeProducts(await request("/products/new"));
 
-  getPopularProducts: async () => normalizeProducts(await request("/products/popular")),
+export const getPopularProducts = async () => normalizeProducts(await request("/products/popular"));
+
+export const getCatalogFilters = async () => normalizeCatalogFiltersPayload(await request("/products/filters"));
+
+export const getProfile = async () => request("/profile");
+
+export const getCart = async () => {
+  const result = await request("/cart");
+  return Array.isArray(result) ? result.map(normalizeCartItem) : [];
+};
+
+export const addToCart = async ({ input }) => request("/cart", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(input),
+});
+
+export const updateCartQuantity = async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ quantity: input.quantity }),
+});
+
+export const removeCartItem = async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
+  method: "DELETE",
+});
+
+export const clearCart = async () => request("/cart", {
+  method: "DELETE",
+});
+
+export const signIn = async ({ input }) => {
+  const result = await request("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  saveAuthTokens(result || {});
+  return result;
+};
+
+export const signUp = async ({ input }) => request("/auth/signup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(input),
+});
+
+export const verifySignup = async ({ input }) => {
+  const result = await request("/auth/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  saveAuthTokens(result || {});
+  return result;
+};
+
+export const refreshSession = async () => {
+  const refreshed = await refreshAuthSession();
+  if (!refreshed) {
+    throw new Error("Unable to refresh session");
+  }
+  return { ok: true };
+};
+
+export const telegramLogin = async ({ input }) => {
+  const result = await request("/auth/telegram/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  saveAuthTokens(result || {});
+  return result;
+};
+
+export const signOut = async () => {
+  const refreshToken = getRefreshToken();
+  try {
+    await request("/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+  } catch {
+    // Не блокируем выход пользователя, если backend недоступен.
+  } finally {
+    clearAuthTokens();
+  }
+  return true;
+};
+
+export const getPublicSettings = async () => request("/settings/public");
+
+export const FLOW = {
+  getNewProducts,
+
+  getPopularProducts,
 
   getAllProducts: async () => normalizeProducts(await request("/products")),
 
-  getCatalogFilters: async () => normalizeCatalogFiltersPayload(await request("/products/filters")),
+  getCatalogFilters,
 
   catalogFilter: async ({ input } = {}) => {
     const products = normalizeProducts(await request("/products"));
@@ -479,12 +574,9 @@ export const FLOW = {
     return { liked: likes.some((like) => like.productId === input.productId) };
   },
 
-  getProfile: async () => request("/profile"),
+  getProfile,
 
-  getCart: async () => {
-    const result = await request("/cart");
-    return Array.isArray(result) ? result.map(normalizeCartItem) : [];
-  },
+  getCart,
 
   trackProductView: async ({ input }) => request(`/products/${encodeURIComponent(input.productId)}/view`, {
     method: "POST",
@@ -492,25 +584,13 @@ export const FLOW = {
     body: JSON.stringify({ visitorId: input.visitorId ?? null }),
   }),
 
-  addToCart: async ({ input }) => request("/cart", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }),
+  addToCart,
 
-  updateCartQuantity: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ quantity: input.quantity }),
-  }),
+  updateCartQuantity,
 
-  removeCartItem: async ({ input }) => request(`/cart/${encodeURIComponent(input.cartItemId)}`, {
-    method: "DELETE",
-  }),
+  removeCartItem,
 
-  clearCart: async () => request("/cart", {
-    method: "DELETE",
-  }),
+  clearCart,
 
 
   startEmailVerification: async ({ input }) => request("/profile/email/verify/start", {
@@ -690,24 +770,9 @@ export const FLOW = {
   }),
 
 
-  signIn: async ({ input }) => {
-    const result = await request("/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    saveAuthTokens(result || {});
-    return result;
-  },
+  signIn,
 
-  signUp: async ({ input }) => {
-    const result = await request("/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    return result;
-  },
+  signUp,
 
   resendCode: async ({ input }) => request("/auth/resend", {
     method: "POST",
@@ -715,15 +780,7 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
-  verifySignup: async ({ input }) => {
-    const result = await request("/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    saveAuthTokens(result || {});
-    return result;
-  },
+  verifySignup,
 
   requestPasswordReset: async ({ input }) =>
     request("/auth/reset/request", {
@@ -739,13 +796,7 @@ export const FLOW = {
       body: JSON.stringify(input),
     }),
 
-  refreshSession: async () => {
-    const refreshed = await refreshAuthSession();
-    if (!refreshed) {
-      throw new Error("Unable to refresh session");
-    }
-    return { ok: true };
-  },
+  refreshSession,
 
 
   telegramStartAuth: async ({ input }) => request("/auth/telegram/start", {
@@ -771,15 +822,7 @@ export const FLOW = {
 
   externalAuthStatus: async ({ input }) => request(`/auth/external/status/${encodeURIComponent(input.state)}`),
 
-  telegramLogin: async ({ input }) => {
-    const result = await request("/auth/telegram/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    saveAuthTokens(result || {});
-    return result;
-  },
+  telegramLogin,
 
   dadataSuggestAddresses: async ({ input }) => request("/integrations/dadata/suggest", {
     method: "POST",
@@ -1020,7 +1063,7 @@ export const FLOW = {
 
   adminDownloadDatabaseBackup: async ({ input }) => downloadRequest(`/admin/database-backups/download?relativePath=${encodeURIComponent(input.relativePath)}`),
 
-  getPublicSettings: async () => request("/settings/public"),
+  getPublicSettings,
 
   adminLogout: async () => {
     try {

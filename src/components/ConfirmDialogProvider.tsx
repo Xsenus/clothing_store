@@ -1,5 +1,7 @@
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -7,17 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
 
 type ConfirmDialogVariant = "default" | "destructive";
 
@@ -37,6 +28,7 @@ interface ConfirmDialogRequest extends ConfirmDialogOptions {
 type ConfirmDialogHandler = (options: ConfirmDialogOptions) => Promise<boolean>;
 
 const ConfirmDialogContext = createContext<ConfirmDialogHandler | null>(null);
+const ConfirmDialogViewport = lazy(() => import("@/components/ConfirmDialogViewport"));
 
 export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef<ConfirmDialogRequest[]>([]);
@@ -92,41 +84,14 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     <ConfirmDialogContext.Provider value={confirm}>
       {children}
 
-      <AlertDialog
-        open={Boolean(activeRequest)}
-        onOpenChange={(open) => {
-          if (!open) {
-            settleRequest(activeRequest?.id, false);
-          }
-        }}
-      >
-        <AlertDialogContent className="rounded-none border-black">
-          <AlertDialogHeader className="space-y-3">
-            <AlertDialogTitle className="text-xl font-black uppercase tracking-wide">
-              {activeRequest?.title || "Подтвердите действие"}
-            </AlertDialogTitle>
-            {activeRequest?.description ? (
-              <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
-                {activeRequest.description}
-              </AlertDialogDescription>
-            ) : null}
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="rounded-none border-black">
-              {activeRequest?.cancelText || "Отмена"}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(
-                "rounded-none",
-                activeRequest?.variant === "destructive" && "bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600"
-              )}
-              onClick={() => settleRequest(activeRequest?.id, true)}
-            >
-              {activeRequest?.confirmText || "Подтвердить"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {activeRequest ? (
+        <Suspense fallback={null}>
+          <ConfirmDialogViewport
+            activeRequest={activeRequest}
+            settleRequest={settleRequest}
+          />
+        </Suspense>
+      ) : null}
     </ConfirmDialogContext.Provider>
   );
 }

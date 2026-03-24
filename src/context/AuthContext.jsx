@@ -1,5 +1,13 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { FLOW } from "@/lib/api-mapping";
+import {
+  getProfile,
+  refreshSession,
+  signIn as apiSignIn,
+  signOut as apiSignOut,
+  signUp as apiSignUp,
+  telegramLogin,
+  verifySignup,
+} from "@/lib/api-mapping";
 import { clearProductLikeStateCache } from "@/lib/product-like-state";
 
 const AuthContext = createContext(undefined);
@@ -37,7 +45,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const me = await FLOW.getProfile();
+        const me = await getProfile();
         setUser(normalizeAuthUser(me));
       } catch (err) {
         setUser(null);
@@ -50,7 +58,7 @@ export function AuthProvider({ children }) {
     if (token) {
       bootstrap();
     } else if (refreshToken) {
-      FLOW.refreshSession()
+      refreshSession()
         .then(() => bootstrap())
         .catch(() => setIsLoading(false));
     } else {
@@ -65,7 +73,7 @@ export function AuthProvider({ children }) {
 
     if (flow === "telegram") {
       const telegramPayload = formData.get ? JSON.parse(formData.get("telegramPayload") || "{}") : formData.telegramPayload;
-      const result = await FLOW.telegramLogin({ input: telegramPayload });
+      const result = await telegramLogin({ input: telegramPayload });
       setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
@@ -82,27 +90,27 @@ export function AuthProvider({ children }) {
     }
 
     if (flow === "signUp") {
-      await FLOW.signUp({ input: { email, password } });
+      await apiSignUp({ input: { email, password } });
       return { signingIn: false };
     }
     if (flow === "email-verification") {
-      const result = await FLOW.verifySignup({ input: { email, code: password } });
+      const result = await verifySignup({ input: { email, code: password } });
       setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
-    const result = await FLOW.signIn({ input: { email, password } });
+    const result = await apiSignIn({ input: { email, password } });
     if (result.user) {
       setUser(normalizeAuthUser(result.user));
       return { signingIn: true };
     }
 
-    const me = await FLOW.getProfile();
+    const me = await getProfile();
     setUser(normalizeAuthUser(me));
     return { signingIn: true };
   };
 
   const signOut = async () => {
-    await FLOW.signOut();
+    await apiSignOut();
     clearProductLikeStateCache();
     setUser(null);
   };

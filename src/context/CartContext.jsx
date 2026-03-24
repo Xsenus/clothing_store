@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useConvexAuth } from "@/context/AuthContext";
-import { FLOW } from "../lib/api-mapping";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
+import {
+  addToCart as apiAddToCart,
+  clearCart as apiClearCart,
+  getCart,
+  removeCartItem as apiRemoveCartItem,
+  updateCartQuantity as apiUpdateCartQuantity,
+} from "../lib/api-mapping";
 
 const CartContext = createContext(undefined);
 
@@ -11,19 +17,21 @@ export function CartProvider({ children }) {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
 
   const refreshCart = async () => {
-    if (typeof FLOW.getCart !== "function") {
+    if (typeof getCart !== "function") {
       console.warn("FLOW.getCart is not available; skipping cart refresh");
       return;
     }
 
     try {
-      const items = await FLOW.getCart({ input: {} });
+      const items = await getCart({ input: {} });
       if (Array.isArray(items)) {
-        setCartItems(items.map((item) => ({
-          ...item,
-          cartId: item.cartId || item.id,
-          product: item.product || null,
-        })));
+        setCartItems(
+          items.map((item) => ({
+            ...item,
+            cartId: item.cartId || item.id,
+            product: item.product || null,
+          })),
+        );
       }
     } catch (error) {
       console.error("Failed to fetch cart:", error);
@@ -38,21 +46,21 @@ export function CartProvider({ children }) {
 
   const addToCart = async (productId, size, quantity) => {
     setIsLoading(true);
-    if (typeof FLOW.addToCart !== "function") {
-      toast.error("Сервис корзины временно недоступен");
+    if (typeof apiAddToCart !== "function") {
+      notify.error("Сервис корзины временно недоступен");
       return false;
     }
 
     try {
-      await FLOW.addToCart({
+      await apiAddToCart({
         input: { productId, size, quantity },
       });
       await refreshCart();
-      toast.success("Товар добавлен в корзину");
+      notify.success("Товар добавлен в корзину");
       return true;
     } catch (error) {
       console.error("Failed to add to cart:", error);
-      toast.error(error?.message || "Не удалось добавить товар");
+      notify.error(error?.message || "Не удалось добавить товар");
       return false;
     } finally {
       setIsLoading(false);
@@ -60,63 +68,63 @@ export function CartProvider({ children }) {
   };
 
   const updateQuantity = async (cartItemId, quantity) => {
-    if (typeof FLOW.updateCartQuantity !== "function") {
-      toast.error("Сервис корзины временно недоступен");
+    if (typeof apiUpdateCartQuantity !== "function") {
+      notify.error("Сервис корзины временно недоступен");
       return;
     }
 
     try {
-      await FLOW.updateCartQuantity({
+      await apiUpdateCartQuantity({
         input: { cartItemId, quantity },
       });
       setCartItems((prev) =>
-        prev.map((item) => (item.cartId === cartItemId ? { ...item, quantity } : item))
+        prev.map((item) => (item.cartId === cartItemId ? { ...item, quantity } : item)),
       );
     } catch (error) {
       console.error("Failed to update quantity:", error);
-      toast.error(error?.message || "Не удалось обновить количество");
+      notify.error(error?.message || "Не удалось обновить количество");
       await refreshCart();
     }
   };
 
   const removeFromCart = async (cartId) => {
-    if (typeof FLOW.removeCartItem !== "function") {
-      toast.error("Сервис корзины временно недоступен");
+    if (typeof apiRemoveCartItem !== "function") {
+      notify.error("Сервис корзины временно недоступен");
       return;
     }
 
     try {
-      await FLOW.removeCartItem({
+      await apiRemoveCartItem({
         input: { cartItemId: cartId },
       });
       setCartItems((prev) => prev.filter((item) => item.cartId !== cartId));
-      toast.success("Товар удален из корзины");
+      notify.success("Товар удален из корзины");
     } catch (error) {
       console.error("Failed to remove item:", error);
-      toast.error("Не удалось удалить товар");
+      notify.error("Не удалось удалить товар");
       await refreshCart();
     }
   };
 
   const clearCart = async () => {
-    if (typeof FLOW.clearCart !== "function") {
-      toast.error("Сервис корзины временно недоступен");
+    if (typeof apiClearCart !== "function") {
+      notify.error("Сервис корзины временно недоступен");
       return;
     }
 
     try {
-      await FLOW.clearCart({ input: {} });
+      await apiClearCart({ input: {} });
       setCartItems([]);
-      toast.success("Корзина очищена");
+      notify.success("Корзина очищена");
     } catch (error) {
       console.error("Failed to clear cart:", error);
-      toast.error("Не удалось очистить корзину");
+      notify.error("Не удалось очистить корзину");
     }
   };
 
   const totalItems = useMemo(
     () => cartItems.reduce((acc, item) => acc + item.quantity, 0),
-    [cartItems]
+    [cartItems],
   );
 
   const value = useMemo(
@@ -130,7 +138,7 @@ export function CartProvider({ children }) {
       clearCart,
       totalItems,
     }),
-    [cartItems, isLoading, totalItems]
+    [cartItems, isLoading, totalItems],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

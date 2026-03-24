@@ -1,35 +1,24 @@
 import "./index.css";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
 import { BrowserRouter } from "react-router";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { CartProvider } from "@/context/CartContext";
-import { AuthProvider } from "@/context/AuthContext";
-import CookieBanner from "@/components/CookieBanner";
-import MetricsScripts from "@/components/MetricsScripts";
-import SiteBranding from "@/components/SiteBranding";
+import App from "./App";
+import DeferredAppDecorations from "@/components/DeferredAppDecorations";
 import { ConfirmDialogProvider } from "@/components/ConfirmDialogProvider";
+import { AuthProvider } from "@/context/AuthContext";
+import { CartProvider } from "@/context/CartContext";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <AuthProvider>
       <CartProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <ConfirmDialogProvider>
-            <BrowserRouter>
-              <App />
-              <CookieBanner />
-              <MetricsScripts />
-              <SiteBranding />
-            </BrowserRouter>
-          </ConfirmDialogProvider>
-        </TooltipProvider>
+        <ConfirmDialogProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+          <DeferredAppDecorations />
+        </ConfirmDialogProvider>
       </CartProvider>
     </AuthProvider>
-  </StrictMode>
+  </StrictMode>,
 );

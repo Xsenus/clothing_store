@@ -45,13 +45,20 @@ public class MediaController : ControllerBase
         {
             var diskPath = _galleryStorage.BuildAbsolutePath(image.DiskPath);
             if (System.IO.File.Exists(diskPath))
+            {
+                Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
                 return Results.File(diskPath, image.ContentType, image.FileName, enableRangeProcessing: true);
+            }
 
             await _galleryStorage.WriteImageToDiskAsync(image);
             if (System.IO.File.Exists(diskPath))
+            {
+                Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
                 return Results.File(diskPath, image.ContentType, image.FileName, enableRangeProcessing: true);
+            }
         }
 
+        Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
         return Results.File(image.BinaryData, image.ContentType, image.FileName);
     }
 }

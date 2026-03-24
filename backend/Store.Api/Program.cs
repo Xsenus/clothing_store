@@ -199,7 +199,11 @@ app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(storeRuntimePaths.UploadsDir),
     RequestPath = "/uploads",
-    ContentTypeProvider = uploadsContentTypeProvider
+    ContentTypeProvider = uploadsContentTypeProvider,
+    OnPrepareResponse = context =>
+    {
+        context.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+    }
 });
 app.MapControllers();
 
