@@ -713,6 +713,8 @@ export default function CheckoutPage() {
                       <Label htmlFor="name">Полное имя</Label>
                       <Input
                         id="name"
+                        name="name"
+                        autoComplete="name"
                         value={name}
                         onChange={(event) => setName(event.target.value)}
                         required
@@ -723,7 +725,9 @@ export default function CheckoutPage() {
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
+                        name="email"
                         type="email"
+                        autoComplete="email"
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
                         required
@@ -735,7 +739,9 @@ export default function CheckoutPage() {
                     <Label htmlFor="phone">Телефон</Label>
                     <Input
                       id="phone"
+                      name="tel"
                       type="tel"
+                      autoComplete="tel"
                       value={phone}
                       onChange={(event) => setPhone(event.target.value)}
                       required
@@ -747,7 +753,10 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   <h2 className="border-b pb-2 text-xl font-bold uppercase tracking-wider">АДРЕС ДЛЯ РАСЧЕТА ДОСТАВКИ</h2>
                   <div className="space-y-2">
+                    <Label htmlFor="checkout-address">Адрес доставки</Label>
                     <AddressAutocompleteInput
+                      id="checkout-address"
+                      name="street-address"
                       value={address}
                       onValueChange={(nextValue) => setAddress(nextValue)}
                       inputClassName="rounded-none border-black focus-visible:ring-black"

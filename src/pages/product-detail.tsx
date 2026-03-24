@@ -838,7 +838,7 @@ export default function ProductDetailPage() {
             <div className="border-t border-b border-gray-100 py-6">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
                 <div className="min-w-0 flex-1">
-                  <label className="mb-3 block text-sm font-bold uppercase tracking-widest">ВЫБЕРИТЕ РАЗМЕР</label>
+                  <p className="mb-3 block text-sm font-bold uppercase tracking-widest">ВЫБЕРИТЕ РАЗМЕР</p>
                   <SizeSelector 
                     sizes={product.sizes || []} 
                     selectedSize={selectedSize} 
@@ -849,7 +849,7 @@ export default function ProductDetailPage() {
                 </div>
 
                 <div className="lg:min-w-[220px] lg:pt-0.5 lg:text-right">
-                  <label className="mb-3 block text-sm font-bold uppercase tracking-widest">КОЛИЧЕСТВО</label>
+                  <p className="mb-3 block text-sm font-bold uppercase tracking-widest">КОЛИЧЕСТВО</p>
                   <div className="flex lg:justify-end">
                     <QuantitySelector 
                       quantity={displayedQuantity}
@@ -1088,7 +1088,12 @@ export default function ProductDetailPage() {
                 </DialogHeader>
 
                 <div className="space-y-4">
+                  <Label htmlFor="product-review-text" className="sr-only">
+                    Текст отзыва
+                  </Label>
                   <Textarea
+                    id="product-review-text"
+                    name="review_text"
                     value={reviewText}
                     onChange={(event) => setReviewText(event.target.value)}
                     placeholder="Поделитесь впечатлением о товаре"
@@ -1099,6 +1104,9 @@ export default function ProductDetailPage() {
                     <label className="inline-flex cursor-pointer items-center justify-center border border-black px-4 py-2 font-bold uppercase tracking-widest">
                       Фото/Видео
                       <input
+                        id="product-review-media-upload"
+                        name="review_media"
+                        aria-label="Загрузка фото и видео для отзыва"
                         type="file"
                         accept="image/*,.avif,.jfif,video/*"
                         multiple

@@ -466,7 +466,9 @@ export default function AuthPage() {
                     <Label htmlFor="reset-email">Email</Label>
                     <Input
                       id="reset-email"
+                      name="email"
                       type="email"
+                      autoComplete="email"
                       value={resetEmail}
                       onChange={(e) => setResetEmail(e.target.value)}
                       required
@@ -483,6 +485,8 @@ export default function AuthPage() {
                     <Label htmlFor="reset-code">Код из письма</Label>
                     <Input
                       id="reset-code"
+                      name="reset_code"
+                      autoComplete="one-time-code"
                       value={resetCode}
                       onChange={(e) => setResetCode(e.target.value)}
                       required
@@ -493,7 +497,9 @@ export default function AuthPage() {
                     <Label htmlFor="reset-password">Новый пароль</Label>
                     <Input
                       id="reset-password"
+                      name="new_password"
                       type="password"
+                      autoComplete="new-password"
                       value={resetNewPassword}
                       onChange={(e) => setResetNewPassword(e.target.value)}
                       required
@@ -561,13 +567,15 @@ export default function AuthPage() {
             {pendingEmail ? (
               <form onSubmit={handleVerify} className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input value={pendingEmail} disabled className="h-9" />
+                  <Label htmlFor="pending-email">Email</Label>
+                  <Input id="pending-email" name="email" type="email" autoComplete="email" value={pendingEmail} disabled className="h-9" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="otp">Код подтверждения</Label>
                   <Input
                     id="otp"
+                    name="otp"
+                    autoComplete="one-time-code"
                     value={otp}
                     onChange={(e) => setOtp(e.target.value)}
                     placeholder="123456"
@@ -662,7 +670,9 @@ export default function AuthPage() {
                       <Label htmlFor="signin-email">Email</Label>
                       <Input
                         id="signin-email"
+                        name="email"
                         type="email"
+                        autoComplete="email"
                         placeholder="example@mail.com"
                         value={signInEmail}
                         onChange={(e) => setSignInEmail(e.target.value)}
@@ -684,7 +694,9 @@ export default function AuthPage() {
                       </div>
                       <Input
                         id="signin-password"
+                        name="password"
                         type="password"
+                        autoComplete="current-password"
                         value={signInPassword}
                         onChange={(e) => setSignInPassword(e.target.value)}
                         required
@@ -716,7 +728,9 @@ export default function AuthPage() {
                       <Label htmlFor="signup-email">Email</Label>
                       <Input
                         id="signup-email"
+                        name="email"
                         type="email"
+                        autoComplete="email"
                         placeholder="example@mail.com"
                         value={signUpEmail}
                         onChange={(e) => setSignUpEmail(e.target.value)}
@@ -728,7 +742,9 @@ export default function AuthPage() {
                       <Label htmlFor="signup-password">Пароль</Label>
                       <Input
                         id="signup-password"
+                        name="password"
                         type="password"
+                        autoComplete="new-password"
                         placeholder="Введите пароль"
                         value={signUpPassword}
                         onChange={(e) => setSignUpPassword(e.target.value)}

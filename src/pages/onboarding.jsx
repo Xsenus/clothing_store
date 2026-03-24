@@ -79,6 +79,8 @@ export default function OnboardingPage() {
                   <Label htmlFor="name">Полное имя</Label>
                   <Input
                     id="name"
+                    name="name"
+                    autoComplete="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
@@ -90,7 +92,9 @@ export default function OnboardingPage() {
                   <Label htmlFor="phone">Телефон (необязательно)</Label>
                   <Input
                     id="phone"
+                    name="tel"
                     type="tel"
+                    autoComplete="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="rounded-none border-black focus-visible:ring-black"
@@ -101,6 +105,7 @@ export default function OnboardingPage() {
                   <Label htmlFor="address">Адрес доставки (необязательно)</Label>
                   <AddressAutocompleteInput
                     id="address"
+                    name="street-address"
                     value={shippingAddress}
                     onValueChange={(nextValue) => setShippingAddress(nextValue)}
                     placeholder="Улица, Дом, Квартира, Город"

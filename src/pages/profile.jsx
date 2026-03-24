@@ -1178,12 +1178,12 @@ export default function ProfilePage() {
                       <div className="profile-settings-main-panel space-y-6">
                         <div className="space-y-2">
                           <Label htmlFor="profile-name">Полное имя</Label>
-                          <Input id="profile-name" value={profile?.name || ""} onChange={(e) => setProfile({ ...profile, name: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
+                          <Input id="profile-name" name="name" autoComplete="name" value={profile?.name || ""} onChange={(e) => setProfile({ ...profile, name: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
                         </div>
 
                         <div className="space-y-2">
                           <Label htmlFor="profile-nickname">Ник</Label>
-                          <Input id="profile-nickname" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
+                          <Input id="profile-nickname" name="nickname" autoComplete="nickname" value={profile?.nickname || ""} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} className="rounded-none border-black focus-visible:ring-black" />
                         </div>
 
                         <div className="space-y-2">
@@ -1193,14 +1193,15 @@ export default function ProfilePage() {
                               <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartEmailVerification} disabled={actionLoading}>Подтвердить email</Button>
                             )}
                           </div>
-                          <Input id="profile-email" value={emailDraft} onChange={(e) => {
+                          <Input id="profile-email" name="email" type="email" autoComplete="email" value={emailDraft} onChange={(e) => {
                             setEmailDraft(e.target.value);
                             setProfile((prev) => ({ ...(prev || {}), emailVerified: false }));
                           }} className="rounded-none border-black focus-visible:ring-black" placeholder="example@mail.com" />
                           {profile?.emailVerified && !emailChanged && <p className="text-xs text-emerald-600">Email подтвержден</p>}
                           {emailCodeRequested && (
                             <div className="flex gap-2">
-                              <Input value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="Код из письма" className="rounded-none border-black" />
+                              <Label htmlFor="profile-email-code" className="sr-only">Код подтверждения email</Label>
+                              <Input id="profile-email-code" name="email_verification_code" autoComplete="one-time-code" value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="Код из письма" className="rounded-none border-black" />
                               <Button type="button" className="h-10 rounded-none" onClick={handleConfirmEmailVerification} disabled={actionLoading}>Подтвердить</Button>
                             </div>
                           )}
@@ -1213,7 +1214,7 @@ export default function ProfilePage() {
                               <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerifyState}>Подтвердить в Telegram</Button>
                             )}
                           </div>
-                          <Input id="profile-phone" value={phoneDraft} onChange={(e) => {
+                          <Input id="profile-phone" name="tel" type="tel" autoComplete="tel" value={phoneDraft} onChange={(e) => {
                             setPhoneDraft(e.target.value);
                             setProfile((prev) => ({ ...(prev || {}), phoneVerified: false }));
                           }} className="rounded-none border-black focus-visible:ring-black" />
@@ -1302,7 +1303,7 @@ export default function ProfilePage() {
                     <div className="profile-settings-addresses space-y-3">
                       <div className="profile-settings-addresses-panel space-y-4">
                         <div className="flex items-center justify-between gap-3">
-                          <Label className="text-base">Адреса доставки</Label>
+                          <div className="text-base font-medium leading-none">Адреса доставки</div>
                           <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleAddShippingAddress}>
                             Добавить адрес
                           </Button>
@@ -1346,7 +1347,12 @@ export default function ProfilePage() {
                                   </div>
                                 </div>
 
+                                <Label htmlFor={`profile-shipping-address-${address.id}`} className="sr-only">
+                                  Адрес доставки {index + 1}
+                                </Label>
                                 <AddressAutocompleteInput
+                                  id={`profile-shipping-address-${address.id}`}
+                                  name={`shipping-address-${index + 1}`}
                                   value={address.value}
                                   onValueChange={(nextValue) => handleShippingAddressChange(address.id, nextValue)}
                                   inputClassName="rounded-none border-black focus-visible:ring-black"

@@ -306,6 +306,8 @@ function FilterContent({
         <h3 className="text-lg font-bold mb-4 uppercase">ЦЕНА</h3>
         <div className="flex gap-4 items-center">
           <Input
+            name="catalog_price_min"
+            aria-label="Минимальная цена"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
@@ -322,6 +324,8 @@ function FilterContent({
             className="w-28 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <Input
+            name="catalog_price_max"
+            aria-label="Максимальная цена"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"

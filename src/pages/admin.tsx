@@ -5878,6 +5878,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   onDrop={handleGalleryDrop}
                 >
                   <input
+                    id="gallery-file-upload"
+                    name="gallery_files"
+                    aria-label="Загрузка изображений в галерею"
                     ref={galleryFileInputRef}
                     type="file"
                     accept="image/*,.avif,.jfif"
@@ -6099,6 +6102,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
+                    name="users_search"
+                    aria-label="Поиск пользователей"
                     value={usersSearch}
                     onChange={(e) => setUsersSearch(e.target.value)}
                     placeholder="Поиск: email, имя, ник, телефон, ID"
@@ -6107,6 +6112,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <select
+                  id="users-role-filter"
+                  name="users_role_filter"
+                  aria-label="Фильтр пользователей по роли"
                   value={usersRoleFilter}
                   onChange={(e) => setUsersRoleFilter(e.target.value as typeof usersRoleFilter)}
                   className="h-10 border border-input bg-background px-3 text-sm rounded-none"
@@ -6117,6 +6125,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </select>
 
                 <select
+                  id="users-status-filter"
+                  name="users_status_filter"
+                  aria-label="Фильтр пользователей по статусу"
                   value={usersStatusFilter}
                   onChange={(e) => setUsersStatusFilter(e.target.value as typeof usersStatusFilter)}
                   className="h-10 border border-input bg-background px-3 text-sm rounded-none"
@@ -6310,6 +6321,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1">
                           <Label>Email</Label>
                           <Input
+                            id="user-edit-email"
+                            name="email"
+                            aria-label="Email пользователя"
                             value={userEditForm.email}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, email: e.target.value }))}
                             className="rounded-none"
@@ -6318,11 +6332,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </div>
                         <div className="space-y-1">
                           <Label>ID</Label>
-                          <Input value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
+                          <Input id="user-edit-id" name="user_id" aria-label="ID пользователя" value={selectedUser.id} disabled className="rounded-none font-mono text-xs" />
                         </div>
                         <div className="space-y-1">
                           <Label>Имя</Label>
                           <Input
+                            id="user-edit-name"
+                            name="name"
+                            aria-label="Имя пользователя"
                             value={userEditForm.name}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, name: e.target.value }))}
                             className="rounded-none"
@@ -6331,6 +6348,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1">
                           <Label>Telegram / Ник</Label>
                           <Input
+                            id="user-edit-nickname"
+                            name="nickname"
+                            aria-label="Telegram или ник пользователя"
                             value={userEditForm.nickname}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, nickname: e.target.value }))}
                             className="rounded-none"
@@ -6339,6 +6359,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1">
                           <Label>Телефон</Label>
                           <Input
+                            id="user-edit-phone"
+                            name="tel"
+                            type="tel"
+                            autoComplete="tel"
+                            aria-label="Телефон пользователя"
                             value={userEditForm.phone}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, phone: e.target.value }))}
                             className="rounded-none"
@@ -6347,6 +6372,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1">
                           <Label>Новый пароль</Label>
                           <Input
+                            id="user-edit-password"
+                            name="new_password"
+                            autoComplete="new-password"
+                            aria-label="Новый пароль пользователя"
                             value={userEditForm.password}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, password: e.target.value }))}
                             className="rounded-none"
@@ -6357,6 +6386,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1 md:col-span-2">
                           <Label>Адрес доставки</Label>
                           <Textarea
+                            id="user-edit-shipping-address"
+                            name="shipping_address"
+                            autoComplete="street-address"
+                            aria-label="Адрес доставки пользователя"
                             value={userEditForm.shippingAddress}
                             onChange={(e) => setUserEditForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
                             className="rounded-none min-h-20"
@@ -6469,6 +6502,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                      name="orders_search"
+                      aria-label="Поиск заказов"
                       value={orderSearch}
                       onChange={(e) => setOrderSearch(e.target.value)}
                       placeholder="Поиск: ID, клиент, телефон, email, товар"
@@ -6477,6 +6512,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   </div>
 
                   <select
+                    id="orders-status-filter"
+                    name="orders_status_filter"
+                    aria-label="Фильтр заказов по статусу"
                     value={ordersStatusFilter}
                     onChange={(e) => setOrdersStatusFilter(e.target.value)}
                     className="h-11 border border-input bg-background px-3 text-sm rounded-none"
@@ -6491,6 +6529,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                   <div className="relative">
                     <Input
+                      name="orders_date_from_display"
+                      aria-label="Дата начала фильтра заказов"
                       type="text"
                       inputMode="numeric"
                       placeholder="дд.мм.гггг"
@@ -6506,6 +6546,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       }
                     />
                     <input
+                      id="orders-date-from-picker"
+                      name="orders_date_from"
                       type="date"
                       value={ordersDateFrom}
                       onChange={(event) =>
@@ -6524,6 +6566,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                   <div className="relative">
                     <Input
+                      name="orders_date_to_display"
+                      aria-label="Дата окончания фильтра заказов"
                       type="text"
                       inputMode="numeric"
                       placeholder="дд.мм.гггг"
@@ -6539,6 +6583,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       }
                     />
                     <input
+                      id="orders-date-to-picker"
+                      name="orders_date_to"
                       type="date"
                       value={ordersDateTo}
                       onChange={(event) =>
@@ -6955,6 +7001,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     <div className="flex items-center gap-2">
                       <Label className="text-xs uppercase tracking-wide text-muted-foreground">Строк на странице</Label>
                       <select
+                        id="orders-page-size"
+                        name="orders_page_size"
+                        aria-label="Строк на странице"
                         value={ordersPageSize}
                         onChange={(e) => void changeOrdersPageSize(Number(e.target.value) as (typeof ORDER_PAGE_SIZE_OPTIONS)[number])}
                         className="h-9 rounded-none border border-input bg-background px-3 text-sm text-foreground"
@@ -7256,6 +7305,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2">
                                 <Label>Статус заказа</Label>
                                 <select
+                                  id="order-status"
+                                  name="order_status"
+                                  aria-label="Статус заказа"
                                   className="h-10 w-full border border-black bg-white px-3 rounded-none"
                                   value={orderForm.status}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, status: e.target.value }))}
@@ -7272,6 +7324,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2">
                                 <Label>Способ оплаты</Label>
                                 <select
+                                  id="order-payment-method"
+                                  name="order_payment_method"
+                                  aria-label="Способ оплаты"
                                   className="h-10 w-full border border-black bg-white px-3 rounded-none"
                                   value={orderForm.paymentMethod}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, paymentMethod: e.target.value }))}
@@ -7288,6 +7343,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2">
                                 <Label>Получатель</Label>
                                 <Input
+                                  id="order-customer-name"
+                                  name="customer_name"
+                                  autoComplete="name"
+                                  aria-label="Получатель заказа"
                                   value={orderForm.customerName}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, customerName: e.target.value }))}
                                   className="rounded-none border-black"
@@ -7297,6 +7356,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2">
                                 <Label>Email</Label>
                                 <Input
+                                  id="order-customer-email"
+                                  name="customer_email"
+                                  type="email"
+                                  autoComplete="email"
+                                  aria-label="Email получателя"
                                   value={orderForm.customerEmail}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, customerEmail: e.target.value }))}
                                   className="rounded-none border-black"
@@ -7306,6 +7370,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2">
                                 <Label>Телефон</Label>
                                 <Input
+                                  id="order-customer-phone"
+                                  name="customer_phone"
+                                  type="tel"
+                                  autoComplete="tel"
+                                  aria-label="Телефон получателя"
                                   value={orderForm.customerPhone}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, customerPhone: e.target.value }))}
                                   className="rounded-none border-black"
@@ -7315,6 +7384,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2 md:col-span-2">
                                 <Label>Адрес доставки</Label>
                                 <Textarea
+                                  id="order-shipping-address"
+                                  name="shipping_address"
+                                  autoComplete="street-address"
+                                  aria-label="Адрес доставки заказа"
                                   value={orderForm.shippingAddress}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
                                   className="rounded-none border-black min-h-[110px]"
@@ -7324,6 +7397,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2 md:col-span-2">
                                 <Label>Yandex request ID</Label>
                                 <Input
+                                  id="order-yandex-request-id"
+                                  name="yandex_request_id"
+                                  aria-label="Yandex request ID"
                                   value={orderForm.yandexRequestId}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, yandexRequestId: e.target.value }))}
                                   className="rounded-none border-black"
@@ -7337,6 +7413,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-2 md:col-span-2">
                                 <Label>Комментарий к изменению</Label>
                                 <Textarea
+                                  id="order-manager-comment"
+                                  name="manager_comment"
+                                  aria-label="Комментарий к изменению заказа"
                                   value={orderForm.managerComment}
                                   onChange={(e) => setOrderForm((prev) => ({ ...prev, managerComment: e.target.value }))}
                                   placeholder="Например: Клиент попросил изменить адрес или заказ передан в доставку"
@@ -7704,6 +7783,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="flex h-full flex-col gap-1">
                                   <Label className="block text-xs">Название *</Label>
                                   <Input
+                                    id={`dict-name-${item.id}`}
+                                    name={`dict_name_${item.id}`}
+                                    aria-label={`Название словарного элемента ${item.name || item.id}`}
                                     value={draft.name}
                                     onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, name: e.target.value } }))}
                                     className="h-11 rounded-none border-slate-300"
@@ -7712,6 +7794,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="flex h-full flex-col gap-1">
                                   <Label className="block text-xs">Slug *</Label>
                                   <Input
+                                    id={`dict-slug-${item.id}`}
+                                    name={`dict_slug_${item.id}`}
+                                    aria-label={`Slug словарного элемента ${item.name || item.id}`}
                                     value={draft.slug}
                                     onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, slug: e.target.value.toLowerCase() } }))}
                                     className="h-11 rounded-none border-slate-300"
@@ -7721,6 +7806,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="flex h-full flex-col gap-1">
                                   <Label className="block text-xs">Порядок</Label>
                                   <Input
+                                    id={`dict-sort-order-${item.id}`}
+                                    name={`dict_sort_order_${item.id}`}
+                                    aria-label={`Порядок словарного элемента ${item.name || item.id}`}
                                     type="number"
                                     min="0"
                                     step="1"
@@ -7734,12 +7822,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <Label className="block text-xs">Цвет</Label>
                                   <div className="grid items-stretch grid-cols-[minmax(0,1fr)_48px] gap-2">
                                     <Input
+                                      id={`dict-color-${item.id}`}
+                                      name={`dict_color_${item.id}`}
+                                      aria-label={`HEX-цвет словарного элемента ${item.name || item.id}`}
                                       value={draft.color}
                                       onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
                                       className="h-11 rounded-none border-slate-300"
                                       placeholder="#3b82f6"
                                     />
                                     <input
+                                      id={`dict-color-picker-${item.id}`}
+                                      name={`dict_color_picker_${item.id}`}
+                                      aria-label={`Цвет словарного элемента ${draft.name || item.name || item.id}`}
                                       type="color"
                                       value={draft.color || "#3b82f6"}
                                       onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, color: e.target.value } }))}
@@ -7762,6 +7856,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <div className="space-y-1">
                                 <Label className="mb-1 block text-xs">Описание</Label>
                                 <Textarea
+                                  id={`dict-description-${item.id}`}
+                                  name={`dict_description_${item.id}`}
+                                  aria-label={`Описание словарного элемента ${item.name || item.id}`}
                                   value={draft.description}
                                   onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, description: e.target.value } }))}
                                   className="min-h-[76px] rounded-md border-slate-300"
@@ -9507,6 +9604,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div key={key} className="space-y-2 rounded-none border border-gray-200 p-3">
                           <Label className="block leading-snug">{label}</Label>
                           <Textarea
+                            id={`legal-setting-${key}`}
+                            name={String(key)}
+                            aria-label={String(label)}
                             value={settings[key] || ""}
                             onChange={(e) => updateSetting(key, e.target.value)}
                             rows={10}
@@ -9568,6 +9668,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 </p>
                               </div>
                               <Checkbox
+                                id="database-backup-enabled"
+                                aria-label="Включить автобэкапы базы данных"
                                 checked={isSettingEnabled("database_backup_enabled", true)}
                                 onCheckedChange={(checked) => updateSetting("database_backup_enabled", checked ? "true" : "false")}
                               />
@@ -9746,6 +9848,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         )}
                         <div className="flex flex-wrap items-center gap-2">
                           <input
+                            id="site-favicon-upload"
+                            name="site_favicon_upload"
+                            aria-label="Загрузка favicon"
                             ref={faviconUploadInputRef}
                             type="file"
                             accept=".ico,image/x-icon"
@@ -9792,6 +9897,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </p>
                           </div>
                           <Checkbox
+                            id="site-loading-animation-enabled"
+                            aria-label="Включить анимацию загрузки сайта"
                             checked={(settings.site_loading_animation_enabled || DEFAULT_APP_SETTINGS.site_loading_animation_enabled) !== "false"}
                             onCheckedChange={(checked) => updateSetting("site_loading_animation_enabled", checked ? "true" : "false")}
                           />
@@ -10182,6 +10289,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </span>
                     </div>
                     <Input
+                      id="telegram-bot-name"
+                      name="telegram_bot_name"
+                      aria-label="Название Telegram-бота"
                       value={telegramBotForm.name}
                       onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, name: e.target.value }))}
                       placeholder="Например: Fashion Demon Bot"
@@ -10196,6 +10306,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </span>
                     </div>
                     <Input
+                      id="telegram-bot-username-field"
+                      name="telegram_bot_username"
+                      aria-label="Username Telegram-бота"
                       value={telegramBotForm.username}
                       placeholder="@my_bot"
                       readOnly
@@ -10207,6 +10320,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>URL картинки</Label>
                   <Input
+                    id="telegram-bot-image-url"
+                    name="telegram_bot_image_url"
+                    aria-label="URL изображения Telegram-бота"
                     type="url"
                     value={telegramBotForm.imageUrl}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, imageUrl: e.target.value }))}
@@ -10222,6 +10338,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       Загрузить на сайт
                     </Button>
                     <input
+                      id="telegram-bot-image-upload"
+                      name="telegram_bot_image"
+                      aria-label="Загрузка изображения Telegram-бота"
                       ref={telegramBotImageInputRef}
                       type="file"
                       accept="image/*,.avif,.jfif"
@@ -10234,6 +10353,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-2">
                   <Label>Токен бота *</Label>
                   <Input
+                    id="telegram-bot-token-field"
+                    name="telegram_bot_token"
+                    aria-label="Токен Telegram-бота"
                     type="text"
                     value={getMaskedTokenInputValue()}
                     onChange={(e) => {
@@ -10295,6 +10417,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </span>
                   </div>
                   <Textarea
+                    id="telegram-bot-description"
+                    name="telegram_bot_description"
+                    aria-label="Описание Telegram-бота"
                     value={telegramBotForm.description}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, description: e.target.value }))}
                     placeholder="Описание бота (setMyDescription)"
@@ -10310,6 +10435,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </span>
                   </div>
                   <Input
+                    id="telegram-bot-short-description"
+                    name="telegram_bot_short_description"
+                    aria-label="Краткое описание Telegram-бота"
                     value={telegramBotForm.shortDescription}
                     onChange={(e) => setTelegramBotForm((prev) => ({ ...prev, shortDescription: e.target.value }))}
                     placeholder="Краткое описание (setMyShortDescription)"
@@ -10340,6 +10468,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </span>
                           </div>
                           <Input
+                            id={`telegram-bot-command-${index}`}
+                            name={`telegram_bot_command_${index + 1}`}
+                            aria-label={`Команда Telegram-бота ${index + 1}`}
                             value={command.command}
                             onChange={(e) => updateTelegramBotCommand(index, "command", e.target.value.toLowerCase())}
                             placeholder="/start"
@@ -10355,6 +10486,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </span>
                           </div>
                           <Input
+                            id={`telegram-bot-command-description-${index}`}
+                            name={`telegram_bot_command_description_${index + 1}`}
+                            aria-label={`Описание команды Telegram-бота ${index + 1}`}
                             value={command.description}
                             onChange={(e) => updateTelegramBotCommand(index, "description", e.target.value)}
                             placeholder="Например: Начать работу"
@@ -10792,6 +10926,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       <ImagePlus className="mr-2 h-4 w-4" />
                                       Загрузить в галерею
                                       <input
+                                        id={`media-gallery-upload-${slot}`}
+                                        name={`media_gallery_upload_${slot}`}
+                                        aria-label={`Загрузка изображения для слота ${slot + 1}`}
                                         type="file"
                                         accept="image/*,.avif,.jfif"
                                         className="hidden"
@@ -11577,6 +11714,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     className="rounded-none"
                   />
                   <input
+                    id="media-gallery-picker-upload"
+                    name="media_gallery_picker_upload"
+                    aria-label="Загрузка изображения из медиагалереи"
                     ref={mediaGalleryUploadInputRef}
                     type="file"
                     accept="image/*,.avif,.jfif"

@@ -51,7 +51,9 @@ export default function AdminLoginPage() {
                 <Label htmlFor="admin-email">Email</Label>
                 <Input
                   id="admin-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -61,7 +63,9 @@ export default function AdminLoginPage() {
                 <Label htmlFor="admin-password">Пароль</Label>
                 <Input
                   id="admin-password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required

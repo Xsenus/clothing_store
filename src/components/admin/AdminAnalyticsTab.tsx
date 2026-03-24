@@ -609,11 +609,11 @@ export default function AdminAnalyticsTab({
 
           <div className="grid gap-3 md:grid-cols-[170px_170px_auto]">
             <div className="relative">
-              <Input type="date" value={dateFrom} onChange={(event) => onDateFromChange(event.target.value)} className="h-11 rounded-none pr-11" />
+              <Input id="analytics-date-from" name="analytics_date_from" type="date" aria-label="Дата начала периода аналитики" value={dateFrom} onChange={(event) => onDateFromChange(event.target.value)} className="h-11 rounded-none pr-11" />
               <CalendarRange className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
             <div className="relative">
-              <Input type="date" value={dateTo} onChange={(event) => onDateToChange(event.target.value)} className="h-11 rounded-none pr-11" />
+              <Input id="analytics-date-to" name="analytics_date_to" type="date" aria-label="Дата конца периода аналитики" value={dateTo} onChange={(event) => onDateToChange(event.target.value)} className="h-11 rounded-none pr-11" />
               <CalendarRange className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
             <Button type="button" variant="outline" className="h-11 rounded-none" onClick={onRefresh} disabled={loading}>
