@@ -1,15 +1,20 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useConvexAuth } from "@/context/AuthContext";
 import { notify } from "@/lib/notify";
-import {
-  addToCart as apiAddToCart,
-  clearCart as apiClearCart,
-  getCart,
-  removeCartItem as apiRemoveCartItem,
-  updateCartQuantity as apiUpdateCartQuantity,
-} from "../lib/api-mapping";
 
 const CartContext = createContext(undefined);
+let cartApiPromise = null;
+
+const loadCartApi = async () => {
+  cartApiPromise ??= import("@/lib/api-mapping").then((module) => ({
+    addToCart: module.addToCart,
+    clearCart: module.clearCart,
+    getCart: module.getCart,
+    removeCartItem: module.removeCartItem,
+    updateCartQuantity: module.updateCartQuantity,
+  }));
+  return cartApiPromise;
+};
 
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
@@ -17,12 +22,8 @@ export function CartProvider({ children }) {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
 
   const refreshCart = async () => {
-    if (typeof getCart !== "function") {
-      console.warn("FLOW.getCart is not available; skipping cart refresh");
-      return;
-    }
-
     try {
+      const { getCart } = await loadCartApi();
       const items = await getCart({ input: {} });
       if (Array.isArray(items)) {
         setCartItems(
@@ -46,12 +47,9 @@ export function CartProvider({ children }) {
 
   const addToCart = async (productId, size, quantity) => {
     setIsLoading(true);
-    if (typeof apiAddToCart !== "function") {
-      notify.error("Сервис корзины временно недоступен");
-      return false;
-    }
 
     try {
+      const { addToCart: apiAddToCart } = await loadCartApi();
       await apiAddToCart({
         input: { productId, size, quantity },
       });
@@ -68,12 +66,8 @@ export function CartProvider({ children }) {
   };
 
   const updateQuantity = async (cartItemId, quantity) => {
-    if (typeof apiUpdateCartQuantity !== "function") {
-      notify.error("Сервис корзины временно недоступен");
-      return;
-    }
-
     try {
+      const { updateCartQuantity: apiUpdateCartQuantity } = await loadCartApi();
       await apiUpdateCartQuantity({
         input: { cartItemId, quantity },
       });
@@ -88,12 +82,8 @@ export function CartProvider({ children }) {
   };
 
   const removeFromCart = async (cartId) => {
-    if (typeof apiRemoveCartItem !== "function") {
-      notify.error("Сервис корзины временно недоступен");
-      return;
-    }
-
     try {
+      const { removeCartItem: apiRemoveCartItem } = await loadCartApi();
       await apiRemoveCartItem({
         input: { cartItemId: cartId },
       });
@@ -107,12 +97,8 @@ export function CartProvider({ children }) {
   };
 
   const clearCart = async () => {
-    if (typeof apiClearCart !== "function") {
-      notify.error("Сервис корзины временно недоступен");
-      return;
-    }
-
     try {
+      const { clearCart: apiClearCart } = await loadCartApi();
       await apiClearCart({ input: {} });
       setCartItems([]);
       notify.success("Корзина очищена");

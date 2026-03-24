@@ -1,11 +1,17 @@
-import { getPublicSettings } from "@/lib/api-mapping";
-
 export const PUBLIC_SETTINGS_CACHE_KEY = "sitePublicSettings";
 export const SITE_BRANDING_UPDATED_EVENT = "site-branding-updated";
 
 let memorySettings = null;
 let publicSettingsPromise = null;
+let getPublicSettingsPromise = null;
 let hasLoadedPublicSettings = false;
+
+const loadGetPublicSettings = async () => {
+  getPublicSettingsPromise ??= import("@/lib/api-mapping").then(
+    (module) => module.getPublicSettings,
+  );
+  return getPublicSettingsPromise;
+};
 
 export const getCachedPublicSettings = () => {
   if (memorySettings) {
@@ -41,6 +47,7 @@ export const fetchPublicSettings = async ({ force = false } = {}) => {
 
   publicSettingsPromise = (async () => {
     try {
+      const getPublicSettings = await loadGetPublicSettings();
       const settings = await getPublicSettings();
       const normalized = settings && typeof settings === "object" ? settings : {};
       hasLoadedPublicSettings = true;

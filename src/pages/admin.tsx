@@ -5934,7 +5934,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
                     type="button"
                     variant={galleryViewMode === "grid" ? "default" : "outline"}
@@ -6067,7 +6067,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
               <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm text-muted-foreground">Всего изображений: {galleryTotalItems}</div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
                     type="button"
                     variant="outline"
@@ -6272,11 +6272,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </Table>
               </div>
 
-              <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
                   Страница {usersPage} из {totalUserPages}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
                     variant="outline"
                     size="sm"
@@ -6600,8 +6600,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       return (
                         <div key={order.id} className="border border-gray-200 bg-white p-4 shadow-sm" style={getOrderRowStyle(order.status)}>
                           <div className="flex flex-col gap-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
                                 <div className="font-mono text-base font-bold">{formatAdminOrderNumber(order)}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">{formatOrderDateTime(order.createdAt)}</div>
                               </div>
@@ -7498,8 +7498,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
           <TabsContent value="dictionaries" className="mt-0">
             <div className="space-y-4">
-              <h2 className="text-5xl font-black tracking-tight">Справочники</h2>
-              <p className="text-lg text-muted-foreground">Управляйте справочниками системы</p>
+              <h2 className="text-3xl font-black tracking-tight sm:text-4xl xl:text-5xl">Справочники</h2>
+              <p className="text-base text-muted-foreground sm:text-lg">Управляйте справочниками системы</p>
 
               <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
                 <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-3">
@@ -7528,19 +7528,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <div className="rounded-xl border border-gray-200 bg-[#f8fafc] p-4">
-                  <div className="mb-4 flex items-center justify-between">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h3 className="text-3xl font-black tracking-tight">{activeDictionaryGroup.label}</h3>
                       <p className="text-sm text-muted-foreground">Всего: {(dictionaries[selectedDictionaryGroup] || []).length}</p>
                     </div>
-                    <Button type="button" className="rounded-none bg-slate-900 text-white hover:bg-slate-800" onClick={() => createDictionaryItem(selectedDictionaryGroup)}>
+                    <Button type="button" className="w-full rounded-none bg-slate-900 text-white hover:bg-slate-800 sm:w-auto" onClick={() => createDictionaryItem(selectedDictionaryGroup)}>
                       <Plus className="mr-2 h-4 w-4" /> Добавить
                     </Button>
                   </div>
 
                   {DICTIONARY_FILTER_SETTING_KEYS[selectedDictionaryGroup] && (
                     <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(620px,auto)] lg:items-end">
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] lg:items-end xl:grid-cols-[minmax(0,1fr)_minmax(620px,auto)]">
                         <div>
                           <p className="text-sm font-semibold">Фильтр каталога</p>
                           <p className="text-xs text-muted-foreground">Управляет отображением блока «{activeDictionaryGroup.label}» на странице каталога и его местом в списке фильтров.</p>
@@ -7860,8 +7860,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
                             </div>
                           ) : (
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
                                 <div className="flex items-center gap-2 font-semibold">
                                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                                   {item.name}
@@ -7882,7 +7882,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <div className="mt-1 text-xs text-muted-foreground">Цвет в каталоге: {item.showColorInCatalog === false ? "скрыт" : "показан"}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">Создано: {item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "—"}</div>
                               </div>
-                              <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                              <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto xl:justify-end">
                                 <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-none" onClick={() => startEditDictionaryItem(item)}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
@@ -8521,7 +8521,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <p className="text-sm text-muted-foreground">Интеграции разнесены по вкладкам, чтобы каждый сервис было удобно настраивать отдельно.</p>
 
                       <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="w-full">
-                        <TabsList className="w-full justify-start gap-2 rounded-none border-b bg-transparent p-0">
+                        <TabsList className="w-full justify-start gap-2 overflow-x-auto rounded-none border-b bg-transparent p-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
                           <TabsTrigger value="telegram" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Telegram</TabsTrigger>
                           <TabsTrigger value="yoomoney" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooMoney</TabsTrigger>
                           <TabsTrigger value="yookassa" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooKassa</TabsTrigger>
@@ -10504,17 +10504,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           </Dialog>
 
           {isOpen && selectedAdminTab === "products" && (
-          <section className="mt-8 border border-black p-6">
-            <div className="mb-6 flex items-center justify-between gap-3">
-              <h2 className="text-2xl font-black uppercase tracking-tighter">
+          <section className="mt-8 border border-black p-4 sm:p-6">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-xl font-black uppercase tracking-tighter sm:text-2xl">
                 {editingId ? 'Редактировать товар' : 'Добавить новый товар'}
               </h2>
-              <Button type="button" variant="outline" onClick={closeProductForm} className="rounded-none">
+              <Button type="button" variant="outline" onClick={closeProductForm} className="w-full rounded-none sm:w-auto">
                 НАЗАД К СПИСКУ
               </Button>
             </div>
               <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="prod-name">Название</Label>
                     <Input 
@@ -11482,8 +11482,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 {getSortedDictionaryItems(productDictionarySelector.kind).map((item) => {
                   const selected = getProductDictionarySelected(productDictionarySelector.kind, item.name);
                   return (
-                    <div key={`${productDictionarySelector.kind}-${item.id}`} className="flex items-center justify-between border border-gray-200 px-4 py-3">
-                      <div>
+                    <div key={`${productDictionarySelector.kind}-${item.id}`} className="flex flex-col gap-3 border border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2 font-semibold">
                           <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color || getDictionaryDotColor(item.name) }} />
                           <span>{item.name}</span>
@@ -11494,7 +11494,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <Button
                         type="button"
                         variant={selected ? "secondary" : "outline"}
-                        className="rounded-none"
+                        className="w-full rounded-none sm:w-auto"
                         onClick={() => addDictionaryValueToProduct(productDictionarySelector.kind, item.name)}
                         disabled={selected}
                       >

@@ -1,16 +1,21 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import {
-  getProfile,
-  refreshSession,
-  signIn as apiSignIn,
-  signOut as apiSignOut,
-  signUp as apiSignUp,
-  telegramLogin,
-  verifySignup,
-} from "@/lib/api-mapping";
 import { clearProductLikeStateCache } from "@/lib/product-like-state";
 
 const AuthContext = createContext(undefined);
+let authApiPromise = null;
+
+const loadAuthApi = async () => {
+  authApiPromise ??= import("@/lib/api-mapping").then((module) => ({
+    getProfile: module.getProfile,
+    refreshSession: module.refreshSession,
+    signIn: module.signIn,
+    signOut: module.signOut,
+    signUp: module.signUp,
+    telegramLogin: module.telegramLogin,
+    verifySignup: module.verifySignup,
+  }));
+  return authApiPromise;
+};
 
 const normalizeAuthUser = (rawUser) => {
   if (!rawUser || typeof rawUser !== "object") {
@@ -45,6 +50,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const bootstrap = async () => {
       try {
+        const { getProfile } = await loadAuthApi();
         const me = await getProfile();
         setUser(normalizeAuthUser(me));
       } catch (err) {
@@ -58,7 +64,8 @@ export function AuthProvider({ children }) {
     if (token) {
       bootstrap();
     } else if (refreshToken) {
-      refreshSession()
+      loadAuthApi()
+        .then(({ refreshSession }) => refreshSession())
         .then(() => bootstrap())
         .catch(() => setIsLoading(false));
     } else {
@@ -67,6 +74,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signIn = async (_provider, formData) => {
+    const {
+      getProfile,
+      signIn: apiSignIn,
+      signUp: apiSignUp,
+      telegramLogin,
+      verifySignup,
+    } = await loadAuthApi();
     const email = formData.get ? formData.get("email") : formData.email;
     const password = formData.get ? formData.get("password") : formData.password;
     const flow = formData.get ? formData.get("flow") : formData.flow;
@@ -110,6 +124,7 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
+    const { signOut: apiSignOut } = await loadAuthApi();
     await apiSignOut();
     clearProductLikeStateCache();
     setUser(null);

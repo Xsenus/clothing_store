@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BarChart3, CalendarRange, CreditCard, Heart, MousePointerClick, Package, RefreshCcw, ShoppingCart, Truck, Users, Wallet } from "lucide-react";
 
 import LoadingSpinner from "@/components/LoadingSpinner";
@@ -418,11 +418,40 @@ const TrendChartCard = ({
   const maxValue = values.reduce((max, value) => Math.max(max, value), 0);
   const peakIndex = values.findIndex((value) => value === maxValue);
   const peakItem = peakIndex >= 0 ? normalizedItems[peakIndex] : null;
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chartWidth, setChartWidth] = useState(0);
 
-  const width = 720;
-  const height = 210;
-  const paddingX = 16;
-  const paddingY = 18;
+  useEffect(() => {
+    const node = chartContainerRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    const updateChartWidth = () => {
+      const nextWidth = Math.round(node.getBoundingClientRect().width);
+      setChartWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
+    };
+
+    updateChartWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateChartWidth);
+      return () => window.removeEventListener("resize", updateChartWidth);
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateChartWidth();
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const compact = chartWidth > 0 && chartWidth < 420;
+  const width = Math.max(chartWidth || 0, 260);
+  const height = compact ? 184 : chartWidth > 0 && chartWidth < 640 ? 200 : 220;
+  const paddingX = compact ? 12 : 16;
+  const paddingY = compact ? 14 : 18;
   const baseline = height - paddingY;
   const chartHeight = height - paddingY * 2;
   const safeCount = Math.max(normalizedItems.length, 1);
@@ -453,15 +482,16 @@ const TrendChartCard = ({
   const firstLabel = normalizedItems[0]?.label || "";
   const middleLabel = normalizedItems[Math.floor((normalizedItems.length - 1) / 2)]?.label || "";
   const lastLabel = normalizedItems[normalizedItems.length - 1]?.label || "";
+  const footerLabels = compact ? [firstLabel, lastLabel] : [firstLabel, middleLabel, lastLabel];
 
   return (
-    <div className="border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-black uppercase">{title}</h3>
+    <div className="border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-base font-black uppercase sm:text-lg">{title}</h3>
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
-        <div className="text-right">
+        <div className="space-y-1 sm:max-w-[220px] sm:text-right">
           <div className="text-2xl font-black">{formatValue(total)}</div>
           <div className="text-xs text-muted-foreground">
             Пик: {peakItem ? `${peakItem.label} · ${formatValue(maxValue)}` : "—"}
@@ -475,8 +505,8 @@ const TrendChartCard = ({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="overflow-x-auto">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-56 min-w-[640px] w-full">
+          <div ref={chartContainerRef} className="w-full overflow-hidden">
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full">
               {[0, 1, 2, 3].map((index) => {
                 const y = paddingY + (chartHeight / 3) * index;
                 return (
@@ -494,11 +524,21 @@ const TrendChartCard = ({
               })}
 
               {areaPath ? <path d={areaPath} className={accentClassName} fill="currentColor" style={{ opacity: 0.15 }} /> : null}
-              {linePath ? <path d={linePath} fill="none" className={accentClassName} stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
+              {linePath ? (
+                <path
+                  d={linePath}
+                  fill="none"
+                  className={accentClassName}
+                  stroke="currentColor"
+                  strokeWidth={compact ? "2.5" : "3"}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : null}
 
               {points.map((point) => (
                 <g key={`${title}-${point.date}`}>
-                  <circle cx={point.x} cy={point.y} r="4.5" className={accentClassName} fill="currentColor">
+                  <circle cx={point.x} cy={point.y} r={compact ? "3.5" : "4.5"} className={accentClassName} fill="currentColor">
                     <title>{`${point.date}: ${formatValue(point.value)}`}</title>
                   </circle>
                 </g>
@@ -506,10 +546,15 @@ const TrendChartCard = ({
             </svg>
           </div>
 
-          <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
-            <span>{firstLabel}</span>
-            <span>{middleLabel}</span>
-            <span>{lastLabel}</span>
+          <div className={`grid gap-3 text-[11px] text-muted-foreground ${compact ? "grid-cols-2" : "grid-cols-3"}`}>
+            {footerLabels.map((label, index) => (
+              <span
+                key={`${title}-footer-label-${index}`}
+                className={index === 0 ? "text-left" : index === footerLabels.length - 1 ? "text-right" : "text-center"}
+              >
+                {label}
+              </span>
+            ))}
           </div>
         </div>
       )}
