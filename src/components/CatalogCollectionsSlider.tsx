@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { type CarouselApi, Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import {
+  type CarouselApi,
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 import { cn } from "@/lib/utils";
 
 export interface CatalogCollectionSliderItem {
@@ -40,7 +47,10 @@ const getPreviewPool = (item: CatalogCollectionSliderItem) => {
   return tiles.slice(0, COLLECTION_PREVIEW_POOL_LIMIT);
 };
 
-const getPreviewTiles = (item: CatalogCollectionSliderItem, rotationTick: number) => {
+const getPreviewTiles = (
+  item: CatalogCollectionSliderItem,
+  rotationTick: number,
+) => {
   const previewPool = getPreviewPool(item);
 
   if (previewPool.length === 0) return [];
@@ -53,10 +63,16 @@ const getPreviewTiles = (item: CatalogCollectionSliderItem, rotationTick: number
     return normalizedTiles.slice(0, COLLECTION_VISIBLE_TILE_COUNT);
   }
 
-  const startIndex = (hashCollectionValue(item.value) + rotationTick) % previewPool.length;
+  const startIndex =
+    (hashCollectionValue(item.value) + rotationTick) % previewPool.length;
   const selectedTiles: string[] = [];
 
-  for (let offset = 0; selectedTiles.length < COLLECTION_VISIBLE_TILE_COUNT && offset < previewPool.length; offset += 1) {
+  for (
+    let offset = 0;
+    selectedTiles.length < COLLECTION_VISIBLE_TILE_COUNT &&
+    offset < previewPool.length;
+    offset += 1
+  ) {
     selectedTiles.push(previewPool[(startIndex + offset) % previewPool.length]);
   }
 
@@ -67,19 +83,29 @@ const getPreviewTiles = (item: CatalogCollectionSliderItem, rotationTick: number
   return selectedTiles;
 };
 
-const renderCollectionVisual = (item: CatalogCollectionSliderItem, rotationTick: number) => {
+const renderCollectionVisual = (
+  item: CatalogCollectionSliderItem,
+  rotationTick: number,
+) => {
   const previewTiles = getPreviewTiles(item, rotationTick);
-  const shouldUseProductCollage = item.previewMode === "products" && previewTiles.length > 0;
+  const shouldUseProductCollage =
+    item.previewMode === "products" && previewTiles.length > 0;
   const imageUrl = item.imageUrl?.trim();
 
   if (shouldUseProductCollage) {
     return (
       <div className="absolute inset-0 grid grid-cols-3">
         {previewTiles.map((tile, index) => (
-          <div key={`${item.value}-tile-${index}`} className="relative overflow-hidden border-r border-white/10 last:border-r-0">
+          <div
+            key={`${item.value}-tile-${index}`}
+            className="relative overflow-hidden border-r border-white/10 last:border-r-0"
+          >
             <img
               src={tile}
               alt=""
+              loading="lazy"
+              decoding="async"
+              fetchPriority="low"
               className="h-full w-full object-cover transition duration-700 group-hover/slide:scale-105"
             />
           </div>
@@ -94,6 +120,9 @@ const renderCollectionVisual = (item: CatalogCollectionSliderItem, rotationTick:
         <img
           src={imageUrl}
           alt={item.label}
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
           className="h-full w-full object-cover transition duration-700 group-hover/slide:scale-[1.03]"
         />
       </div>
@@ -151,7 +180,8 @@ export default function CatalogCollectionsSlider({
       if (items.length > 1) {
         const snapCount = carouselApi?.scrollSnapList().length ?? 0;
         if (snapCount > 1) {
-          const nextIndex = ((carouselApi?.selectedScrollSnap() ?? 0) + 1) % snapCount;
+          const nextIndex =
+            ((carouselApi?.selectedScrollSnap() ?? 0) + 1) % snapCount;
           carouselApi?.scrollTo(nextIndex);
         }
         return;
@@ -169,7 +199,8 @@ export default function CatalogCollectionsSlider({
 
   const normalizedEyebrow = eyebrow?.trim().toLowerCase();
   const normalizedTitle = title?.trim().toLowerCase();
-  const shouldShowEyebrow = Boolean(eyebrow) && normalizedEyebrow !== normalizedTitle;
+  const shouldShowEyebrow =
+    Boolean(eyebrow) && normalizedEyebrow !== normalizedTitle;
 
   return (
     <section
@@ -209,7 +240,10 @@ export default function CatalogCollectionsSlider({
           {items.map((item) => {
             const isActive = activeValue === item.value;
             return (
-              <CarouselItem key={item.slug || item.value} className="basis-full pl-0">
+              <CarouselItem
+                key={item.slug || item.value}
+                className="basis-full pl-0"
+              >
                 <button
                   type="button"
                   onClick={() => onSelect(item)}
@@ -218,7 +252,9 @@ export default function CatalogCollectionsSlider({
                   className={cn(
                     "group/slide relative block w-full overflow-hidden border text-left text-white",
                     "h-[260px] sm:h-[340px] lg:h-[520px]",
-                    isActive ? "border-black shadow-[0_0_0_2px_rgba(0,0,0,1)]" : "border-black/12"
+                    isActive
+                      ? "border-black shadow-[0_0_0_2px_rgba(0,0,0,1)]"
+                      : "border-black/12",
                   )}
                 >
                   {renderCollectionVisual(item, rotationTick)}
@@ -230,7 +266,10 @@ export default function CatalogCollectionsSlider({
                     <div className="overflow-hidden">
                       <div
                         className="max-w-[70%] translate-y-0 opacity-100 text-2xl font-black uppercase tracking-tight transition duration-500 ease-out sm:text-4xl lg:text-6xl md:translate-y-full md:opacity-0 md:group-hover/slide:translate-y-0 md:group-hover/slide:opacity-100 md:group-focus-visible/slide:translate-y-0 md:group-focus-visible/slide:opacity-100"
-                        style={{ transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)" }}
+                        style={{
+                          transitionTimingFunction:
+                            "cubic-bezier(0.16, 1, 0.3, 1)",
+                        }}
                       >
                         {item.label}
                       </div>

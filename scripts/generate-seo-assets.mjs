@@ -7,7 +7,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const mode = process.argv[2] || process.env.NODE_ENV || "production";
 const outDirFlagIndex = process.argv.indexOf("--out-dir");
-const outDir = outDirFlagIndex >= 0 ? process.argv[outDirFlagIndex + 1] : "dist";
+const outDir =
+  outDirFlagIndex >= 0 ? process.argv[outDirFlagIndex + 1] : "dist";
 const outputDir = path.resolve(projectRoot, outDir);
 const env = loadEnv(mode, projectRoot, "");
 
@@ -19,12 +20,20 @@ const staticRoutes = [
   { path: "/offer", changefreq: "yearly", priority: "0.2" },
 ];
 
-const siteUrl = normalizeSiteUrl(env.VITE_SITE_URL || process.env.VITE_SITE_URL || "http://localhost:5173");
+const defaultSiteUrl = "https://fashiondemon.shop";
+const siteUrl = normalizeSiteUrl(
+  env.VITE_SITE_URL ||
+    process.env.VITE_SITE_URL ||
+    process.env.SITE_URL ||
+    defaultSiteUrl,
+);
 const buildTimestamp = new Date().toISOString();
 
 await fs.mkdir(outputDir, { recursive: true });
 
-const productEntries = await readProductEntries(path.resolve(projectRoot, "seed", "products.jsonl"));
+const productEntries = await readProductEntries(
+  path.resolve(projectRoot, "seed", "products.jsonl"),
+);
 const urls = dedupeRoutes([
   ...staticRoutes.map((route) => ({
     ...route,
@@ -40,16 +49,24 @@ const urls = dedupeRoutes([
   })),
 ]);
 
-await fs.writeFile(path.join(outputDir, "sitemap.xml"), renderSitemap(urls), "utf8");
-await fs.writeFile(path.join(outputDir, "robots.txt"), renderRobots(siteUrl), "utf8");
+await fs.writeFile(
+  path.join(outputDir, "sitemap.xml"),
+  renderSitemap(urls),
+  "utf8",
+);
+await fs.writeFile(
+  path.join(outputDir, "robots.txt"),
+  renderRobots(siteUrl),
+  "utf8",
+);
 
 console.log(
-  `Generated SEO assets in ${path.relative(projectRoot, outputDir)} for ${siteUrl} (${urls.length} URLs).`
+  `Generated SEO assets in ${path.relative(projectRoot, outputDir)} for ${siteUrl} (${urls.length} URLs).`,
 );
 
 function normalizeSiteUrl(value) {
   const normalized = String(value || "").trim();
-  const url = new URL(normalized || "http://localhost:5173");
+  const url = new URL(normalized || defaultSiteUrl);
   return url.toString().replace(/\/$/, "");
 }
 
@@ -71,7 +88,9 @@ async function readProductEntries(filePath) {
           return null;
         }
       })
-      .filter((item) => item && typeof item.slug === "string" && item.slug.trim())
+      .filter(
+        (item) => item && typeof item.slug === "string" && item.slug.trim(),
+      )
       .map((item) => ({ slug: item.slug.trim() }));
   } catch {
     return [];
@@ -98,7 +117,7 @@ function renderSitemap(entries) {
     <lastmod>${escapeXml(entry.lastmod)}</lastmod>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
-  </url>`
+  </url>`,
     )
     .join("\n");
 

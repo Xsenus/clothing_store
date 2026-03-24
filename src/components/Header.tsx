@@ -1,8 +1,15 @@
-import { Link, useLocation, useNavigate } from 'react-router';
-import { ShoppingBag, User, Menu, LogOut, Package, Settings2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Link, useLocation, useNavigate } from "react-router";
+import {
+  ShoppingBag,
+  User,
+  Menu,
+  LogOut,
+  Package,
+  Settings2,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,45 +17,48 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useCart } from '@/context/CartContext';
-import { useAuth, useAuthActions } from '@/context/AuthContext';
-import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
-import { motion, AnimatePresence } from 'framer-motion';
+} from "@/components/ui/dropdown-menu";
+import { useCart } from "@/context/CartContext";
+import { useAuth, useAuthActions } from "@/context/AuthContext";
+import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
 
-const getUserPrimaryLabel = (user: { nickname?: string; name?: string; email?: string } | null) => {
-  const nickname = String(user?.nickname || '').trim();
+const getUserPrimaryLabel = (
+  user: { nickname?: string; name?: string; email?: string } | null,
+) => {
+  const nickname = String(user?.nickname || "").trim();
   if (nickname) {
-    return nickname.startsWith('@') ? nickname : `@${nickname}`;
+    return nickname.startsWith("@") ? nickname : `@${nickname}`;
   }
 
-  const name = String(user?.name || '').trim();
+  const name = String(user?.name || "").trim();
   if (name) {
     return name;
   }
 
-  const email = String(user?.email || '').trim();
+  const email = String(user?.email || "").trim();
   if (email) {
     return email;
   }
 
-  return 'МОЙ АККАУНТ';
+  return "МОЙ АККАУНТ";
 };
 
-const getUserCompactLabel = (user: { nickname?: string; name?: string; email?: string } | null) => {
-  const nickname = String(user?.nickname || '').trim();
+const getUserCompactLabel = (
+  user: { nickname?: string; name?: string; email?: string } | null,
+) => {
+  const nickname = String(user?.nickname || "").trim();
   if (nickname) {
-    return nickname.startsWith('@') ? nickname : `@${nickname}`;
+    return nickname.startsWith("@") ? nickname : `@${nickname}`;
   }
 
-  const name = String(user?.name || '').trim();
+  const name = String(user?.name || "").trim();
   if (name) {
     return name;
   }
 
-  const email = String(user?.email || '').trim();
-  if (email.includes('@')) {
-    const localPart = email.split('@')[0]?.trim();
+  const email = String(user?.email || "").trim();
+  if (email.includes("@")) {
+    const localPart = email.split("@")[0]?.trim();
     if (localPart) {
       return localPart;
     }
@@ -58,16 +68,19 @@ const getUserCompactLabel = (user: { nickname?: string; name?: string; email?: s
     return email;
   }
 
-  return 'Аккаунт';
+  return "Аккаунт";
 };
 
-const getUserSecondaryLabel = (user: { email?: string } | null, primaryLabel: string) => {
-  const email = String(user?.email || '').trim();
+const getUserSecondaryLabel = (
+  user: { email?: string } | null,
+  primaryLabel: string,
+) => {
+  const email = String(user?.email || "").trim();
   if (email && email !== primaryLabel) {
     return email;
   }
 
-  return 'Личный кабинет';
+  return "Личный кабинет";
 };
 
 export default function Header() {
@@ -83,38 +96,43 @@ export default function Header() {
   const userPrimaryLabel = getUserPrimaryLabel(user);
   const userCompactLabel = getUserCompactLabel(user);
   const userSecondaryLabel = getUserSecondaryLabel(user, userPrimaryLabel);
-  const shouldHideDesktopAccountTrigger = location.pathname === '/' && !isScrolled;
+  const shouldHideDesktopAccountTrigger =
+    location.pathname === "/" && !isScrolled;
+  const cartLabel =
+    totalItems > 0 ? `Корзина, товаров: ${totalItems}` : "Корзина";
 
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 0);
     };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   const navLinks = [
-    { name: 'ГЛАВНАЯ', path: '/' },
-    { name: 'КАТАЛОГ', path: '/catalog' },
+    { name: "ГЛАВНАЯ", path: "/" },
+    { name: "КАТАЛОГ", path: "/catalog" },
   ];
 
   const handleSignOut = async () => {
     const confirmed = await confirmAction({
-      title: 'Выйти из аккаунта?',
-      description: 'Текущая сессия будет завершена на этом устройстве.',
-      confirmText: 'Выйти',
+      title: "Выйти из аккаунта?",
+      description: "Текущая сессия будет завершена на этом устройстве.",
+      confirmText: "Выйти",
     });
     if (!confirmed) return false;
 
     await signOut();
-    navigate('/', { replace: true });
+    navigate("/", { replace: true });
     return true;
   };
 
   return (
-    <header 
+    <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled ? 'bg-background/80 backdrop-blur-md border-b' : 'bg-transparent'
+        isScrolled
+          ? "bg-background/80 backdrop-blur-md border-b"
+          : "bg-transparent"
       }`}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:h-20">
@@ -122,18 +140,25 @@ export default function Header() {
         <div className="md:hidden">
           <Sheet open={isOpen} onOpenChange={setIsOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Открыть меню"
+                title="Открыть меню"
+              >
                 <Menu className="h-6 w-6" />
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="bg-background border-r-border">
               <nav className="flex flex-col gap-6 mt-10">
                 {navLinks.map((link) => (
-                  <Link 
-                    key={link.path} 
+                  <Link
+                    key={link.path}
                     to={link.path}
                     className={`text-2xl font-bold hover:text-muted-foreground transition-colors ${
-                      location.pathname === link.path ? 'underline decoration-2 underline-offset-4' : ''
+                      location.pathname === link.path
+                        ? "underline decoration-2 underline-offset-4"
+                        : ""
                     }`}
                     onClick={() => setIsOpen(false)}
                   >
@@ -143,11 +168,17 @@ export default function Header() {
                 {isAuthenticated ? (
                   <>
                     <div className="border-t border-border pt-6">
-                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Аккаунт</p>
-                      <p className="mt-2 text-lg font-bold">{userPrimaryLabel}</p>
-                      <p className="text-sm text-muted-foreground">{userSecondaryLabel}</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">
+                        Аккаунт
+                      </p>
+                      <p className="mt-2 text-lg font-bold">
+                        {userPrimaryLabel}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {userSecondaryLabel}
+                      </p>
                     </div>
-                    <Link 
+                    <Link
                       to="/profile?tab=settings"
                       className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
                       onClick={() => setIsOpen(false)}
@@ -155,7 +186,7 @@ export default function Header() {
                       <Settings2 className="h-6 w-6" />
                       ПРОФИЛЬ
                     </Link>
-                    <Link 
+                    <Link
                       to="/profile"
                       className="text-2xl font-bold hover:text-muted-foreground transition-colors flex items-center gap-2"
                       onClick={() => setIsOpen(false)}
@@ -163,21 +194,21 @@ export default function Header() {
                       <Package className="h-6 w-6" />
                       ЗАКАЗЫ
                     </Link>
-                  <button 
-                    onClick={async () => {
-                      const signedOut = await handleSignOut();
-                      if (signedOut) {
-                        setIsOpen(false);
-                      }
-                    }}
-                    className="text-2xl font-bold text-left hover:text-muted-foreground transition-colors flex items-center gap-2"
-                  >
-                    <LogOut className="h-6 w-6" />
-                    ВЫЙТИ
-                  </button>
+                    <button
+                      onClick={async () => {
+                        const signedOut = await handleSignOut();
+                        if (signedOut) {
+                          setIsOpen(false);
+                        }
+                      }}
+                      className="text-2xl font-bold text-left hover:text-muted-foreground transition-colors flex items-center gap-2"
+                    >
+                      <LogOut className="h-6 w-6" />
+                      ВЫЙТИ
+                    </button>
                   </>
                 ) : (
-                  <Link 
+                  <Link
                     to="/auth"
                     className="text-2xl font-bold hover:text-muted-foreground transition-colors"
                     onClick={() => setIsOpen(false)}
@@ -201,11 +232,13 @@ export default function Header() {
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-8">
           {navLinks.map((link) => (
-            <Link 
-              key={link.path} 
+            <Link
+              key={link.path}
               to={link.path}
               className={`text-sm font-bold tracking-widest hover:text-muted-foreground transition-colors ${
-                location.pathname === link.path ? 'underline decoration-2 underline-offset-4' : ''
+                location.pathname === link.path
+                  ? "underline decoration-2 underline-offset-4"
+                  : ""
               }`}
             >
               {link.name}
@@ -261,14 +294,14 @@ export default function Header() {
                   <DropdownMenuSeparator className="mx-2 my-2 bg-black/8" />
                   <DropdownMenuItem
                     className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
-                    onSelect={() => navigate('/profile?tab=settings')}
+                    onSelect={() => navigate("/profile?tab=settings")}
                   >
                     <Settings2 className="mr-3 h-4 w-4" />
                     Профиль
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="rounded-[16px] px-3 py-3 text-[15px] font-medium"
-                    onSelect={() => navigate('/profile')}
+                    onSelect={() => navigate("/profile")}
                   >
                     <Package className="mr-3 h-4 w-4" />
                     Заказы
@@ -287,33 +320,33 @@ export default function Header() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : !isAuthenticated ? (
-              <Link to="/auth">
-                <Button variant="ghost" size="sm" className="font-bold">
+              <Button asChild variant="ghost" size="sm" className="font-bold">
+                <Link to="/auth" aria-label="Войти в аккаунт">
                   ВОЙТИ
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             ) : null}
           </div>
-          
-          <Link to="/cart" className="relative" id="cart-icon-target">
-            <Button variant="ghost" size="icon">
+
+          <Button asChild variant="ghost" size="icon" className="relative">
+            <Link
+              to="/cart"
+              id="cart-icon-target"
+              aria-label={cartLabel}
+              title={cartLabel}
+            >
               <ShoppingBag className="h-5 w-5" />
-              <AnimatePresence>
-                {totalItems > 0 && (
-                  <motion.span 
-                    key={totalItems}
-                    initial={{ scale: 0 }}
-                    animate={{ scale: [1, 1.3, 1] }}
-                    exit={{ scale: 0 }}
-                    transition={{ duration: 0.4 }}
-                    className="absolute top-0 right-0 h-4 w-4 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center"
-                  >
-                    {totalItems}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </Button>
-          </Link>
+              {totalItems > 0 && (
+                <span
+                  key={totalItems}
+                  className="site-cart-badge-pop absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
+                  aria-hidden="true"
+                >
+                  {totalItems}
+                </span>
+              )}
+            </Link>
+          </Button>
         </div>
       </div>
     </header>

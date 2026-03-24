@@ -1,23 +1,28 @@
-import { Link, useNavigate } from 'react-router';
-import { Heart, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { FLOW } from '@/lib/api-mapping';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { toast } from 'sonner';
-import { useCart } from '@/context/CartContext';
-import { motion } from 'framer-motion';
-import { useAuth } from '@/context/AuthContext';
-import { useProductMediaBackground } from '@/hooks/useProductMediaBackground';
-import { getProductCardImageDisplayClasses } from '@/lib/product-card-background';
-import { formatProductPrice } from '@/lib/price-format';
+import { Link, useNavigate } from "react-router";
+import { Heart, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { FLOW } from "@/lib/api-mapping";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { useProductMediaBackground } from "@/hooks/useProductMediaBackground";
+import { getProductCardImageDisplayClasses } from "@/lib/product-card-background";
+import { formatProductPrice } from "@/lib/price-format";
 import {
   getCachedProductLikeState,
   setCachedProductLikeState,
   subscribeProductLikeState,
-} from '@/lib/product-like-state';
+} from "@/lib/product-like-state";
 
 interface Product {
   _id: string;
@@ -43,45 +48,45 @@ interface ProductCardProps {
   onLikeChange?: (liked: boolean, product: Product) => void;
 }
 
-const FlyingImage = ({ src, startRect, onComplete }: { src: string; startRect: DOMRect; onComplete: () => void }) => {
-  const target = document.getElementById('cart-icon-target');
+interface FlyingImageState {
+  src: string;
+  rect: DOMRect;
+}
+
+const FlyingImage = ({
+  src,
+  startRect,
+  onComplete,
+}: {
+  src: string;
+  startRect: DOMRect;
+  onComplete: () => void;
+}) => {
+  const target = document.getElementById("cart-icon-target");
 
   if (!target) return null;
   const targetRect = target.getBoundingClientRect();
+  const style = {
+    "--site-fly-start-top": `${startRect.top}px`,
+    "--site-fly-start-left": `${startRect.left}px`,
+    "--site-fly-start-width": `${startRect.width}px`,
+    "--site-fly-start-height": `${startRect.height}px`,
+    "--site-fly-end-top": `${targetRect.top + 10}px`,
+    "--site-fly-end-left": `${targetRect.left + 10}px`,
+    "--site-fly-end-width": "30px",
+    "--site-fly-end-height": "30px",
+  } as React.CSSProperties;
 
   return createPortal(
-    <motion.img
+    <img
       src={src}
-      initial={{
-        position: 'fixed',
-        top: startRect.top,
-        left: startRect.left,
-        width: startRect.width,
-        height: startRect.height,
-        opacity: 1,
-        zIndex: 9999,
-        borderRadius: '0px',
-      }}
-      animate={{
-        top: targetRect.top + 10,
-        left: targetRect.left + 10,
-        width: 30,
-        height: 30,
-        opacity: [1, 1, 0],
-        borderRadius: '50%',
-      }}
-      transition={{
-        duration: 0.8,
-        ease: [0.4, 0.0, 0.2, 1],
-        opacity: {
-          times: [0, 0.75, 1],
-          duration: 0.8,
-        },
-      }}
-      onAnimationComplete={onComplete}
-      className="object-cover pointer-events-none shadow-xl"
+      alt=""
+      aria-hidden="true"
+      onAnimationEnd={onComplete}
+      style={style}
+      className="site-flying-image pointer-events-none object-cover shadow-xl"
     />,
-    document.body
+    document.body,
   );
 };
 
@@ -96,7 +101,7 @@ export default function ProductCard({
   const [isAdding, setIsAdding] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [flyingImage, setFlyingImage] = useState<{ src: string; rect: DOMRect } | null>(null);
+  const [flyingImage, setFlyingImage] = useState<FlyingImageState | null>(null);
   const [imageError, setImageError] = useState(false);
 
   const imageRef = useRef<HTMLImageElement>(null);
@@ -104,37 +109,48 @@ export default function ProductCard({
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  const hasStockInfo = Boolean(product.sizeStock && Object.keys(product.sizeStock).length > 0);
-  const hasAvailableStock = !hasStockInfo || Object.values(product.sizeStock || {}).some((value) => Number(value) > 0);
+  const hasStockInfo = Boolean(
+    product.sizeStock && Object.keys(product.sizeStock).length > 0,
+  );
+  const hasAvailableStock =
+    !hasStockInfo ||
+    Object.values(product.sizeStock || {}).some((value) => Number(value) > 0);
   const isHiddenProduct = product.isHidden === true;
   const isUnavailable = isHiddenProduct || !hasAvailableStock;
   const canOpenProduct = !isHiddenProduct && Boolean(product.slug);
   const productHref = canOpenProduct ? `/product/${product.slug}` : null;
   const productCardImage = product.catalogImageUrl || product.images[0] || "";
-  const { backgroundStyle: productCardBackgroundStyle, imageFitMode } = useProductMediaBackground(productCardImage);
-  const cardImageDisplay = getProductCardImageDisplayClasses(imageFitMode, 'card');
-  const compactImageDisplay = getProductCardImageDisplayClasses(imageFitMode, 'compact');
+  const { backgroundStyle: productCardBackgroundStyle, imageFitMode } =
+    useProductMediaBackground(productCardImage);
+  const cardImageDisplay = getProductCardImageDisplayClasses(
+    imageFitMode,
+    "card",
+  );
+  const compactImageDisplay = getProductCardImageDisplayClasses(
+    imageFitMode,
+    "compact",
+  );
   const cardHoverScaleClassName =
-    imageFitMode === 'contain-zoom'
-      ? 'group-hover:scale-[1.12]'
-      : imageFitMode === 'fill'
-        ? ''
-        : 'group-hover:scale-105';
+    imageFitMode === "contain-zoom"
+      ? "group-hover:scale-[1.12]"
+      : imageFitMode === "fill"
+        ? ""
+        : "group-hover:scale-105";
 
   useEffect(() => {
     const cachedLikeState = getCachedProductLikeState(product._id);
-    if (typeof cachedLikeState?.liked === 'boolean') {
+    if (typeof cachedLikeState?.liked === "boolean") {
       setIsLiked(cachedLikeState.liked);
     }
-    if (typeof cachedLikeState?.likesCount === 'number') {
+    if (typeof cachedLikeState?.likesCount === "number") {
       setLikesCount(cachedLikeState.likesCount);
     }
 
     return subscribeProductLikeState(product._id, (nextSnapshot) => {
-      if (typeof nextSnapshot.liked === 'boolean') {
+      if (typeof nextSnapshot.liked === "boolean") {
         setIsLiked(nextSnapshot.liked);
       }
-      if (typeof nextSnapshot.likesCount === 'number') {
+      if (typeof nextSnapshot.likesCount === "number") {
         setLikesCount(nextSnapshot.likesCount);
       }
     });
@@ -142,7 +158,7 @@ export default function ProductCard({
 
   useEffect(() => {
     const cachedLikeState = getCachedProductLikeState(product._id);
-    if (typeof cachedLikeState?.likesCount === 'number') {
+    if (typeof cachedLikeState?.likesCount === "number") {
       setLikesCount(cachedLikeState.likesCount);
       return;
     }
@@ -159,11 +175,11 @@ export default function ProductCard({
     }
 
     const cachedLikeState = getCachedProductLikeState(product._id);
-    if (typeof cachedLikeState?.liked === 'boolean') {
+    if (typeof cachedLikeState?.liked === "boolean") {
       setIsLiked(cachedLikeState.liked);
     }
 
-    if (typeof initialLiked === 'boolean') {
+    if (typeof initialLiked === "boolean") {
       setIsLiked(initialLiked);
       setCachedProductLikeState(product._id, { liked: initialLiked });
       return;
@@ -171,7 +187,9 @@ export default function ProductCard({
 
     const checkUserLike = async () => {
       try {
-        const result = await FLOW.checkLike({ input: { productId: product._id } });
+        const result = await FLOW.checkLike({
+          input: { productId: product._id },
+        });
         setCachedProductLikeState(product._id, { liked: !!result?.liked });
       } catch {
         setCachedProductLikeState(product._id, { liked: false });
@@ -186,22 +204,26 @@ export default function ProductCard({
     event.stopPropagation();
 
     if (!isAuthenticated) {
-      navigate('/auth');
+      navigate("/auth");
       return;
     }
 
     try {
-      const result = await FLOW.toggleLike({ input: { productId: product._id } });
+      const result = await FLOW.toggleLike({
+        input: { productId: product._id },
+      });
       const nextLiked = !!result?.liked;
       const cachedLikeState = getCachedProductLikeState(product._id);
-      const baseLikesCount = typeof result?.likesCount === 'number'
-        ? result.likesCount
-        : typeof cachedLikeState?.likesCount === 'number'
-          ? cachedLikeState.likesCount
-          : likesCount;
-      const nextLikesCount = typeof result?.likesCount === 'number'
-        ? Math.max(0, Number(result.likesCount))
-        : Math.max(0, baseLikesCount + (nextLiked ? 1 : -1));
+      const baseLikesCount =
+        typeof result?.likesCount === "number"
+          ? result.likesCount
+          : typeof cachedLikeState?.likesCount === "number"
+            ? cachedLikeState.likesCount
+            : likesCount;
+      const nextLikesCount =
+        typeof result?.likesCount === "number"
+          ? Math.max(0, Number(result.likesCount))
+          : Math.max(0, baseLikesCount + (nextLiked ? 1 : -1));
 
       setCachedProductLikeState(product._id, {
         liked: nextLiked,
@@ -209,26 +231,27 @@ export default function ProductCard({
       });
       onLikeChange?.(nextLiked, product);
     } catch (error) {
-      const message = error instanceof Error && error.message
-        ? error.message
-        : 'Не удалось обновить избранное';
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Не удалось обновить избранное";
       toast.error(message);
     }
   };
 
   const handleQuickAdd = async () => {
     if (!isAuthenticated) {
-      navigate('/auth');
+      navigate("/auth");
       return;
     }
 
     if (isUnavailable) {
-      toast.error('Товар сейчас недоступен');
+      toast.error("Товар сейчас недоступен");
       return;
     }
 
     if (!selectedSize) {
-      toast.error('Выберите размер');
+      toast.error("Выберите размер");
       return;
     }
 
@@ -256,7 +279,10 @@ export default function ProductCard({
           ref={imageRef}
           src={productCardImage}
           alt={product.name}
-          className={`relative z-[1] h-full w-full transition-transform duration-500 ${canOpenProduct ? cardHoverScaleClassName : ''} ${cardImageDisplay.objectFitClassName} ${cardImageDisplay.paddingClassName} ${cardImageDisplay.scaleClassName}`.trim()}
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+          className={`relative z-[1] h-full w-full transition-transform duration-500 ${canOpenProduct ? cardHoverScaleClassName : ""} ${cardImageDisplay.objectFitClassName} ${cardImageDisplay.paddingClassName} ${cardImageDisplay.scaleClassName}`.trim()}
           onError={() => setImageError(true)}
         />
       ) : (
@@ -265,7 +291,9 @@ export default function ProductCard({
         </div>
       )}
 
-      <div className={`absolute inset-0 transition-colors duration-300 ${canOpenProduct ? 'bg-black/0 group-hover:bg-black/10' : 'bg-black/5'}`} />
+      <div
+        className={`absolute inset-0 transition-colors duration-300 ${canOpenProduct ? "bg-black/0 group-hover:bg-black/10" : "bg-black/5"}`}
+      />
 
       <div className="absolute top-2 left-2 flex flex-col gap-2">
         {product.isNew && (
@@ -290,7 +318,7 @@ export default function ProductCard({
                   event.preventDefault();
                   event.stopPropagation();
                   if (!isAuthenticated) {
-                    navigate('/auth');
+                    navigate("/auth");
                   }
                 }}
               >
@@ -303,11 +331,16 @@ export default function ProductCard({
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="flex items-center gap-4">
-                  <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md" style={productCardBackgroundStyle}>
+                  <div
+                    className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md"
+                    style={productCardBackgroundStyle}
+                  >
                     {productCardImage ? (
                       <img
                         src={productCardImage}
                         alt={product.name}
+                        loading="lazy"
+                        decoding="async"
                         className={`relative z-[1] h-full w-full ${compactImageDisplay.objectFitClassName} ${compactImageDisplay.paddingClassName} ${compactImageDisplay.scaleClassName}`.trim()}
                       />
                     ) : (
@@ -318,28 +351,35 @@ export default function ProductCard({
                   </div>
                   <div>
                     <h3 className="font-bold">{product.name}</h3>
-                    <p className="text-muted-foreground">{formatProductPrice(product.price)}</p>
+                    <p className="text-muted-foreground">
+                      {formatProductPrice(product.price)}
+                    </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
                   {product.sizes && product.sizes.length > 0 ? (
                     product.sizes.map((size) => {
-                      const disabled = hasStockInfo && (product.sizeStock?.[size] ?? 0) <= 0;
+                      const disabled =
+                        hasStockInfo && (product.sizeStock?.[size] ?? 0) <= 0;
                       return (
                         <Button
                           key={size}
-                          variant={selectedSize === size ? 'default' : 'outline'}
+                          variant={
+                            selectedSize === size ? "default" : "outline"
+                          }
                           onClick={() => setSelectedSize(size)}
                           disabled={disabled}
-                          className={`font-bold ${disabled ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : ''} ${selectedSize === size ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                          className={`font-bold ${disabled ? "bg-gray-200 text-gray-500 cursor-not-allowed" : ""} ${selectedSize === size ? "ring-2 ring-primary ring-offset-2" : ""}`}
                         >
                           {size}
                         </Button>
                       );
                     })
                   ) : (
-                    <p className="col-span-4 text-center text-sm text-muted-foreground">Размеры не указаны</p>
+                    <p className="col-span-4 text-center text-sm text-muted-foreground">
+                      Размеры не указаны
+                    </p>
                   )}
                 </div>
 
@@ -348,7 +388,9 @@ export default function ProductCard({
                   onClick={handleQuickAdd}
                   disabled={!selectedSize || isAdding}
                 >
-                  {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isAdding && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Добавить в корзину
                 </Button>
               </div>
@@ -364,8 +406,10 @@ export default function ProductCard({
       <h3 className="font-bold text-lg truncate mb-1">{product.name}</h3>
       <div className="flex justify-between items-center gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-xl font-black text-black">{formatProductPrice(product.price)}</span>
-          <span className="text-sm text-gray-400 line-through">
+          <span className="text-xl font-black text-black">
+            {formatProductPrice(product.price)}
+          </span>
+          <span className="text-sm text-gray-600 line-through">
             {formatProductPrice(product.price * 1.2)}
           </span>
         </div>
@@ -384,13 +428,22 @@ export default function ProductCard({
 
   return (
     <>
-      <div className={`group block relative overflow-hidden bg-card border transition-all duration-300 transform-gpu origin-center ${canOpenProduct ? 'border-transparent hover:border-border hover:scale-[0.99]' : 'border-black/10 opacity-90'}`}>
+      <div
+        className={`group block relative overflow-hidden bg-card border transition-all duration-300 transform-gpu origin-center ${canOpenProduct ? "border-transparent hover:border-border hover:scale-[0.99]" : "border-black/10 opacity-90"}`}
+      >
         {productHref ? (
-          <Link to={productHref} className="block relative aspect-[25/24] overflow-hidden" style={productCardBackgroundStyle}>
+          <Link
+            to={productHref}
+            className="block relative aspect-square overflow-hidden"
+            style={productCardBackgroundStyle}
+          >
             {mediaContent}
           </Link>
         ) : (
-          <div className="block relative aspect-[25/24] overflow-hidden cursor-default" style={productCardBackgroundStyle}>
+          <div
+            className="block relative aspect-square overflow-hidden cursor-default"
+            style={productCardBackgroundStyle}
+          >
             {mediaContent}
           </div>
         )}
@@ -398,10 +451,10 @@ export default function ProductCard({
         <button
           onClick={handleLike}
           className="absolute top-2 right-2 z-10 rounded-full border border-black/10 bg-white/85 p-2 text-black shadow-sm backdrop-blur-sm transition-all hover:scale-105 hover:bg-white"
-          aria-label={isLiked ? 'Убрать из избранного' : 'Добавить в избранное'}
+          aria-label={isLiked ? "Убрать из избранного" : "Добавить в избранное"}
         >
           <Heart
-            className={`h-6 w-6 transition-colors ${isLiked ? 'fill-red-500 stroke-red-500 text-red-500' : 'stroke-black text-black'}`}
+            className={`h-6 w-6 transition-colors ${isLiked ? "fill-red-500 stroke-red-500 text-red-500" : "stroke-black text-black"}`}
           />
         </button>
 
@@ -410,9 +463,7 @@ export default function ProductCard({
             {infoContent}
           </Link>
         ) : (
-          <div className="block p-4 bg-white text-black">
-            {infoContent}
-          </div>
+          <div className="block p-4 bg-white text-black">{infoContent}</div>
         )}
       </div>
 
