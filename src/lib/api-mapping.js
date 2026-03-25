@@ -862,6 +862,18 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  deliveryCalculate: async ({ input }) => request("/integrations/delivery/calculate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  getDeliveryPickupPoints: async ({ input }) => request("/integrations/delivery/pickup-points", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   signOut: async () => {
     const refreshToken = getRefreshToken();
     try {
@@ -1085,7 +1097,31 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  adminTestRoboKassa: async ({ input }) => request("/admin/settings/robokassa/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminTestYandexDelivery: async ({ input }) => request("/admin/settings/yandex-delivery/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestCdekDelivery: async ({ input }) => request("/admin/settings/cdek-delivery/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestRussianPostDelivery: async ({ input }) => request("/admin/settings/russian-post-delivery/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  adminTestAvitoDelivery: async ({ input }) => request("/admin/settings/avito-delivery/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

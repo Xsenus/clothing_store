@@ -13,6 +13,10 @@ const YOO_KASSA_METHODS = new Set([
   "yookassa_yoomoney",
 ]);
 
+const ROBO_KASSA_METHODS = new Set([
+  "robokassa",
+]);
+
 export const YOO_MONEY_PAYMENT_METHOD_LABELS = {
   yoomoney: "ЮMoney",
   yoomoney_card: "ЮMoney: банковская карта",
@@ -24,6 +28,10 @@ export const YOO_KASSA_PAYMENT_METHOD_LABELS = {
   yookassa_card: "YooKassa: банковская карта",
   yookassa_sbp: "YooKassa: СБП",
   yookassa_yoomoney: "YooKassa: ЮMoney",
+};
+
+export const ROBO_KASSA_PAYMENT_METHOD_LABELS = {
+  robokassa: "RoboKassa",
 };
 
 export const YOO_MONEY_PAYMENT_STATUS_LABELS = {
@@ -46,6 +54,16 @@ export const YOO_KASSA_PAYMENT_STATUS_LABELS = {
   error: "Ошибка",
 };
 
+export const ROBO_KASSA_PAYMENT_STATUS_LABELS = {
+  pending: "Ожидает оплаты",
+  paid: "Оплачен",
+  expired: "Счет истек",
+  canceled: "Отменен",
+  cancelled: "Отменен",
+  review_required: "Нужна проверка",
+  error: "Ошибка",
+};
+
 export const isSettingEnabled = (value, fallback = false) => {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) {
@@ -60,6 +78,9 @@ export const isYooMoneyPaymentMethod = (value) =>
 
 export const isYooKassaPaymentMethod = (value) =>
   YOO_KASSA_METHODS.has(String(value || "").trim().toLowerCase());
+
+export const isRoboKassaPaymentMethod = (value) =>
+  ROBO_KASSA_METHODS.has(String(value || "").trim().toLowerCase());
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -120,6 +141,32 @@ export const getYooKassaConfigurationIssues = (settings) => {
   return issues;
 };
 
+export const getRoboKassaConfigurationIssues = (settings) => {
+  const enabled = isSettingEnabled(settings?.payments_robokassa_enabled);
+  if (!enabled) {
+    return [];
+  }
+
+  const issues = [];
+
+  if (!normalizeText(settings?.robokassa_merchant_login)) {
+    issues.push("Укажите Merchant Login RoboKassa.");
+  }
+
+  if (!normalizeText(settings?.robokassa_password1) || !normalizeText(settings?.robokassa_password2)) {
+    issues.push("Добавьте пароль #1 и пароль #2 RoboKassa.");
+  }
+
+  if (
+    isSettingEnabled(settings?.robokassa_test_mode, true)
+    && (!normalizeText(settings?.robokassa_test_password1) || !normalizeText(settings?.robokassa_test_password2))
+  ) {
+    issues.push("Для тестового режима RoboKassa нужны тестовые пароли #1 и #2.");
+  }
+
+  return issues;
+};
+
 export const getYooMoneyCapabilities = (settings) => {
   const enabled = isSettingEnabled(settings?.payments_yoomoney_enabled);
   const ready = enabled && (settings?.payments_yoomoney_ready === undefined
@@ -153,6 +200,19 @@ export const getYooKassaCapabilities = (settings) => {
     allowSbp,
     allowYooMoney,
     hasAnyMethod: allowBankCards || allowSbp || allowYooMoney,
+  };
+};
+
+export const getRoboKassaCapabilities = (settings) => {
+  const enabled = isSettingEnabled(settings?.payments_robokassa_enabled);
+  const ready = enabled && (settings?.payments_robokassa_ready === undefined
+    ? true
+    : isSettingEnabled(settings?.payments_robokassa_ready));
+
+  return {
+    enabled,
+    ready,
+    hasAnyMethod: ready,
   };
 };
 

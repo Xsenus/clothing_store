@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
 
 import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
@@ -16,6 +16,7 @@ import { fetchPublicSettings } from '@/lib/site-settings';
 import { cn } from '@/lib/utils';
 import { getOrCreateVisitorId } from '@/lib/visitor-id';
 import {
+  getRoboKassaCapabilities,
   getYooKassaCapabilities,
   getYooMoneyCapabilities,
   isSettingEnabled,
@@ -53,6 +54,20 @@ interface DeliveryQuoteResponse {
   homeDelivery?: DeliveryQuoteOption | null;
   pickupPointDelivery?: DeliveryQuoteOption | null;
   nearestPickupPointDelivery?: DeliveryQuoteOption | null;
+}
+
+interface DeliveryProviderQuote {
+  provider?: string;
+  label?: string;
+  currency?: string;
+  homeDelivery?: DeliveryQuoteOption | null;
+  pickupPointDelivery?: DeliveryQuoteOption | null;
+  details?: Record<string, string> | null;
+}
+
+interface DeliveryProvidersResponse {
+  toAddress?: string;
+  providers?: DeliveryProviderQuote[] | null;
 }
 
 interface PromoCodeValidationResult {
@@ -108,12 +123,58 @@ const getVisibleDeliveryError = (
   return fallback;
 };
 
-const buildPickupQuoteCacheKey = (
-  address: string,
-  requestedWeightKg: number,
-  subtotal: number,
-  pickupPointId: string,
-) => [address.trim(), requestedWeightKg.toFixed(3), subtotal.toFixed(2), pickupPointId].join('|');
+const getDeliveryOptionCost = (option?: DeliveryQuoteOption | null) => {
+  const value = Number(option?.estimatedCost);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+};
+
+const pickBestDeliveryProvider = (
+  providers: DeliveryProviderQuote[],
+  method: DeliveryMethod,
+) => {
+  const candidates = providers.filter((provider) => {
+    if (method === 'home') {
+      return !!provider?.homeDelivery?.available;
+    }
+
+    if (method === 'pickup') {
+      return !!provider?.pickupPointDelivery?.available;
+    }
+
+    return false;
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return [...candidates].sort((left, right) => {
+    const leftOption = method === 'home' ? left.homeDelivery : left.pickupPointDelivery;
+    const rightOption = method === 'home' ? right.homeDelivery : right.pickupPointDelivery;
+    return getDeliveryOptionCost(leftOption) - getDeliveryOptionCost(rightOption);
+  })[0] || null;
+};
+
+const isProviderTestEnvironment = (provider?: DeliveryProviderQuote | null) => {
+  const environment = String(provider?.details?.environment || '').trim().toLowerCase();
+  const testEnvironment = String(provider?.details?.testEnvironment || '').trim().toLowerCase();
+  return environment === 'test' || testEnvironment === 'true';
+};
+
+const getDeliveryProviderCaption = (provider?: DeliveryProviderQuote | null) => {
+  const label = String(provider?.label || provider?.provider || '').trim();
+  if (!label) {
+    return null;
+  }
+
+  if (provider?.provider === 'russian_post') {
+    return `${label} · официальный API`;
+  }
+
+  return isProviderTestEnvironment(provider)
+    ? `${label} · учебный контур`
+    : label;
+};
 
 interface PaymentOptionCardProps {
   id: string;
@@ -248,11 +309,17 @@ export default function CheckoutPage() {
     allowYooMoney: false,
     hasAnyMethod: false,
   }));
-  const [isYandexDeliveryEnabled, setIsYandexDeliveryEnabled] = useState(true);
+  const [roboKassaCapabilities, setRoboKassaCapabilities] = useState(() => ({
+    enabled: false,
+    ready: false,
+    hasAnyMethod: false,
+  }));
+  const [isManagedDeliveryEnabled, setIsManagedDeliveryEnabled] = useState(true);
 
   const [homeDeliveryLoading, setHomeDeliveryLoading] = useState(false);
   const [homeDelivery, setHomeDelivery] = useState<DeliveryQuoteOption | null>(null);
   const [homeDeliveryError, setHomeDeliveryError] = useState('');
+  const [homeDeliveryProvider, setHomeDeliveryProvider] = useState<DeliveryProviderQuote | null>(null);
 
   const [pickupPointsLoading, setPickupPointsLoading] = useState(false);
   const [pickupPointsError, setPickupPointsError] = useState('');
@@ -261,9 +328,9 @@ export default function CheckoutPage() {
   const [pickupDeliveryLoading, setPickupDeliveryLoading] = useState(false);
   const [pickupDelivery, setPickupDelivery] = useState<DeliveryQuoteOption | null>(null);
   const [pickupDeliveryError, setPickupDeliveryError] = useState('');
+  const [pickupDeliveryProvider, setPickupDeliveryProvider] = useState<DeliveryProviderQuote | null>(null);
 
   const [products, setProducts] = useState<Record<string, any>>({});
-  const pickupQuoteCacheRef = useRef(new Map<string, DeliveryQuoteOption | null>());
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -293,13 +360,20 @@ export default function CheckoutPage() {
         if (!cancelled) {
           setYooMoneyCapabilities(getYooMoneyCapabilities(settings));
           setYooKassaCapabilities(getYooKassaCapabilities(settings));
-          setIsYandexDeliveryEnabled(isSettingEnabled(settings?.yandex_delivery_enabled, true));
+          setRoboKassaCapabilities(getRoboKassaCapabilities(settings));
+          setIsManagedDeliveryEnabled(
+            isSettingEnabled(settings?.yandex_delivery_enabled, true)
+            || isSettingEnabled(settings?.delivery_cdek_enabled)
+            || isSettingEnabled(settings?.delivery_russian_post_enabled)
+            || isSettingEnabled(settings?.delivery_avito_enabled),
+          );
         }
       } catch {
         if (!cancelled) {
           setYooMoneyCapabilities(getYooMoneyCapabilities({}));
           setYooKassaCapabilities(getYooKassaCapabilities({}));
-          setIsYandexDeliveryEnabled(true);
+          setRoboKassaCapabilities(getRoboKassaCapabilities({}));
+          setIsManagedDeliveryEnabled(true);
         }
       }
     };
@@ -320,6 +394,7 @@ export default function CheckoutPage() {
       'yookassa_card',
       'yookassa_sbp',
       'yookassa_yoomoney',
+      'robokassa',
     ].includes(paymentMethod)) {
       return;
     }
@@ -332,12 +407,13 @@ export default function CheckoutPage() {
       || (paymentMethod === 'yookassa_sbp' && yooKassaCapabilities.allowSbp)
       || (paymentMethod === 'yookassa_yoomoney' && yooKassaCapabilities.allowYooMoney)
       || (paymentMethod === 'yookassa' && yooKassaCapabilities.hasAnyMethod)
+      || (paymentMethod === 'robokassa' && roboKassaCapabilities.hasAnyMethod)
     );
 
     if (!methodStillAvailable) {
       setPaymentMethod('cod');
     }
-  }, [paymentMethod, yooKassaCapabilities, yooMoneyCapabilities]);
+  }, [paymentMethod, roboKassaCapabilities, yooKassaCapabilities, yooMoneyCapabilities]);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,10 +456,15 @@ export default function CheckoutPage() {
   const promoDiscount = Math.min(subtotal, Number(appliedPromoCode?.discountAmount ?? 0));
 
   useEffect(() => {
-    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0) {
+    if (!isManagedDeliveryEnabled || !address.trim() || subtotal <= 0) {
       setHomeDeliveryLoading(false);
       setHomeDelivery(null);
       setHomeDeliveryError('');
+      setHomeDeliveryProvider(null);
+      setPickupDeliveryLoading(false);
+      setPickupDelivery(null);
+      setPickupDeliveryError('');
+      setPickupDeliveryProvider(null);
       return;
     }
 
@@ -391,14 +472,17 @@ export default function CheckoutPage() {
 
     const run = async () => {
       setHomeDeliveryLoading(true);
+      setPickupDeliveryLoading(true);
       setHomeDeliveryError('');
+      setPickupDeliveryError('');
 
       try {
-        const res = await FLOW.yandexDeliveryCalculate({
+        const res = await FLOW.deliveryCalculate({
           input: {
             toAddress: address,
             weightKg: requestedWeightKg,
             declaredCost: subtotal,
+            paymentMethod,
           },
         });
 
@@ -406,20 +490,42 @@ export default function CheckoutPage() {
           return;
         }
 
-        const nextQuote = (res || null) as DeliveryQuoteResponse | null;
-        const nextHomeDelivery = nextQuote?.homeDelivery || null;
+        const nextResponse = (res || null) as DeliveryProvidersResponse | null;
+        const nextProviders = Array.isArray(nextResponse?.providers) ? nextResponse.providers : [];
+        const nextHomeProvider = pickBestDeliveryProvider(nextProviders, 'home');
+        const nextPickupProvider = pickBestDeliveryProvider(nextProviders, 'pickup');
+        const nextHomeDelivery = nextHomeProvider?.homeDelivery || null;
+        const nextPickupDelivery = nextPickupProvider?.pickupPointDelivery || null;
+
+        setHomeDeliveryProvider(nextHomeProvider);
+        setPickupDeliveryProvider(nextPickupProvider);
         setHomeDelivery(nextHomeDelivery);
-        setHomeDeliveryError(nextHomeDelivery?.available ? '' : nextHomeDelivery?.error || DELIVERY_CALCULATION_ERROR_MESSAGE);
+        setPickupDelivery(nextPickupDelivery);
+        setHomeDeliveryError(
+          nextHomeDelivery?.available
+            ? ''
+            : nextHomeDelivery?.error || 'Службы доставки не вернули доступный вариант до двери.'
+        );
+        setPickupDeliveryError(
+          nextPickupDelivery?.available
+            ? ''
+            : nextPickupDelivery?.error || 'Службы доставки не вернули доступный вариант до пункта выдачи.'
+        );
       } catch (error) {
         if (cancelled) {
           return;
         }
 
         setHomeDelivery(null);
+        setHomeDeliveryProvider(null);
         setHomeDeliveryError(getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE));
+        setPickupDelivery(null);
+        setPickupDeliveryProvider(null);
+        setPickupDeliveryError(getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE));
       } finally {
         if (!cancelled) {
           setHomeDeliveryLoading(false);
+          setPickupDeliveryLoading(false);
         }
       }
     };
@@ -429,17 +535,14 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, isYandexDeliveryEnabled, requestedWeightKg, subtotal]);
+  }, [address, isManagedDeliveryEnabled, paymentMethod, requestedWeightKg, subtotal]);
 
   useEffect(() => {
-    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0) {
+    if (!isManagedDeliveryEnabled || !address.trim() || subtotal <= 0 || !pickupDeliveryProvider?.provider || !pickupDelivery?.available) {
       setPickupPointsLoading(false);
       setPickupPoints([]);
       setPickupPointsError('');
       setSelectedPickupPointId('');
-      setPickupDelivery(null);
-      setPickupDeliveryError('');
-      pickupQuoteCacheRef.current.clear();
       return;
     }
 
@@ -450,15 +553,16 @@ export default function CheckoutPage() {
       setPickupPointsError('');
       setPickupPoints([]);
       setSelectedPickupPointId('');
-      setPickupDelivery(null);
-      setPickupDeliveryError('');
-      pickupQuoteCacheRef.current.clear();
 
       try {
-        const response = await FLOW.getYandexDeliveryPickupPoints({
+        const response = await FLOW.getDeliveryPickupPoints({
           input: {
+            provider: pickupDeliveryProvider.provider,
             toAddress: address,
             limit: 8,
+            paymentMethod,
+            weightKg: requestedWeightKg,
+            declaredCost: subtotal,
           },
         });
 
@@ -481,7 +585,7 @@ export default function CheckoutPage() {
         });
 
         if (nextPoints.length === 0) {
-          setPickupPointsError('Яндекс не нашел ПВЗ для этого адреса.');
+          setPickupPointsError('Службы доставки не нашли доступные пункты выдачи для этого адреса.');
           return;
         }
 
@@ -506,7 +610,7 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, isYandexDeliveryEnabled, requestedWeightKg, subtotal]);
+  }, [address, isManagedDeliveryEnabled, paymentMethod, pickupDelivery?.available, pickupDeliveryProvider, requestedWeightKg, subtotal]);
 
   const selectedPickupPoint = pickupPoints.find((point) => point.id === selectedPickupPointId) || null;
   const selfPickupDelivery: DeliveryQuoteOption = {
@@ -518,90 +622,35 @@ export default function CheckoutPage() {
   };
 
   useEffect(() => {
-    if (!isYandexDeliveryEnabled || !address.trim() || subtotal <= 0 || !selectedPickupPointId) {
-      setPickupDelivery(null);
-      setPickupDeliveryError('');
-      setPickupDeliveryLoading(false);
+    if (!selectedPickupPointId) {
       return;
     }
 
-    const cacheKey = buildPickupQuoteCacheKey(address, requestedWeightKg, subtotal, selectedPickupPointId);
-    const cachedQuote = pickupQuoteCacheRef.current.get(cacheKey);
-    if (cachedQuote !== undefined) {
-      setPickupDelivery(cachedQuote);
-      setPickupDeliveryError(cachedQuote?.available ? '' : cachedQuote?.error || DELIVERY_CALCULATION_ERROR_MESSAGE);
-      setPickupDeliveryLoading(false);
+    const selectedPoint = pickupPoints.find((point) => point.id === selectedPickupPointId);
+    if (!selectedPoint) {
       return;
     }
 
-    let cancelled = false;
-    const timeoutId = window.setTimeout(async () => {
-      setPickupDeliveryLoading(true);
-      setPickupDeliveryError('');
-
-      try {
-        const response = await FLOW.yandexDeliveryCalculate({
-          input: {
-            toAddress: address,
-            weightKg: requestedWeightKg,
-            declaredCost: subtotal,
-            pickupPointId: selectedPickupPointId,
-          },
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextQuote = (response || null) as DeliveryQuoteResponse | null;
-        const nextPickupDelivery = nextQuote?.pickupPointDelivery || nextQuote?.nearestPickupPointDelivery || {
-          available: false,
-          estimatedCost: null,
-          deliveryDays: null,
-          error: DELIVERY_CALCULATION_ERROR_MESSAGE,
-        };
-        pickupQuoteCacheRef.current.set(cacheKey, nextPickupDelivery);
-        setPickupDelivery(nextPickupDelivery);
-        setPickupDeliveryError(nextPickupDelivery?.available ? '' : nextPickupDelivery?.error || DELIVERY_CALCULATION_ERROR_MESSAGE);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        const nextError = getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE);
-        pickupQuoteCacheRef.current.set(cacheKey, {
-          available: false,
-          estimatedCost: null,
-          deliveryDays: null,
-          error: nextError,
-        });
-        setPickupDelivery({
-          available: false,
-          estimatedCost: null,
-          deliveryDays: null,
-          error: nextError,
-        });
-        setPickupDeliveryError(nextError);
-      } finally {
-        if (!cancelled) {
-          setPickupDeliveryLoading(false);
-        }
+    setPickupDelivery((prev) => {
+      if (!prev) {
+        return prev;
       }
-    }, 250);
 
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [address, isYandexDeliveryEnabled, requestedWeightKg, selectedPickupPointId, subtotal]);
+      return {
+        ...prev,
+        estimatedCost: selectedPoint.estimatedCost ?? prev.estimatedCost,
+        deliveryDays: selectedPoint.deliveryDays ?? prev.deliveryDays,
+      };
+    });
+  }, [pickupPoints, selectedPickupPointId]);
 
   useEffect(() => {
-    if (!isYandexDeliveryEnabled) {
+    if (!isManagedDeliveryEnabled) {
       if (selectedDeliveryMethod !== 'self_pickup') {
         setSelectedDeliveryMethod('self_pickup');
       }
     }
-  }, [isYandexDeliveryEnabled, selectedDeliveryMethod]);
+  }, [isManagedDeliveryEnabled, selectedDeliveryMethod]);
 
   const selectedDeliveryOption = selectedDeliveryMethod === 'pickup'
     ? pickupDelivery
@@ -611,8 +660,8 @@ export default function CheckoutPage() {
   const isPickupSelected = selectedDeliveryMethod === 'pickup';
   const isSelfPickupSelected = selectedDeliveryMethod === 'self_pickup';
   const isHomeSelected = selectedDeliveryMethod === 'home';
-  const isHomeMethodDisabled = !isYandexDeliveryEnabled || !address.trim();
-  const isPickupMethodDisabled = !isYandexDeliveryEnabled || !address.trim();
+  const isHomeMethodDisabled = !isManagedDeliveryEnabled || !address.trim() || !homeDeliveryProvider || !homeDelivery?.available;
+  const isPickupMethodDisabled = !isManagedDeliveryEnabled || !address.trim() || !pickupDeliveryProvider || !pickupDelivery?.available;
   const shipping = Number(selectedDeliveryOption?.estimatedCost ?? 0);
   const total = subtotal - promoDiscount + shipping;
   const visibleHomeDeliveryError = getVisibleDeliveryError(homeDeliveryError, isAdmin);
@@ -639,6 +688,23 @@ export default function CheckoutPage() {
         ? Boolean(homeDelivery?.available)
         : Boolean(selectedPickupPoint?.id && pickupDelivery?.available)
     );
+  const selectedShippingProvider = selectedDeliveryMethod === 'home'
+    ? homeDeliveryProvider?.provider || null
+    : selectedDeliveryMethod === 'pickup'
+      ? pickupDeliveryProvider?.provider || null
+      : 'self_pickup';
+  const selectedShippingTariff = selectedDeliveryMethod === 'home'
+    ? homeDelivery?.tariff || null
+    : selectedDeliveryMethod === 'pickup'
+      ? pickupDelivery?.tariff || null
+      : 'self_pickup';
+  const homeDeliveryProviderCaption = getDeliveryProviderCaption(homeDeliveryProvider);
+  const pickupDeliveryProviderCaption = getDeliveryProviderCaption(pickupDeliveryProvider);
+  const selectedDeliveryProviderCaption = selectedDeliveryMethod === 'home'
+    ? homeDeliveryProviderCaption
+    : selectedDeliveryMethod === 'pickup'
+      ? pickupDeliveryProviderCaption
+      : 'Самовывоз';
 
   const resolveSelectedShippingAddress = () => {
     if (selectedDeliveryMethod === 'self_pickup') {
@@ -840,6 +906,8 @@ export default function CheckoutPage() {
           items: cartItems,
           shippingAmount: shipping,
           shippingMethod: selectedDeliveryMethod,
+          shippingProvider: selectedShippingProvider,
+          shippingTariff: selectedShippingTariff,
           pickupPointId: selectedPickupPoint?.id || null,
           totalAmount: total,
           paymentReturnUrl: buildPaymentReturnUrl(),
@@ -940,9 +1008,9 @@ export default function CheckoutPage() {
                       placeholder="Начните вводить адрес"
                     />
                     <p className="text-sm text-muted-foreground">
-                      {isYandexDeliveryEnabled
-                        ? 'Для доставки до двери и ПВЗ укажите адрес. Для самовывоза поле можно оставить пустым.'
-                        : 'Яндекс.Доставка сейчас отключена. Для самовывоза адрес можно не указывать.'}
+                      {isManagedDeliveryEnabled
+                        ? 'Для доставки до двери и в пункт выдачи укажите адрес. Для самовывоза поле можно оставить пустым.'
+                        : 'Онлайн-интеграции доставки сейчас отключены. Для самовывоза адрес можно не указывать.'}
                     </p>
                   </div>
                 </div>
@@ -1014,6 +1082,17 @@ export default function CheckoutPage() {
                         subtitle="Оплата ЮMoney внутри платежной страницы YooKassa."
                       />
                     )}
+                    {roboKassaCapabilities.hasAnyMethod && (
+                      <PaymentOptionCard
+                        id="payment-robokassa"
+                        value="robokassa"
+                        currentValue={paymentMethod}
+                        onSelect={setPaymentMethod}
+                        title="RoboKassa"
+                        badge="Онлайн"
+                        subtitle="Переход на защищенную платежную форму RoboKassa с возвратом в личный кабинет после оплаты."
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1023,9 +1102,9 @@ export default function CheckoutPage() {
                     {isShippingLoading && <span className="text-sm text-muted-foreground">Расчет...</span>}
                   </div>
 
-                  {!isYandexDeliveryEnabled ? (
+                  {!isManagedDeliveryEnabled ? (
                     <p className="text-sm text-muted-foreground">
-                      Яндекс.Доставка отключена в интеграциях, поэтому сейчас доступен только самовывоз.
+                      Онлайн-интеграции доставки отключены, поэтому сейчас доступен только самовывоз.
                     </p>
                   ) : !address.trim() && (
                     <p className="text-sm text-muted-foreground">
@@ -1068,7 +1147,7 @@ export default function CheckoutPage() {
                       </div>
                     </div>
 
-                    {isYandexDeliveryEnabled && (
+                    {isManagedDeliveryEnabled && (
                       <div
                         role="radio"
                         aria-checked={isHomeSelected}
@@ -1111,12 +1190,17 @@ export default function CheckoutPage() {
                                   Срок доставки: {formatDeliveryDays(homeDelivery.deliveryDays)}
                                 </div>
                               )}
+                              {homeDeliveryProviderCaption && (
+                                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                                  Расчет: {homeDeliveryProviderCaption}
+                                </div>
+                              )}
                             </div>
                           </div>
                       </div>
                     )}
 
-                    {isYandexDeliveryEnabled && (
+                    {isManagedDeliveryEnabled && (
                       <div
                         role="radio"
                         aria-checked={isPickupSelected}
@@ -1167,6 +1251,11 @@ export default function CheckoutPage() {
                                       <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
                                     )}
                                   </div>
+                                  {pickupDeliveryProviderCaption && (
+                                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                      Расчет: {pickupDeliveryProviderCaption}
+                                    </p>
+                                  )}
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">
@@ -1397,6 +1486,11 @@ export default function CheckoutPage() {
                     {selectedDeliveryOption?.available ? formatProductPrice(shipping) : '—'}
                   </span>
                 </div>
+                {selectedDeliveryProviderCaption && (
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Провайдер: {selectedDeliveryProviderCaption}
+                  </div>
+                )}
                 {selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address && (
                   <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
                     ПВЗ: {selectedPickupPoint.address}

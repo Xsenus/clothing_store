@@ -18,6 +18,8 @@ import PageSeo from "@/components/PageSeo";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import {
+  ROBO_KASSA_PAYMENT_METHOD_LABELS,
+  ROBO_KASSA_PAYMENT_STATUS_LABELS,
   YOO_KASSA_PAYMENT_METHOD_LABELS,
   YOO_KASSA_PAYMENT_STATUS_LABELS,
   YOO_MONEY_PAYMENT_METHOD_LABELS,
@@ -119,10 +121,20 @@ const PAYMENT_METHOD_LABELS = {
 ORDER_STATUS_LABELS.pending_payment = "Ожидает оплаты";
 Object.assign(PAYMENT_METHOD_LABELS, YOO_MONEY_PAYMENT_METHOD_LABELS);
 Object.assign(PAYMENT_METHOD_LABELS, YOO_KASSA_PAYMENT_METHOD_LABELS);
+Object.assign(PAYMENT_METHOD_LABELS, ROBO_KASSA_PAYMENT_METHOD_LABELS);
 
 const SHIPPING_METHOD_LABELS = {
   home: "До двери",
   pickup: "ПВЗ",
+  self_pickup: "Самовывоз",
+};
+
+const SHIPPING_PROVIDER_LABELS = {
+  yandex_delivery: "Яндекс Доставка",
+  yandex: "Яндекс Доставка",
+  cdek: "СДЭК",
+  russian_post: "Почта России",
+  avito: "Avito",
   self_pickup: "Самовывоз",
 };
 
@@ -155,6 +167,7 @@ const formatPaymentStatus = (value) => {
   const normalized = normalizePaymentStatus(value);
   return YOO_MONEY_PAYMENT_STATUS_LABELS[normalized]
     || YOO_KASSA_PAYMENT_STATUS_LABELS[normalized]
+    || ROBO_KASSA_PAYMENT_STATUS_LABELS[normalized]
     || value
     || "—";
 };
@@ -220,6 +233,49 @@ const getYandexDeliveryStatusText = (order) => {
 
   return "";
 };
+
+const getOrderShippingProviderLabel = (order) => {
+  if (String(order?.shippingMethod || "").trim() === "self_pickup") {
+    return SHIPPING_PROVIDER_LABELS.self_pickup;
+  }
+
+  const provider = String(order?.shippingProvider || "").trim().toLowerCase();
+  if (provider) {
+    return SHIPPING_PROVIDER_LABELS[provider] || provider;
+  }
+
+  if (String(order?.yandexRequestId || "").trim()) {
+    return SHIPPING_PROVIDER_LABELS.yandex_delivery;
+  }
+
+  return "";
+};
+
+const getOrderShippingStatusText = (order) => {
+  const description = String(order?.shippingStatusDescription || "").trim();
+  if (description) return description;
+
+  const status = String(order?.shippingStatus || "").trim();
+  if (status) return status;
+
+  return getYandexDeliveryStatusText(order);
+};
+
+const getOrderTrackingUrl = (order) =>
+  String(order?.shippingTrackingUrl || order?.yandexDeliveryTrackingUrl || "").trim();
+
+const getOrderTrackingUpdatedAt = (order) =>
+  order?.shippingStatusUpdatedAt || order?.yandexDeliveryStatusUpdatedAt || null;
+
+const hasOrderShippingDetails = (order) =>
+  !!(
+    getOrderShippingProviderLabel(order)
+    || getOrderShippingStatusText(order)
+    || String(order?.shippingTrackingNumber || "").trim()
+    || String(order?.shippingProviderOrderId || "").trim()
+    || getOrderTrackingUrl(order)
+    || String(order?.yandexPickupCode || "").trim()
+  );
 
 const formatRubles = (raw) => {
   const value = Number(raw || 0);
@@ -1007,24 +1063,32 @@ export default function ProfilePage() {
                               </span>
                             </div>
 
-                            {String(order.yandexRequestId || "").trim() ? (
+                            {hasOrderShippingDetails(order) ? (
                               <div className="rounded-none border border-gray-200 bg-gray-50 p-3 text-sm">
-                                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-400">Яндекс.Доставка</p>
-                                <p className="font-medium">{getYandexDeliveryStatusText(order)}</p>
+                                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-400">
+                                  {getOrderShippingProviderLabel(order) || "Доставка"}
+                                </p>
+                                <p className="font-medium">{getOrderShippingStatusText(order) || "Статус доставки уточняется"}</p>
                                 {order.yandexPickupCode ? (
                                   <p className="mt-1 text-gray-700">Код получения: <span className="font-semibold">{order.yandexPickupCode}</span></p>
                                 ) : null}
-                                {order.yandexDeliveryStatusUpdatedAt ? (
-                                  <p className="mt-1 text-xs text-gray-500">Статус обновлен: {formatOrderDateTime(order.yandexDeliveryStatusUpdatedAt)}</p>
+                                {order.shippingTrackingNumber ? (
+                                  <p className="mt-1 text-gray-700">Трек-номер: <span className="font-semibold">{order.shippingTrackingNumber}</span></p>
                                 ) : null}
-                                {order.yandexDeliveryTrackingUrl ? (
+                                {order.shippingProviderOrderId ? (
+                                  <p className="mt-1 text-gray-700">ID отправления: <span className="font-semibold">{order.shippingProviderOrderId}</span></p>
+                                ) : null}
+                                {getOrderTrackingUpdatedAt(order) ? (
+                                  <p className="mt-1 text-xs text-gray-500">Статус обновлен: {formatOrderDateTime(getOrderTrackingUpdatedAt(order))}</p>
+                                ) : null}
+                                {getOrderTrackingUrl(order) ? (
                                   <a
-                                    href={order.yandexDeliveryTrackingUrl}
+                                    href={getOrderTrackingUrl(order)}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="mt-2 inline-flex text-xs font-semibold uppercase tracking-[0.16em] underline underline-offset-2"
                                   >
-                                    Отслеживать в Яндекс.Доставке
+                                    Отслеживать отправление
                                   </a>
                                 ) : null}
                               </div>
@@ -1088,6 +1152,9 @@ export default function ProfilePage() {
                               ) : null}
                               <div className="mt-2 text-xs text-gray-500">
                                 Доставка: {SHIPPING_METHOD_LABELS[order.shippingMethod] || order.shippingMethod || "—"}
+                                {getOrderShippingProviderLabel(order)
+                                  ? ` · ${getOrderShippingProviderLabel(order)}`
+                                  : ""}
                                 {Number.isFinite(Number(order.shippingAmount))
                                   ? ` · ${formatRubles(order.shippingAmount)}`
                                   : ""}
@@ -1154,10 +1221,10 @@ export default function ProfilePage() {
                                   </div>
                                 </div>
                               ) : null}
-                              {String(order.yandexRequestId || "").trim() ? (
+                              {getOrderShippingStatusText(order) ? (
                                 <div>
                                   <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-gray-400">Статус доставки</p>
-                                  <p className="break-words text-gray-700">{getYandexDeliveryStatusText(order)}</p>
+                                  <p className="break-words text-gray-700">{getOrderShippingStatusText(order)}</p>
                                 </div>
                               ) : null}
                             </div>
