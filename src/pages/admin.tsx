@@ -666,6 +666,8 @@ interface AdminUserEditForm {
 }
 
 interface AdminUserMergeForm {
+  targetUserId: string;
+  targetSearch: string;
   sourceUserId: string;
   sourceSearch: string;
   email: string;
@@ -843,6 +845,33 @@ const choosePreferredMergeOption = (options: AdminContactOption[], preferredValu
   }
 
   return options.find((option) => option.verified)?.value || options[0]?.value || "";
+};
+
+const mergeAdminContactOptions = (
+  users: Array<AdminUser | null | undefined>,
+  collector: (user: AdminUser) => AdminContactOption[],
+) => {
+  const options = new Map<string, AdminContactOption>();
+
+  users.filter(Boolean).forEach((user) => {
+    collector(user as AdminUser).forEach((option) => {
+      const existing = options.get(option.value);
+      if (!existing) {
+        options.set(option.value, { ...option });
+        return;
+      }
+
+      existing.verified = existing.verified || option.verified;
+      if (!existing.source.includes(option.source)) {
+        existing.source = `${existing.source}, ${option.source}`;
+      }
+    });
+  });
+
+  return Array.from(options.values()).sort((left, right) => {
+    if (left.verified !== right.verified) return left.verified ? -1 : 1;
+    return left.value.localeCompare(right.value, "ru");
+  });
 };
 
 const ORDER_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -1734,7 +1763,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [isUserEditModalOpen, setIsUserEditModalOpen] = useState(false);
   const [userEditForm, setUserEditForm] = useState<AdminUserEditForm>({ email: "", name: "", phone: "", nickname: "", shippingAddress: "", password: "" });
   const [userEditSaving, setUserEditSaving] = useState(false);
-  const [userMergeForm, setUserMergeForm] = useState<AdminUserMergeForm>({ sourceUserId: "", sourceSearch: "", email: "", phone: "" });
+  const [userMergeForm, setUserMergeForm] = useState<AdminUserMergeForm>({
+    targetUserId: "",
+    targetSearch: "",
+    sourceUserId: "",
+    sourceSearch: "",
+    email: "",
+    phone: "",
+  });
   const [userMergeSaving, setUserMergeSaving] = useState(false);
   const [pendingSensitiveFields, setPendingSensitiveFields] = useState<SensitiveField[]>([]);
   const [isSensitiveConfirmOpen, setIsSensitiveConfirmOpen] = useState(false);
@@ -4446,64 +4482,49 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   }, [usersPage, totalUserPages]);
 
+  const mergeTargetUser = useMemo(() => {
+    if (!userMergeForm.targetUserId) return null;
+    return usersById.get(userMergeForm.targetUserId) || null;
+  }, [userMergeForm.targetUserId, usersById]);
+
   const mergeSourceUser = useMemo(() => {
     if (!userMergeForm.sourceUserId) return null;
     return usersById.get(userMergeForm.sourceUserId) || null;
   }, [userMergeForm.sourceUserId, usersById]);
 
   const userMergeEmailOptions = useMemo(() => {
-    if (!selectedUser || !mergeSourceUser) return [];
-
-    const options = new Map<string, AdminContactOption>();
-    [...collectAdminUserEmailOptions(selectedUser), ...collectAdminUserEmailOptions(mergeSourceUser)].forEach((option) => {
-      const existing = options.get(option.value);
-      if (!existing) {
-        options.set(option.value, { ...option });
-        return;
-      }
-
-      existing.verified = existing.verified || option.verified;
-      if (!existing.source.includes(option.source)) {
-        existing.source = `${existing.source}, ${option.source}`;
-      }
-    });
-
-    return Array.from(options.values()).sort((left, right) => {
-      if (left.verified !== right.verified) return left.verified ? -1 : 1;
-      return left.value.localeCompare(right.value, "ru");
-    });
-  }, [mergeSourceUser, selectedUser]);
+    if (!mergeTargetUser || !mergeSourceUser) return [];
+    return mergeAdminContactOptions([mergeTargetUser, mergeSourceUser], collectAdminUserEmailOptions);
+  }, [mergeSourceUser, mergeTargetUser]);
 
   const userMergePhoneOptions = useMemo(() => {
-    if (!selectedUser || !mergeSourceUser) return [];
+    if (!mergeTargetUser || !mergeSourceUser) return [];
+    return mergeAdminContactOptions([mergeTargetUser, mergeSourceUser], collectAdminUserPhoneOptions);
+  }, [mergeSourceUser, mergeTargetUser]);
 
-    const options = new Map<string, AdminContactOption>();
-    [...collectAdminUserPhoneOptions(selectedUser), ...collectAdminUserPhoneOptions(mergeSourceUser)].forEach((option) => {
-      const existing = options.get(option.value);
-      if (!existing) {
-        options.set(option.value, { ...option });
-        return;
-      }
+  const mergeTargetCandidateUsers = useMemo(() => {
+    const query = userMergeForm.targetSearch.trim().toLowerCase();
+    return users
+      .map((user) => ({ user, score: 0 }))
+      .filter(({ user, score }) => {
+        if (!query) return users.length <= 20 || user.id === userMergeForm.targetUserId;
+        return buildAdminUserSearchText(user).includes(query);
+      })
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        return buildAdminUserDisplayName(left.user).localeCompare(buildAdminUserDisplayName(right.user), "ru");
+      })
+      .slice(0, query ? 50 : 20)
+      .map((entry) => entry.user);
+  }, [userMergeForm.targetSearch, userMergeForm.targetUserId, users]);
 
-      existing.verified = existing.verified || option.verified;
-      if (!existing.source.includes(option.source)) {
-        existing.source = `${existing.source}, ${option.source}`;
-      }
-    });
-
-    return Array.from(options.values()).sort((left, right) => {
-      if (left.verified !== right.verified) return left.verified ? -1 : 1;
-      return left.value.localeCompare(right.value, "ru");
-    });
-  }, [mergeSourceUser, selectedUser]);
-
-  const mergeCandidateUsers = useMemo(() => {
-    if (!selectedUser) return [];
+  const mergeSourceCandidateUsers = useMemo(() => {
+    if (!mergeTargetUser) return [];
 
     const query = userMergeForm.sourceSearch.trim().toLowerCase();
     return users
-      .filter((user) => user.id !== selectedUser.id)
-      .map((user) => ({ user, score: getMergeCandidateScore(selectedUser, user) }))
+      .filter((user) => user.id !== mergeTargetUser.id)
+      .map((user) => ({ user, score: getMergeCandidateScore(mergeTargetUser, user) }))
       .filter(({ user, score }) => {
         if (!query) return score > 0 || users.length <= 20 || user.id === userMergeForm.sourceUserId;
         return buildAdminUserSearchText(user).includes(query);
@@ -4514,7 +4535,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       })
       .slice(0, query ? 50 : 20)
       .map((entry) => entry.user);
-  }, [selectedUser, userMergeForm.sourceSearch, users]);
+  }, [mergeTargetUser, userMergeForm.sourceSearch, userMergeForm.sourceUserId, users]);
 
   const openUserEditModal = (user: AdminUser) => {
     setSelectedUser(user);
@@ -4526,12 +4547,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       shippingAddress: user.profile?.shippingAddress || "",
       password: ""
     });
-    setUserMergeForm({
-      sourceUserId: "",
-      sourceSearch: "",
-      email: "",
-      phone: "",
-    });
     setPendingSensitiveFields([]);
     setIsSensitiveConfirmOpen(false);
     setIsUserEditModalOpen(true);
@@ -4539,56 +4554,58 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const closeUserEditModal = () => {
     setIsUserEditModalOpen(false);
-    setUserMergeForm({
-      sourceUserId: "",
-      sourceSearch: "",
-      email: "",
-      phone: "",
-    });
     setUserMergeSaving(false);
     setPendingSensitiveFields([]);
     setIsSensitiveConfirmOpen(false);
   };
 
+  const resetUserMergeForm = () => {
+    setUserMergeForm({
+      targetUserId: "",
+      targetSearch: "",
+      sourceUserId: "",
+      sourceSearch: "",
+      email: "",
+      phone: "",
+    });
+  };
+
+  const selectUserMergeTarget = (user: AdminUser) => {
+    const preservedSource = userMergeForm.sourceUserId && userMergeForm.sourceUserId !== user.id
+      ? usersById.get(userMergeForm.sourceUserId) || null
+      : null;
+    const emailOptions = mergeAdminContactOptions([user, preservedSource], collectAdminUserEmailOptions);
+    const phoneOptions = mergeAdminContactOptions([user, preservedSource], collectAdminUserPhoneOptions);
+
+    setUserMergeForm((prev) => ({
+      ...prev,
+      targetUserId: user.id,
+      sourceUserId: preservedSource?.id || "",
+      email: preservedSource
+        ? choosePreferredMergeOption(emailOptions, user.profile?.email || user.email || "")
+        : "",
+      phone: preservedSource
+        ? choosePreferredMergeOption(phoneOptions, user.profile?.phone || "")
+        : "",
+    }));
+  };
+
   const selectUserMergeSource = (user: AdminUser) => {
-    const emailOptions = new Map<string, AdminContactOption>();
-    [...collectAdminUserEmailOptions(selectedUser), ...collectAdminUserEmailOptions(user)].forEach((option) => {
-      const existing = emailOptions.get(option.value);
-      if (!existing) {
-        emailOptions.set(option.value, { ...option });
-        return;
-      }
+    if (!mergeTargetUser || user.id === mergeTargetUser.id) return;
 
-      existing.verified = existing.verified || option.verified;
-      if (!existing.source.includes(option.source)) {
-        existing.source = `${existing.source}, ${option.source}`;
-      }
-    });
-
-    const phoneOptions = new Map<string, AdminContactOption>();
-    [...collectAdminUserPhoneOptions(selectedUser), ...collectAdminUserPhoneOptions(user)].forEach((option) => {
-      const existing = phoneOptions.get(option.value);
-      if (!existing) {
-        phoneOptions.set(option.value, { ...option });
-        return;
-      }
-
-      existing.verified = existing.verified || option.verified;
-      if (!existing.source.includes(option.source)) {
-        existing.source = `${existing.source}, ${option.source}`;
-      }
-    });
+    const emailOptions = mergeAdminContactOptions([mergeTargetUser, user], collectAdminUserEmailOptions);
+    const phoneOptions = mergeAdminContactOptions([mergeTargetUser, user], collectAdminUserPhoneOptions);
 
     setUserMergeForm((prev) => ({
       ...prev,
       sourceUserId: user.id,
       email: choosePreferredMergeOption(
-        Array.from(emailOptions.values()),
-        selectedUser?.profile?.email || selectedUser?.email || ""
+        emailOptions,
+        mergeTargetUser.profile?.email || mergeTargetUser.email || ""
       ),
       phone: choosePreferredMergeOption(
-        Array.from(phoneOptions.values()),
-        selectedUser?.profile?.phone || ""
+        phoneOptions,
+        mergeTargetUser.profile?.phone || ""
       ),
     }));
   };
@@ -4628,11 +4645,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const submitUserMerge = async () => {
-    if (!selectedUser || !mergeSourceUser) return;
+    if (!mergeTargetUser || !mergeSourceUser) return;
 
     const confirmed = await confirmAction({
       title: "Объединить аккаунты?",
-      description: `Аккаунт ${buildAdminUserDisplayName(mergeSourceUser)} будет объединён в ${buildAdminUserDisplayName(selectedUser)}. Источник будет удалён после переноса заказов, корзины, сессий и внешних привязок.`,
+      description: `Аккаунт ${buildAdminUserDisplayName(mergeSourceUser)} будет объединён в ${buildAdminUserDisplayName(mergeTargetUser)}. Источник будет удалён после переноса заказов, корзины, сессий и внешних привязок.`,
       confirmText: "Объединить",
       variant: "destructive",
     });
@@ -4643,14 +4660,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       await FLOW.adminMergeUsers({
         input: {
           sourceUserId: mergeSourceUser.id,
-          targetUserId: selectedUser.id,
+          targetUserId: mergeTargetUser.id,
           email: userMergeForm.email || undefined,
           phone: userMergeForm.phone || undefined,
         },
       });
       await fetchAdminData();
       toast.success("Аккаунты объединены");
-      closeUserEditModal();
+      resetUserMergeForm();
     } catch (error) {
       toast.error(getErrorMessage(error, "Не удалось объединить аккаунты"));
     } finally {
@@ -6683,6 +6700,218 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
               </div>
 
+              <div className="mb-6 border border-gray-200 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold uppercase">Объединение аккаунтов</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Это отдельный инструмент админки. Выберите основной профиль и аккаунт-источник: источник будет удалён после безопасного переноса заказов, корзины, сессий и внешних привязок.
+                    </p>
+                  </div>
+                  {(mergeTargetUser || mergeSourceUser) ? (
+                    <Button type="button" variant="outline" className="rounded-none" onClick={resetUserMergeForm}>
+                      Сбросить выбор
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="user-merge-target-search">Основной профиль</Label>
+                      <Input
+                        id="user-merge-target-search"
+                        value={userMergeForm.targetSearch}
+                        onChange={(e) => setUserMergeForm((prev) => ({ ...prev, targetSearch: e.target.value }))}
+                        className="rounded-none"
+                        placeholder="Email, телефон, ник, ID, провайдер"
+                      />
+                    </div>
+
+                    <div className="max-h-56 space-y-2 overflow-auto border p-2">
+                      {mergeTargetCandidateUsers.map((user) => {
+                        const isSelected = user.id === userMergeForm.targetUserId;
+                        return (
+                          <button
+                            key={`target-${user.id}`}
+                            type="button"
+                            onClick={() => selectUserMergeTarget(user)}
+                            className={`w-full border px-3 py-3 text-left transition ${isSelected ? "border-black bg-black text-white" : "border-gray-200 hover:border-black"}`}
+                          >
+                            <div className="font-semibold">{buildAdminUserDisplayName(user)}</div>
+                            <div className={`mt-1 text-sm ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {user.profile?.name || "Без имени"}
+                              {user.profile?.nickname ? ` | @${user.profile.nickname}` : ""}
+                              {user.profile?.phone ? ` | ${user.profile.phone}` : ""}
+                            </div>
+                            {(user.externalIdentities || []).length > 0 ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(user.externalIdentities || []).map((identity) => (
+                                  <span
+                                    key={`target-${user.id}-${identity.provider}-${identity.providerEmail || identity.providerUsername || ""}`}
+                                    className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${isSelected ? "border-white/40 text-white" : "border-gray-200 text-muted-foreground"}`}
+                                  >
+                                    {getExternalProviderLabel(identity.provider)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                      {mergeTargetCandidateUsers.length === 0 ? (
+                        <div className="px-3 py-6 text-sm text-muted-foreground">
+                          {userMergeForm.targetSearch.trim()
+                            ? "Ничего не найдено. Попробуйте другой email, телефон, ник или ID."
+                            : "Начните вводить email, телефон, ник или ID, чтобы выбрать основной профиль."}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="user-merge-source-search">Аккаунт для объединения</Label>
+                      <Input
+                        id="user-merge-source-search"
+                        value={userMergeForm.sourceSearch}
+                        onChange={(e) => setUserMergeForm((prev) => ({ ...prev, sourceSearch: e.target.value }))}
+                        className="rounded-none"
+                        placeholder={mergeTargetUser ? "Email, телефон, ник, ID, провайдер" : "Сначала выберите основной профиль"}
+                        disabled={!mergeTargetUser}
+                      />
+                    </div>
+
+                    <div className="max-h-56 space-y-2 overflow-auto border p-2">
+                      {!mergeTargetUser ? (
+                        <div className="px-3 py-6 text-sm text-muted-foreground">
+                          Сначала выберите основной профиль. После этого здесь появятся вероятные дубли и ручной поиск.
+                        </div>
+                      ) : null}
+                      {mergeTargetUser ? mergeSourceCandidateUsers.map((user) => {
+                        const isSelected = user.id === userMergeForm.sourceUserId;
+                        return (
+                          <button
+                            key={`source-${user.id}`}
+                            type="button"
+                            onClick={() => selectUserMergeSource(user)}
+                            className={`w-full border px-3 py-3 text-left transition ${isSelected ? "border-black bg-black text-white" : "border-gray-200 hover:border-black"}`}
+                          >
+                            <div className="font-semibold">{buildAdminUserDisplayName(user)}</div>
+                            <div className={`mt-1 text-sm ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {user.profile?.name || "Без имени"}
+                              {user.profile?.nickname ? ` | @${user.profile.nickname}` : ""}
+                              {user.profile?.phone ? ` | ${user.profile.phone}` : ""}
+                            </div>
+                            {(user.externalIdentities || []).length > 0 ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(user.externalIdentities || []).map((identity) => (
+                                  <span
+                                    key={`source-${user.id}-${identity.provider}-${identity.providerEmail || identity.providerUsername || ""}`}
+                                    className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${isSelected ? "border-white/40 text-white" : "border-gray-200 text-muted-foreground"}`}
+                                  >
+                                    {getExternalProviderLabel(identity.provider)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      }) : null}
+                      {mergeTargetUser && mergeSourceCandidateUsers.length === 0 ? (
+                        <div className="px-3 py-6 text-sm text-muted-foreground">
+                          {userMergeForm.sourceSearch.trim()
+                            ? "Ничего не найдено. Попробуйте другой email, телефон, ник или ID."
+                            : "Вероятные дубли не найдены. Попробуйте поискать аккаунт вручную."}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 border p-3">
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Основной профиль</div>
+                      <div className="mt-1 font-semibold">
+                        {mergeTargetUser ? buildAdminUserDisplayName(mergeTargetUser) : "Не выбран"}
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {mergeTargetUser
+                          ? `${mergeTargetUser.profile?.name || "Без имени"}${mergeTargetUser.profile?.phone ? ` | ${mergeTargetUser.profile.phone}` : ""}`
+                          : "Выберите профиль слева."}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Аккаунт-источник</div>
+                      <div className="mt-1 font-semibold">
+                        {mergeSourceUser ? buildAdminUserDisplayName(mergeSourceUser) : "Не выбран"}
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {mergeSourceUser
+                          ? `${mergeSourceUser.profile?.name || "Без имени"}${mergeSourceUser.profile?.phone ? ` | ${mergeSourceUser.profile.phone}` : ""}`
+                          : "Выберите дубль, который нужно влить в основной профиль."}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="user-merge-email">Итоговый email</Label>
+                      <select
+                        id="user-merge-email"
+                        value={userMergeForm.email}
+                        onChange={(e) => setUserMergeForm((prev) => ({ ...prev, email: e.target.value }))}
+                        className="h-11 w-full border border-input bg-background px-3 text-sm rounded-none"
+                        disabled={!mergeSourceUser || userMergeEmailOptions.length === 0}
+                      >
+                        {userMergeEmailOptions.length === 0 ? (
+                          <option value="">Нет email для выбора</option>
+                        ) : null}
+                        {userMergeEmailOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.value} {option.verified ? "| подтверждён" : "| не подтверждён"}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-xs text-muted-foreground">
+                        Для входа лучше оставлять подтверждённый email одного из объединяемых аккаунтов.
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="user-merge-phone">Итоговый телефон</Label>
+                      <select
+                        id="user-merge-phone"
+                        value={userMergeForm.phone}
+                        onChange={(e) => setUserMergeForm((prev) => ({ ...prev, phone: e.target.value }))}
+                        className="h-11 w-full border border-input bg-background px-3 text-sm rounded-none"
+                        disabled={!mergeSourceUser || userMergePhoneOptions.length === 0}
+                      >
+                        {userMergePhoneOptions.length === 0 ? (
+                          <option value="">Телефон не найден</option>
+                        ) : null}
+                        {userMergePhoneOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.value} {option.verified ? "| подтверждён" : "| не подтверждён"}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-xs text-muted-foreground">
+                        Телефон от внешнего провайдера без подтверждения сохраняется как неподтверждённый.
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full rounded-none"
+                      onClick={submitUserMerge}
+                      disabled={!mergeTargetUser || !mergeSourceUser || userMergeSaving}
+                    >
+                      {userMergeSaving ? "Объединяем..." : "Объединить аккаунты"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-3 md:hidden">
                 {paginatedUsers.map((user) => {
                   const userOrdersCount = user.ordersCount || 0;
@@ -7004,159 +7233,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               )}
                             </TableBody>
                           </Table>
-                        </div>
-                      </div>
-
-                      <div className="border p-4">
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <h3 className="text-lg font-bold uppercase">Account Merge</h3>
-                            <p className="text-sm text-muted-foreground">
-                              The current user stays as the target profile. The selected source account will be removed after all safe links and data are transferred.
-                            </p>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Target profile: <span className="font-mono text-foreground">{buildAdminUserDisplayName(selectedUser)}</span>
-                          </div>
-                        </div>
-
-                        {(selectedUser.externalIdentities || []).length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {(selectedUser.externalIdentities || []).map((identity) => (
-                              <span
-                                key={`${selectedUser.id}-${identity.provider}-${identity.providerEmail || identity.providerUsername || ""}`}
-                                className="inline-flex border border-gray-200 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                              >
-                                {getExternalProviderLabel(identity.provider)}
-                                {identity.verifiedAt ? " | verified" : ""}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-                          <div className="space-y-3">
-                            <div className="space-y-1">
-                              <Label htmlFor="user-merge-search">Find source account</Label>
-                              <Input
-                                id="user-merge-search"
-                                value={userMergeForm.sourceSearch}
-                                onChange={(e) => setUserMergeForm((prev) => ({ ...prev, sourceSearch: e.target.value }))}
-                                className="rounded-none"
-                                placeholder="Email, phone, nickname, ID, provider"
-                              />
-                            </div>
-
-                            <div className="max-h-56 space-y-2 overflow-auto border p-2">
-                              {mergeCandidateUsers.map((user) => {
-                                const isSelected = user.id === userMergeForm.sourceUserId;
-                                return (
-                                  <button
-                                    key={user.id}
-                                    type="button"
-                                    onClick={() => selectUserMergeSource(user)}
-                                    className={`w-full border px-3 py-3 text-left transition ${isSelected ? "border-black bg-black text-white" : "border-gray-200 hover:border-black"}`}
-                                  >
-                                    <div className="font-semibold">{buildAdminUserDisplayName(user)}</div>
-                                    <div className={`mt-1 text-sm ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
-                                      {user.profile?.name || "No name"}
-                                      {user.profile?.nickname ? ` | @${user.profile.nickname}` : ""}
-                                      {user.profile?.phone ? ` | ${user.profile.phone}` : ""}
-                                    </div>
-                                    {(user.externalIdentities || []).length > 0 ? (
-                                      <div className="mt-2 flex flex-wrap gap-2">
-                                        {(user.externalIdentities || []).map((identity) => (
-                                          <span
-                                            key={`${user.id}-${identity.provider}-${identity.providerEmail || identity.providerUsername || ""}`}
-                                            className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${isSelected ? "border-white/40 text-white" : "border-gray-200 text-muted-foreground"}`}
-                                          >
-                                            {getExternalProviderLabel(identity.provider)}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                  </button>
-                                );
-                              })}
-                              {mergeCandidateUsers.length === 0 ? (
-                                <div className="px-3 py-6 text-sm text-muted-foreground">
-                                  {userMergeForm.sourceSearch.trim()
-                                    ? "No matches found. Try another email, phone, nickname or ID."
-                                    : "No obvious duplicates found yet. Start typing an email, phone, nickname or ID to search manually."}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 border p-3">
-                            <div>
-                              <div className="text-xs uppercase text-muted-foreground">Source</div>
-                              <div className="mt-1 font-semibold">
-                                {mergeSourceUser ? buildAdminUserDisplayName(mergeSourceUser) : "Not selected"}
-                              </div>
-                              <div className="mt-1 text-sm text-muted-foreground">
-                                {mergeSourceUser
-                                  ? `${mergeSourceUser.profile?.name || "No name"}${mergeSourceUser.profile?.phone ? ` | ${mergeSourceUser.profile.phone}` : ""}`
-                                  : "Select the source account on the left."}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1">
-                              <Label htmlFor="user-merge-email">Final email</Label>
-                              <select
-                                id="user-merge-email"
-                                value={userMergeForm.email}
-                                onChange={(e) => setUserMergeForm((prev) => ({ ...prev, email: e.target.value }))}
-                                className="h-11 w-full border border-input bg-background px-3 text-sm rounded-none"
-                                disabled={!mergeSourceUser || userMergeEmailOptions.length === 0}
-                              >
-                                {userMergeEmailOptions.length === 0 ? (
-                                  <option value="">No confirmed email available</option>
-                                ) : null}
-                                {userMergeEmailOptions.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.value} {option.verified ? "| confirmed" : "| unconfirmed"}
-                                  </option>
-                                ))}
-                              </select>
-                              <div className="text-xs text-muted-foreground">
-                                Only an already confirmed email from one of the merged accounts can be kept as the final login email.
-                              </div>
-                            </div>
-
-                            <div className="space-y-1">
-                              <Label htmlFor="user-merge-phone">Final phone</Label>
-                              <select
-                                id="user-merge-phone"
-                                value={userMergeForm.phone}
-                                onChange={(e) => setUserMergeForm((prev) => ({ ...prev, phone: e.target.value }))}
-                                className="h-11 w-full border border-input bg-background px-3 text-sm rounded-none"
-                                disabled={!mergeSourceUser || userMergePhoneOptions.length === 0}
-                              >
-                                {userMergePhoneOptions.length === 0 ? (
-                                  <option value="">No phone stored in the profiles</option>
-                                ) : null}
-                                {userMergePhoneOptions.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.value} {option.verified ? "| confirmed" : "| unconfirmed"}
-                                  </option>
-                                ))}
-                              </select>
-                              <div className="text-xs text-muted-foreground">
-                                A phone received from an external provider without proof is stored as unconfirmed.
-                              </div>
-                            </div>
-
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="w-full rounded-none"
-                              onClick={submitUserMerge}
-                              disabled={!mergeSourceUser || userMergeSaving}
-                            >
-                              {userMergeSaving ? "Merging..." : "Merge into this profile"}
-                            </Button>
-                          </div>
                         </div>
                       </div>
 
