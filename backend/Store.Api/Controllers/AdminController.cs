@@ -37,6 +37,7 @@ public class AdminController : ControllerBase
     private readonly IAvitoDeliveryService _avitoDeliveryService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
     private readonly DatabaseBackupService _databaseBackupService;
+    private readonly UserIdentityService _userIdentityService;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="AdminController"/>.
@@ -58,7 +59,8 @@ public class AdminController : ControllerBase
         IRussianPostDeliveryService russianPostDeliveryService,
         IAvitoDeliveryService avitoDeliveryService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService,
-        DatabaseBackupService databaseBackupService)
+        DatabaseBackupService databaseBackupService,
+        UserIdentityService userIdentityService)
     {
         _configuration = configuration;
         _db = db;
@@ -77,6 +79,7 @@ public class AdminController : ControllerBase
         _avitoDeliveryService = avitoDeliveryService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
         _databaseBackupService = databaseBackupService;
+        _userIdentityService = userIdentityService;
     }
 
     /// <summary>
@@ -1317,13 +1320,36 @@ public class AdminController : ControllerBase
     public async Task<IResult> Users()
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
-        var profiles = await _db.Profiles.ToDictionaryAsync(x => x.UserId, x => x);
+        var profiles = await _db.Profiles
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.UserId, x => x);
+        var externalIdentities = await _db.UserExternalIdentities
+            .AsNoTracking()
+            .OrderBy(x => x.Provider)
+            .ThenByDescending(x => x.VerifiedAt ?? x.UpdatedAt)
+            .ToListAsync();
+        var externalIdentitiesByUserId = externalIdentities
+            .GroupBy(x => x.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(identity => new
+                {
+                    identity.Provider,
+                    identity.ProviderEmail,
+                    identity.ProviderUsername,
+                    identity.DisplayName,
+                    identity.VerifiedAt,
+                    identity.LastUsedAt
+                } as object).ToList());
         var orderCounts = await _db.Orders
             .AsNoTracking()
             .GroupBy(x => x.UserId)
             .Select(x => new { UserId = x.Key, Count = x.Count() })
             .ToDictionaryAsync(x => x.UserId, x => x.Count);
-        var users = await _db.Users.OrderBy(x => x.CreatedAt).ToListAsync();
+        var users = await _db.Users
+            .AsNoTracking()
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
 
         return Results.Ok(users.Select(u => new
         {
@@ -1338,8 +1364,20 @@ public class AdminController : ControllerBase
             u.CreatedAt,
             ordersCount = orderCounts.GetValueOrDefault(u.Id),
             profile = profiles.TryGetValue(u.Id, out var p)
-                ? new { p.Name, p.Phone, p.Nickname, p.ShippingAddress, p.PhoneVerified, p.EmailVerified }
-                : null
+                ? new
+                {
+                    Email = TechnicalEmailHelper.HideIfTechnical(p.Email),
+                    p.Name,
+                    p.Phone,
+                    p.Nickname,
+                    p.ShippingAddress,
+                    p.PhoneVerified,
+                    p.EmailVerified
+                }
+                : null,
+            externalIdentities = externalIdentitiesByUserId.TryGetValue(u.Id, out var identities)
+                ? identities
+                : new List<object>()
         }));
     }
 
@@ -1381,7 +1419,7 @@ public class AdminController : ControllerBase
             var currentEmail = (user.Email ?? string.Empty).Trim().ToLowerInvariant();
             if (!string.Equals(normalizedEmail, currentEmail, StringComparison.Ordinal))
             {
-                if (await _db.Users.AnyAsync(x => x.Email == normalizedEmail && x.Id != userId))
+                if (await _userIdentityService.HasOtherUserWithConfirmedEmailAsync(normalizedEmail, userId))
                     return Results.BadRequest(new { detail = "Email already in use" });
 
                 user.Email = normalizedEmail;
@@ -1604,6 +1642,28 @@ public class AdminController : ControllerBase
         profile.AdminPreferencesJson = JsonSerializer.Serialize(preferences);
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
+    }
+
+    [HttpPost("users/merge")]
+    public async Task<IResult> MergeUsers([FromBody] AdminUserMergePayload payload)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var mergedUser = await _userIdentityService.MergeUsersAsync(
+                payload.SourceUserId,
+                payload.TargetUserId,
+                payload.Email,
+                payload.Phone,
+                HttpContext.RequestAborted);
+
+            return Results.Ok(new { ok = true, userId = mergedUser.Id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
     }
 
     [HttpPost("settings")]
@@ -3151,4 +3211,12 @@ public class AdminUserPatchPayload
     public string? Nickname { get; set; }
     public string? ShippingAddress { get; set; }
     public string? Password { get; set; }
+}
+
+public class AdminUserMergePayload
+{
+    public string SourceUserId { get; set; } = string.Empty;
+    public string TargetUserId { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
 }

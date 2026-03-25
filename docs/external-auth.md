@@ -85,6 +85,8 @@ Callback URL всегда строится backend-ом по текущему or
 - VK: `/api/auth/external/callback/vk`
 - Яндекс: `/api/auth/external/callback/yandex`
 
+If the API is reverse-proxied under `/api`, nginx must also send `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix: /api`, otherwise providers will receive the wrong `redirect_uri`.
+
 В админке эти URL показаны в read-only полях, и именно их нужно добавлять у провайдера в список разрешенных redirect URI.
 
 ## Что включать на витрине

@@ -108,6 +108,8 @@ public class ProfileController : ControllerBase
 
         if (await _db.Users.AnyAsync(x => x.Email == nextEmail && x.Id != user.Id))
             return Results.BadRequest(new { detail = "Email already in use" });
+        if (await _userIdentityService.HasOtherUserWithConfirmedEmailAsync(nextEmail, user.Id, HttpContext.RequestAborted))
+            return Results.BadRequest(new { detail = "Email already in use" });
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var activeRequest = await _db.ContactChangeRequests
@@ -196,6 +198,8 @@ public class ProfileController : ControllerBase
 
         if (await _db.Users.AnyAsync(x => x.Email == nextEmail && x.Id != user.Id))
             return Results.BadRequest(new { detail = "Email already in use" });
+        if (await _userIdentityService.HasOtherUserWithConfirmedEmailAsync(nextEmail, user.Id, HttpContext.RequestAborted))
+            return Results.BadRequest(new { detail = "Email already in use" });
 
         user.Email = nextEmail;
         user.Verified = true;
@@ -213,6 +217,7 @@ public class ProfileController : ControllerBase
         request.VerifiedAt = now;
         request.ConsumedAt = now;
 
+        await _userIdentityService.ConsolidateUsersByConfirmedEmailAsync(user.Id, nextEmail, HttpContext.RequestAborted);
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true, email = nextEmail, emailVerified = true });
     }

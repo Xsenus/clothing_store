@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Primitives;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
@@ -60,6 +61,8 @@ public class AuthController : ControllerBase
             return Results.BadRequest(new { detail = "Password is too weak" });
 
         var existingUser = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+        if (await _userIdentityService.HasOtherUserWithConfirmedEmailAsync(email, existingUser?.Id, HttpContext.RequestAborted))
+            return Results.BadRequest(new { detail = "Email already in use" });
         if (existingUser is not null && existingUser.Verified)
             return Results.BadRequest(new { detail = "Email already in use" });
 
@@ -127,6 +130,7 @@ public class AuthController : ControllerBase
             profile.EmailVerified = true;
         }
         _db.VerificationCodes.Remove(code);
+        user = await _userIdentityService.ConsolidateUsersByConfirmedEmailAsync(user.Id, email, HttpContext.RequestAborted);
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "email");
         return Results.Ok(new
         {
@@ -143,11 +147,12 @@ public class AuthController : ControllerBase
     public async Task<IResult> Login([FromBody] AuthPayload payload)
     {
         var email = payload.Email.Trim().ToLowerInvariant();
-        var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+        var user = await _userIdentityService.FindUserForEmailAuthAsync(email, HttpContext.RequestAborted);
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
         if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
         if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
+        user = await _userIdentityService.ConsolidateUsersByConfirmedEmailAsync(user.Id, email, HttpContext.RequestAborted);
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "email");
         return Results.Ok(new { token, refreshToken, user = await BuildAuthUserPayloadAsync(user) });
     }
@@ -680,7 +685,7 @@ public class AuthController : ControllerBase
         var email = payload.Email.Trim().ToLowerInvariant();
         var code = await _db.VerificationCodes.FirstOrDefaultAsync(x => x.Email == email && x.Kind == "reset");
         if (code is null || code.Code != payload.Code || code.ExpiresAt < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return Results.BadRequest(new { detail = "Invalid code" });
-        var user = await _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+        var user = await _userIdentityService.FindUserByConfirmedEmailAsync(email, cancellationToken: HttpContext.RequestAborted);
         if (user is null) return Results.BadRequest(new { detail = "User not found" });
 
         var strictPasswordPolicy = await IsStrictPasswordPolicyEnabledAsync();
@@ -692,6 +697,7 @@ public class AuthController : ControllerBase
         user.PasswordHash = hash;
         user.Salt = salt;
         _db.VerificationCodes.Remove(code);
+        user = await _userIdentityService.ConsolidateUsersByConfirmedEmailAsync(user.Id, email, HttpContext.RequestAborted);
         await _db.SaveChangesAsync();
         return Results.Ok(new { ok = true });
     }
@@ -706,7 +712,7 @@ public class AuthController : ControllerBase
             && profile.EmailVerified
             && TechnicalEmailHelper.IsValidRealEmail(profile.Email)
                 ? TechnicalEmailHelper.NormalizeRealEmail(profile.Email)
-                : profile is null && TechnicalEmailHelper.IsValidRealEmail(user.Email)
+                : TechnicalEmailHelper.IsValidRealEmail(user.Email)
                     ? TechnicalEmailHelper.NormalizeRealEmail(user.Email)
                     : string.Empty;
 
@@ -834,7 +840,56 @@ public class AuthController : ControllerBase
             ? relativePath
             : "/" + relativePath;
 
-        return $"{Request.Scheme}://{Request.Host}{Request.PathBase}{normalizedPath}";
+        var scheme = GetProxyHeaderValue("X-Forwarded-Proto") ?? Request.Scheme;
+        var host = GetProxyHeaderValue("X-Forwarded-Host") ?? Request.Host.Value;
+        var pathBase = ResolveExternalPathBase();
+
+        return $"{scheme}://{host}{pathBase}{normalizedPath}";
+    }
+
+    private string ResolveExternalPathBase()
+    {
+        var requestPathBase = NormalizePathBase(Request.PathBase.Value);
+        var forwardedPrefix = NormalizePathBase(GetProxyHeaderValue("X-Forwarded-Prefix"));
+
+        if (string.IsNullOrWhiteSpace(forwardedPrefix))
+            return requestPathBase ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(requestPathBase))
+            return forwardedPrefix;
+
+        if (string.Equals(requestPathBase, forwardedPrefix, StringComparison.Ordinal))
+            return requestPathBase;
+
+        return $"{requestPathBase}{forwardedPrefix}";
+    }
+
+    private string? GetProxyHeaderValue(string headerName)
+    {
+        if (!Request.Headers.TryGetValue(headerName, out StringValues values))
+            return null;
+
+        var rawValue = values.ToString();
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return null;
+
+        var firstValue = rawValue
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(firstValue) ? null : firstValue;
+    }
+
+    private static string? NormalizePathBase(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == "/")
+            return null;
+
+        if (!normalized.StartsWith("/", StringComparison.Ordinal))
+            normalized = "/" + normalized;
+
+        return normalized.TrimEnd('/');
     }
 
     private async Task<ExternalAccessTokenResult> ExchangeExternalAccessTokenAsync(
@@ -922,6 +977,7 @@ public class AuthController : ControllerBase
             && emailVerifiedEl.GetBoolean();
         var displayName = document.RootElement.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
         var avatarUrl = document.RootElement.TryGetProperty("picture", out var pictureEl) ? pictureEl.GetString() : null;
+        var phone = ReadExternalPhone(document.RootElement, "phone_number", "phone");
 
         return new ExternalIdentityProfile(
             Provider: "google",
@@ -930,7 +986,9 @@ public class AuthController : ControllerBase
             EmailVerified: emailVerified,
             Username: null,
             DisplayName: displayName,
-            AvatarUrl: avatarUrl);
+            AvatarUrl: avatarUrl,
+            Phone: phone,
+            PhoneVerified: false);
     }
 
     private async Task<ExternalIdentityProfile> LoadVkProfileAsync(ExternalAccessTokenResult tokenResult, CancellationToken cancellationToken)
@@ -985,6 +1043,7 @@ public class AuthController : ControllerBase
         var username = userEl.TryGetProperty("screen_name", out var screenNameEl) ? screenNameEl.GetString() : null;
         var avatarUrl = userEl.TryGetProperty("photo_200", out var photoEl) ? photoEl.GetString() : null;
         var email = string.IsNullOrWhiteSpace(tokenResult.ProviderEmail) ? null : tokenResult.ProviderEmail.Trim();
+        var phone = ReadExternalPhone(userEl, "phone", "phone_number", "mobile_phone", "home_phone");
 
         return new ExternalIdentityProfile(
             Provider: "vk",
@@ -993,7 +1052,9 @@ public class AuthController : ControllerBase
             EmailVerified: TechnicalEmailHelper.IsValidRealEmail(email),
             Username: username,
             DisplayName: string.IsNullOrWhiteSpace(displayName) ? username : displayName,
-            AvatarUrl: avatarUrl);
+            AvatarUrl: avatarUrl,
+            Phone: phone,
+            PhoneVerified: false);
     }
 
     private async Task<ExternalIdentityProfile> LoadYandexProfileAsync(string accessToken, CancellationToken cancellationToken)
@@ -1016,6 +1077,7 @@ public class AuthController : ControllerBase
         var email = document.RootElement.TryGetProperty("default_email", out var emailEl) ? emailEl.GetString() : null;
         var username = document.RootElement.TryGetProperty("login", out var loginEl) ? loginEl.GetString() : null;
         var displayName = document.RootElement.TryGetProperty("real_name", out var realNameEl) ? realNameEl.GetString() : null;
+        var phone = ReadExternalPhone(document.RootElement, "default_phone", "phone", "phone_number");
         if (string.IsNullOrWhiteSpace(displayName) && document.RootElement.TryGetProperty("display_name", out var displayNameEl))
             displayName = displayNameEl.GetString();
 
@@ -1038,7 +1100,45 @@ public class AuthController : ControllerBase
             EmailVerified: TechnicalEmailHelper.IsValidRealEmail(email),
             Username: username,
             DisplayName: displayName,
-            AvatarUrl: avatarUrl);
+            AvatarUrl: avatarUrl,
+            Phone: phone,
+            PhoneVerified: false);
+    }
+
+    private static string? ReadExternalPhone(JsonElement root, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!root.TryGetProperty(propertyName, out var value))
+                continue;
+
+            var phone = value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Object => TryReadNestedPhone(value),
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(phone))
+                return phone.Trim();
+        }
+
+        return null;
+    }
+
+    private static string? TryReadNestedPhone(JsonElement root)
+    {
+        foreach (var propertyName in new[] { "number", "formatted", "value", "phone_number" })
+        {
+            if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.String)
+                continue;
+
+            var phone = value.GetString();
+            if (!string.IsNullOrWhiteSpace(phone))
+                return phone;
+        }
+
+        return null;
     }
 
     private static string? GetExternalProviderErrorDetail(string? responseBody, string? fallback)
