@@ -959,6 +959,17 @@ export const FLOW = {
     method: "DELETE",
   }),
 
+  adminMergeUsers: async ({ input }) => request("/admin/users/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceUserId: input.sourceUserId,
+      targetUserId: input.targetUserId,
+      email: input.email,
+      phone: input.phone,
+    }),
+  }),
+
 
   adminGetTelegramBots: async () => request("/admin/telegram-bots"),
 

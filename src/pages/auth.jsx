@@ -29,6 +29,72 @@ function AuthMiniFooter() {
   );
 }
 
+function QuickAuthTile({ label, title, active = false, disabled = false, onClick, children }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      title={title || label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "h-14 rounded-2xl border bg-white px-0 shadow-sm transition-all hover:bg-white",
+        active
+          ? "border-black/60 shadow-md"
+          : "border-border/70 hover:-translate-y-0.5 hover:border-black/20 hover:shadow-md",
+      ].join(" ")}
+    >
+      <span className="sr-only">{label}</span>
+      {children}
+    </Button>
+  );
+}
+
+function GoogleBrandIcon() {
+  return (
+    <span
+      aria-hidden="true"
+      className="text-[28px] font-semibold leading-none"
+      style={{
+        backgroundImage:
+          "linear-gradient(135deg, #4285F4 0%, #4285F4 34%, #EA4335 34%, #EA4335 57%, #FBBC05 57%, #FBBC05 74%, #34A853 74%, #34A853 100%)",
+        WebkitBackgroundClip: "text",
+        color: "transparent",
+      }}
+    >
+      G
+    </span>
+  );
+}
+
+function VkBrandIcon() {
+  return (
+    <span aria-hidden="true" className="text-lg font-black uppercase tracking-tight text-[#0077FF]">
+      VK
+    </span>
+  );
+}
+
+function YandexBrandIcon() {
+  return (
+    <span aria-hidden="true" className="text-[28px] font-black leading-none text-[#FC3F1D]">
+      Я
+    </span>
+  );
+}
+
+function TelegramBrandIcon() {
+  return (
+    <svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M20.67 4.34L3.95 10.79C2.81 11.24 2.82 11.87 3.74 12.15L8.03 13.49L9.68 18.67C9.89 19.31 10.06 19.55 10.46 19.55C10.77 19.55 10.9 19.41 11.08 19.1L13.16 15.72L17.49 18.91C18.29 19.35 18.86 19.13 19.06 18.17L21.91 4.73C22.2 3.55 21.47 3.01 20.67 4.34Z"
+        fill="#229ED9"
+      />
+    </svg>
+  );
+}
+
 export default function AuthPage() {
   const { signIn } = useAuthActions();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -440,6 +506,14 @@ export default function AuthPage() {
     }
   };
 
+  const hasOAuthQuickAuth = googleEnabled || vkEnabled || yandexEnabled;
+  const hasTelegramBotQuickAuth = telegramEnabled && telegramBotUsername;
+  const hasTelegramWidgetQuickAuth = telegramWidgetEnabled && telegramBotUsername;
+  const hasQuickAuthSection = hasOAuthQuickAuth || hasTelegramBotQuickAuth || hasTelegramWidgetQuickAuth;
+  const oauthProviderCount = [googleEnabled, vkEnabled, yandexEnabled].filter(Boolean).length;
+  const oauthGridClassName =
+    oauthProviderCount >= 3 ? "grid-cols-3" : oauthProviderCount === 2 ? "grid-cols-2" : "grid-cols-1";
+
   if (showReset) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
@@ -614,58 +688,6 @@ export default function AuthPage() {
               </form>
             ) : (
               <>
-                {(googleEnabled || vkEnabled || yandexEnabled || (telegramEnabled && telegramBotUsername)) && (
-                  <div className="mb-5 space-y-3">
-                    <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">Быстрый вход и регистрация</p>
-                      {googleEnabled && (
-                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("google")} disabled={loading}>
-                          Продолжить через Google
-                        </Button>
-                      )}
-                      {vkEnabled && (
-                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("vk")} disabled={loading}>
-                          Продолжить через VK
-                        </Button>
-                      )}
-                      {yandexEnabled && (
-                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("yandex")} disabled={loading}>
-                          Продолжить через Яндекс
-                        </Button>
-                      )}
-                      {telegramWidgetEnabled && telegramBotUsername && (
-                        <div className="rounded-md border border-dashed px-3 py-3">
-                          <p className="mb-2 text-xs text-muted-foreground">Telegram widget: самый быстрый вход без переходов по боту.</p>
-                          <div ref={telegramWidgetRef} className="flex justify-center" />
-                        </div>
-                      )}
-                      {telegramEnabled && telegramBotUsername && (
-                        <Button type="button" variant="outline" className="w-full h-9" onClick={handleTelegramSignIn} disabled={loading}>
-                          Войти через Telegram в боте
-                        </Button>
-                      )}
-                    </div>
-                    {(telegramAuthState || externalAuthSession) && (
-                      <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                        {telegramAuthState && (
-                          <p>
-                            Ожидаем подтверждение входа в @{telegramBotUsername}. {telegramAuthExpiresAt ? "Ссылка действует 10 минут." : ""}
-                          </p>
-                        )}
-                        {externalAuthSession && (
-                          <p>
-                            Ожидаем завершение входа через {getProviderLabel(externalAuthSession.provider)}.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-border" />
-                      <span className="text-xs text-muted-foreground">или по email</span>
-                      <div className="h-px flex-1 bg-border" />
-                    </div>
-                  </div>
-                )}
                 <Tabs value={authTab} onValueChange={setAuthTab} defaultValue="signin" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-4">
                   <TabsTrigger value="signin">Вход</TabsTrigger>
@@ -714,19 +736,6 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full h-9" disabled={loading}>
                       {loading ? "Вход..." : "Войти"}
                     </Button>
-                    {false && telegramEnabled && telegramBotUsername && (
-                      <div className="pt-1 space-y-2">
-                        <p className="text-xs text-muted-foreground">Или войдите через Telegram:</p>
-                        <Button type="button" variant="outline" className="w-full h-9" onClick={handleTelegramSignIn} disabled={loading}>
-                          Войти через Telegram
-                        </Button>
-                        {telegramAuthState && (
-                          <p className="text-xs text-muted-foreground">
-                            Ожидаем подтверждение в @{telegramBotUsername}. {telegramAuthExpiresAt ? "Ссылка действует 10 минут." : ""}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </form>
                 </TabsContent>
 
@@ -766,6 +775,86 @@ export default function AuthPage() {
                   </form>
                 </TabsContent>
                 </Tabs>
+                {hasQuickAuthSection && (
+                  <div className="mt-5 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-px flex-1 bg-border" />
+                      <span className="text-xs text-muted-foreground">или быстрый вход</span>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+
+                    {hasOAuthQuickAuth && (
+                      <div className={`grid gap-3 ${oauthGridClassName}`}>
+                        {googleEnabled && (
+                          <QuickAuthTile
+                            label="Продолжить через Google"
+                            active={externalAuthSession?.provider === "google"}
+                            disabled={loading}
+                            onClick={() => handleExternalSignIn("google")}
+                          >
+                            <GoogleBrandIcon />
+                          </QuickAuthTile>
+                        )}
+                        {vkEnabled && (
+                          <QuickAuthTile
+                            label="Продолжить через VK"
+                            active={externalAuthSession?.provider === "vk"}
+                            disabled={loading}
+                            onClick={() => handleExternalSignIn("vk")}
+                          >
+                            <VkBrandIcon />
+                          </QuickAuthTile>
+                        )}
+                        {yandexEnabled && (
+                          <QuickAuthTile
+                            label="Продолжить через Яндекс"
+                            active={externalAuthSession?.provider === "yandex"}
+                            disabled={loading}
+                            onClick={() => handleExternalSignIn("yandex")}
+                          >
+                            <YandexBrandIcon />
+                          </QuickAuthTile>
+                        )}
+                      </div>
+                    )}
+
+                    {hasTelegramBotQuickAuth && (
+                      <QuickAuthTile
+                        label="Войти через Telegram"
+                        title="Войти через Telegram"
+                        active={Boolean(telegramAuthState)}
+                        disabled={loading}
+                        onClick={handleTelegramSignIn}
+                      >
+                        <TelegramBrandIcon />
+                      </QuickAuthTile>
+                    )}
+
+                    {hasTelegramWidgetQuickAuth && (
+                      <div className="rounded-2xl border border-dashed border-border/70 px-3 py-3">
+                        <p className="mb-3 text-center text-xs text-muted-foreground">
+                          Мгновенный вход через Telegram widget
+                        </p>
+                        <div ref={telegramWidgetRef} className="flex justify-center" />
+                      </div>
+                    )}
+
+                    {(telegramAuthState || externalAuthSession) && (
+                      <div className="space-y-1 rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                        {telegramAuthState && (
+                          <p>
+                            Ожидаем подтверждение входа в @{telegramBotUsername}. {telegramAuthExpiresAt ? "Ссылка действует 10 минут." : ""}
+                          </p>
+                        )}
+                        {externalAuthSession && (
+                          <p>
+                            Ожидаем завершение входа через {getProviderLabel(externalAuthSession.provider)}.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </CardContent>
