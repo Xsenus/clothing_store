@@ -37,6 +37,12 @@ public sealed record CdekDeliveryIntegrationOverrides(
 public sealed class CdekDeliveryService : ICdekDeliveryService
 {
     private const string ProviderCode = "cdek";
+    private const string TrainingCalculatorInternalErrorCode = "v2_internal_error";
+    private const string TrainingCalculatorInternalAdditionalCode = "0xBC236B02";
+    private const decimal TrainingFallbackCourierCost = 285m;
+    private const decimal TrainingFallbackPickupCost = 140m;
+    private const string TrainingFallbackCourierTariff = "137";
+    private const string TrainingFallbackPickupTariff = "136";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -175,9 +181,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             CityCode: cityCode,
             Quote: quote,
             PickupPoints: points,
-            Note: settings.UseTestEnvironment
-                ? "Использован официальный учебный контур api.edu.cdek.ru."
-                : "Использован боевой контур api.cdek.ru. Для сквозного теста понадобятся реальные договорные учетные данные.");
+            Note: BuildTestNote(settings, quote));
     }
 
     private async Task<DeliveryProviderQuoteResult> CalculateInternalAsync(
@@ -240,7 +244,12 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         using var response = await client.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
+        {
+            if (settings.UseTestEnvironment && TryBuildTrainingFallbackQuote(response.StatusCode, body, cityCode, out var fallbackQuote))
+                return fallbackQuote;
+
             throw new HttpRequestException(BuildHttpError("СДЭК не смог рассчитать тарифы", response.StatusCode, body));
+        }
 
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
         var tariffs = ExtractTariffs(document.RootElement);
@@ -268,6 +277,90 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
                 ["environment"] = settings.UseTestEnvironment ? "test" : "production",
                 ["cityCode"] = cityCode
             });
+    }
+
+    private static string BuildTestNote(CdekDeliveryIntegrationOverrides settings, DeliveryProviderQuoteResult quote)
+    {
+        if (!settings.UseTestEnvironment)
+            return "Использован боевой контур api.cdek.ru. Для сквозного теста понадобятся реальные договорные учетные данные.";
+
+        if (quote.Details is not null
+            && quote.Details.TryGetValue("quoteSource", out var quoteSource)
+            && string.Equals(quoteSource, "training_fallback", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Учебный калькулятор api.edu.cdek.ru вернул internal error, поэтому показаны резервные demo-тарифы учебного контура. OAuth, определение города и список ПВЗ при этом получены с официального API.";
+        }
+
+        return "Использован официальный учебный контур api.edu.cdek.ru.";
+    }
+
+    private static bool TryBuildTrainingFallbackQuote(
+        System.Net.HttpStatusCode statusCode,
+        string? body,
+        string cityCode,
+        out DeliveryProviderQuoteResult quote)
+    {
+        quote = default!;
+        if ((int)statusCode != 500 || !IsTrainingCalculatorInternalError(body))
+            return false;
+
+        quote = new DeliveryProviderQuoteResult(
+            Provider: ProviderCode,
+            Label: "СДЭК",
+            Currency: "RUB",
+            HomeDelivery: new DeliveryQuoteOptionSummary(
+                true,
+                TrainingFallbackCourierCost,
+                0,
+                TrainingFallbackCourierTariff,
+                "Показан резервный demo-тариф из-за сбоя учебного калькулятора СДЭК."),
+            PickupPointDelivery: new DeliveryPickupQuoteSummary(
+                true,
+                TrainingFallbackPickupCost,
+                0,
+                TrainingFallbackPickupTariff,
+                null,
+                "Показан резервный demo-тариф из-за сбоя учебного калькулятора СДЭК."),
+            Details: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["environment"] = "test",
+                ["cityCode"] = cityCode,
+                ["quoteSource"] = "training_fallback",
+                ["calculatorErrorCode"] = TrainingCalculatorInternalErrorCode,
+                ["calculatorErrorAdditionalCode"] = TrainingCalculatorInternalAdditionalCode,
+                ["calculatorErrorBody"] = string.IsNullOrWhiteSpace(body) ? string.Empty : body.Trim()
+            });
+        return true;
+    }
+
+    private static bool IsTrainingCalculatorInternalError(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+                return false;
+
+            foreach (var error in errors.EnumerateArray())
+            {
+                var code = GetString(error, "code");
+                var additionalCode = GetString(error, "additional_code");
+                if (string.Equals(code, TrainingCalculatorInternalErrorCode, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(additionalCode, TrainingCalculatorInternalAdditionalCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private async Task<CdekDeliveryIntegrationOverrides> ResolveSettingsAsync(

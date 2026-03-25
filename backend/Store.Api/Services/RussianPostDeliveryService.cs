@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -145,6 +146,7 @@ public sealed class RussianPostDeliveryService : IRussianPostDeliveryService
 
         using var request = new HttpRequestMessage(HttpMethod.Get, uri.Uri);
         ApplyHeaders(request, settings);
+        ApplyRequestTransportOptions(request);
 
         var client = _httpClientFactory.CreateClient();
         using var response = await client.SendAsync(request, cancellationToken);
@@ -224,6 +226,7 @@ public sealed class RussianPostDeliveryService : IRussianPostDeliveryService
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(BaseUrl), "/1.0/tariff"));
         ApplyHeaders(request, settings);
+        ApplyRequestTransportOptions(request);
         request.Content = new StringContent(requestBody.ToJsonString(), Encoding.UTF8, "application/json");
 
         var client = _httpClientFactory.CreateClient();
@@ -331,6 +334,13 @@ public sealed class RussianPostDeliveryService : IRussianPostDeliveryService
         request.Headers.TryAddWithoutValidation("Authorization", $"AccessToken {settings.AccessToken}");
         request.Headers.TryAddWithoutValidation("X-User-Authorization", $"Basic {settings.AuthorizationKey}");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.UserAgent.ParseAdd("FashionDemonStore/1.0");
+    }
+
+    private static void ApplyRequestTransportOptions(HttpRequestMessage request)
+    {
+        request.Version = HttpVersion.Version11;
+        request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
     }
 
     private async Task<DaDataAddressSuggestion?> TryResolveAddressAsync(string address, CancellationToken cancellationToken)

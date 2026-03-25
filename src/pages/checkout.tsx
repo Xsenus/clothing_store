@@ -25,6 +25,8 @@ import {
 import { toast } from 'sonner';
 
 type DeliveryMethod = 'home' | 'pickup' | 'self_pickup';
+type ManagedDeliveryMethod = Exclude<DeliveryMethod, 'self_pickup'>;
+type StatusTone = 'success' | 'warning' | 'danger' | 'muted';
 
 interface DeliveryQuoteOption {
   available?: boolean;
@@ -47,15 +49,6 @@ interface PickupPointOption {
   paymentMethods?: string[] | null;
 }
 
-interface DeliveryQuoteResponse {
-  provider?: string;
-  currency?: string;
-  toAddress?: string;
-  homeDelivery?: DeliveryQuoteOption | null;
-  pickupPointDelivery?: DeliveryQuoteOption | null;
-  nearestPickupPointDelivery?: DeliveryQuoteOption | null;
-}
-
 interface DeliveryProviderQuote {
   provider?: string;
   label?: string;
@@ -70,6 +63,48 @@ interface DeliveryProvidersResponse {
   providers?: DeliveryProviderQuote[] | null;
 }
 
+interface DeliveryProviderConfig {
+  provider: string;
+  label: string;
+  enabled: boolean;
+  ready: boolean;
+  supportsHome: boolean;
+  supportsPickup: boolean;
+  pickupTitle: string;
+}
+
+interface CheckoutPaymentOption {
+  id: string;
+  value: string;
+  title: string;
+  badge: string;
+  subtitle: string;
+  enabled: boolean;
+  working: boolean;
+  statusLabel: string;
+  statusTone: StatusTone;
+  statusDescription: string;
+}
+
+interface CheckoutDeliveryCard {
+  key: string;
+  provider: string;
+  providerLabel: string;
+  method: ManagedDeliveryMethod;
+  title: string;
+  quote: DeliveryQuoteOption | null;
+  providerQuote: DeliveryProviderQuote | null;
+  available: boolean;
+  disabled: boolean;
+  priceLabel: string;
+  summary: string;
+  statusLabel: string;
+  statusTone: StatusTone;
+  statusDescription: string;
+  deliveryDaysLabel: string | null;
+  caption: string | null;
+}
+
 interface PromoCodeValidationResult {
   code: string;
   description?: string | null;
@@ -82,6 +117,12 @@ interface PromoCodeValidationResult {
 }
 
 const DELIVERY_CALCULATION_ERROR_MESSAGE = 'Не удалось выполнить расчет стоимости доставки.';
+const STATUS_TONE_CLASS_NAMES: Record<StatusTone, string> = {
+  success: 'border-emerald-700 bg-emerald-700 text-white',
+  warning: 'border-amber-700 bg-amber-50 text-amber-900',
+  danger: 'border-red-700 bg-red-50 text-red-900',
+  muted: 'border-black/15 bg-white text-muted-foreground',
+};
 
 const formatDeliveryDays = (days?: number | null) => {
   if (!Number.isFinite(Number(days)) || Number(days) <= 0) {
@@ -123,38 +164,6 @@ const getVisibleDeliveryError = (
   return fallback;
 };
 
-const getDeliveryOptionCost = (option?: DeliveryQuoteOption | null) => {
-  const value = Number(option?.estimatedCost);
-  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
-};
-
-const pickBestDeliveryProvider = (
-  providers: DeliveryProviderQuote[],
-  method: DeliveryMethod,
-) => {
-  const candidates = providers.filter((provider) => {
-    if (method === 'home') {
-      return !!provider?.homeDelivery?.available;
-    }
-
-    if (method === 'pickup') {
-      return !!provider?.pickupPointDelivery?.available;
-    }
-
-    return false;
-  });
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  return [...candidates].sort((left, right) => {
-    const leftOption = method === 'home' ? left.homeDelivery : left.pickupPointDelivery;
-    const rightOption = method === 'home' ? right.homeDelivery : right.pickupPointDelivery;
-    return getDeliveryOptionCost(leftOption) - getDeliveryOptionCost(rightOption);
-  })[0] || null;
-};
-
 const isProviderTestEnvironment = (provider?: DeliveryProviderQuote | null) => {
   const environment = String(provider?.details?.environment || '').trim().toLowerCase();
   const testEnvironment = String(provider?.details?.testEnvironment || '').trim().toLowerCase();
@@ -167,8 +176,14 @@ const getDeliveryProviderCaption = (provider?: DeliveryProviderQuote | null) => 
     return null;
   }
 
+  const quoteSource = String(provider?.details?.quoteSource || '').trim().toLowerCase();
+
   if (provider?.provider === 'russian_post') {
     return `${label} · официальный API`;
+  }
+
+  if (provider?.provider === 'cdek' && quoteSource === 'training_fallback') {
+    return `${label} · учебный контур (demo тарифы)`;
   }
 
   return isProviderTestEnvironment(provider)
@@ -183,6 +198,9 @@ interface PaymentOptionCardProps {
   title: string;
   badge: string;
   subtitle?: string;
+  statusLabel?: string;
+  statusTone?: StatusTone;
+  statusDescription?: string;
   disabled?: boolean;
   onSelect: (value: string) => void;
 }
@@ -194,6 +212,9 @@ const PaymentOptionCard = ({
   title,
   badge,
   subtitle,
+  statusLabel,
+  statusTone = 'muted',
+  statusDescription,
   disabled = false,
   onSelect,
 }: PaymentOptionCardProps) => {
@@ -250,6 +271,25 @@ const PaymentOptionCard = ({
           {subtitle ? (
             <p className={cn('text-sm text-muted-foreground', isSelected ? 'text-black/70' : '')}>{subtitle}</p>
           ) : null}
+          {(statusLabel || statusDescription) ? (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {statusLabel ? (
+                <span
+                  className={cn(
+                    'inline-flex items-center border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
+                    STATUS_TONE_CLASS_NAMES[statusTone],
+                  )}
+                >
+                  {statusLabel}
+                </span>
+              ) : null}
+              {statusDescription ? (
+                <span className={cn('text-xs', isSelected ? 'text-black/60' : 'text-muted-foreground')}>
+                  {statusDescription}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </button>
@@ -292,12 +332,15 @@ export default function CheckoutPage() {
   const [address, setAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('self_pickup');
+  const [selectedDeliveryProviderCode, setSelectedDeliveryProviderCode] = useState<string | null>(null);
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [promoCodeLoading, setPromoCodeLoading] = useState(false);
   const [promoCodeError, setPromoCodeError] = useState('');
   const [appliedPromoCode, setAppliedPromoCode] = useState<PromoCodeValidationResult | null>(null);
+  const [publicSettings, setPublicSettings] = useState<Record<string, string>>({});
   const [yooMoneyCapabilities, setYooMoneyCapabilities] = useState(() => ({
     enabled: false,
+    ready: false,
     allowBankCards: false,
     allowWallet: false,
     hasAnyMethod: false,
@@ -317,18 +360,14 @@ export default function CheckoutPage() {
   const [isManagedDeliveryEnabled, setIsManagedDeliveryEnabled] = useState(true);
 
   const [homeDeliveryLoading, setHomeDeliveryLoading] = useState(false);
-  const [homeDelivery, setHomeDelivery] = useState<DeliveryQuoteOption | null>(null);
-  const [homeDeliveryError, setHomeDeliveryError] = useState('');
-  const [homeDeliveryProvider, setHomeDeliveryProvider] = useState<DeliveryProviderQuote | null>(null);
+  const [deliveryProviders, setDeliveryProviders] = useState<DeliveryProviderQuote[]>([]);
+  const [deliveryCalculationError, setDeliveryCalculationError] = useState('');
 
   const [pickupPointsLoading, setPickupPointsLoading] = useState(false);
   const [pickupPointsError, setPickupPointsError] = useState('');
   const [pickupPoints, setPickupPoints] = useState<PickupPointOption[]>([]);
   const [selectedPickupPointId, setSelectedPickupPointId] = useState('');
   const [pickupDeliveryLoading, setPickupDeliveryLoading] = useState(false);
-  const [pickupDelivery, setPickupDelivery] = useState<DeliveryQuoteOption | null>(null);
-  const [pickupDeliveryError, setPickupDeliveryError] = useState('');
-  const [pickupDeliveryProvider, setPickupDeliveryProvider] = useState<DeliveryProviderQuote | null>(null);
 
   const [products, setProducts] = useState<Record<string, any>>({});
 
@@ -358,6 +397,7 @@ export default function CheckoutPage() {
       try {
         const settings = await fetchPublicSettings();
         if (!cancelled) {
+          setPublicSettings(settings && typeof settings === 'object' ? settings as Record<string, string> : {});
           setYooMoneyCapabilities(getYooMoneyCapabilities(settings));
           setYooKassaCapabilities(getYooKassaCapabilities(settings));
           setRoboKassaCapabilities(getRoboKassaCapabilities(settings));
@@ -370,6 +410,7 @@ export default function CheckoutPage() {
         }
       } catch {
         if (!cancelled) {
+          setPublicSettings({});
           setYooMoneyCapabilities(getYooMoneyCapabilities({}));
           setYooKassaCapabilities(getYooKassaCapabilities({}));
           setRoboKassaCapabilities(getRoboKassaCapabilities({}));
@@ -454,17 +495,197 @@ export default function CheckoutPage() {
 
   const requestedWeightKg = Math.max(0.3, Number((totalItems * 0.3).toFixed(3)));
   const promoDiscount = Math.min(subtotal, Number(appliedPromoCode?.discountAmount ?? 0));
+  const yoomoneyBankCardsEnabled = isSettingEnabled(publicSettings?.yoomoney_allow_bank_cards);
+  const yoomoneyWalletEnabled = isSettingEnabled(publicSettings?.yoomoney_allow_wallet);
+  const yookassaBankCardsEnabled = isSettingEnabled(publicSettings?.yookassa_allow_bank_cards, true);
+  const yookassaSbpEnabled = isSettingEnabled(publicSettings?.yookassa_allow_sbp, true);
+  const yookassaYooMoneyEnabled = isSettingEnabled(publicSettings?.yookassa_allow_yoomoney, true);
+
+  const resolvePaymentStatus = (
+    providerEnabled: boolean,
+    providerReady: boolean,
+    methodEnabled: boolean,
+    working: boolean,
+  ) => {
+    if (working) {
+      return {
+        label: 'Работает',
+        tone: 'success' as const,
+        description: 'Метод доступен для оформления заказа.',
+      };
+    }
+
+    if (!providerEnabled) {
+      return {
+        label: 'Отключено',
+        tone: 'muted' as const,
+        description: 'Интеграция выключена в публичных настройках.',
+      };
+    }
+
+    if (!providerReady) {
+      return {
+        label: 'Не готово',
+        tone: 'warning' as const,
+        description: 'Интеграция включена, но еще не готова для публичного checkout.',
+      };
+    }
+
+    if (!methodEnabled) {
+      return {
+        label: 'Метод выключен',
+        tone: 'muted' as const,
+        description: 'Этот способ отключен в настройках платежного провайдера.',
+      };
+    }
+
+    return {
+      label: 'Недоступно',
+      tone: 'danger' as const,
+      description: 'Сейчас этот способ оплаты не может принять заказ.',
+    };
+  };
+
+  const codPaymentStatus = {
+    label: 'Работает',
+    tone: 'success' as const,
+    description: 'Базовый способ оплаты всегда доступен для оформления.',
+  };
+  const yooMoneyCardStatus = resolvePaymentStatus(
+    yooMoneyCapabilities.enabled,
+    yooMoneyCapabilities.ready,
+    yoomoneyBankCardsEnabled,
+    yooMoneyCapabilities.allowBankCards,
+  );
+  const yooMoneyWalletStatus = resolvePaymentStatus(
+    yooMoneyCapabilities.enabled,
+    yooMoneyCapabilities.ready,
+    yoomoneyWalletEnabled,
+    yooMoneyCapabilities.allowWallet,
+  );
+  const yooKassaCardStatus = resolvePaymentStatus(
+    yooKassaCapabilities.enabled,
+    yooKassaCapabilities.ready,
+    yookassaBankCardsEnabled,
+    yooKassaCapabilities.allowBankCards,
+  );
+  const yooKassaSbpStatus = resolvePaymentStatus(
+    yooKassaCapabilities.enabled,
+    yooKassaCapabilities.ready,
+    yookassaSbpEnabled,
+    yooKassaCapabilities.allowSbp,
+  );
+  const yooKassaYooMoneyStatus = resolvePaymentStatus(
+    yooKassaCapabilities.enabled,
+    yooKassaCapabilities.ready,
+    yookassaYooMoneyEnabled,
+    yooKassaCapabilities.allowYooMoney,
+  );
+  const roboKassaStatus = resolvePaymentStatus(
+    roboKassaCapabilities.enabled,
+    roboKassaCapabilities.ready,
+    roboKassaCapabilities.enabled,
+    roboKassaCapabilities.hasAnyMethod,
+  );
+
+  const paymentOptions: CheckoutPaymentOption[] = [
+    {
+      id: 'payment-cod',
+      value: 'cod',
+      title: 'Оплата при получении',
+      badge: 'При получении',
+      subtitle: 'Оплатите заказ при получении или примерке.',
+      enabled: true,
+      working: true,
+      statusLabel: codPaymentStatus.label,
+      statusTone: codPaymentStatus.tone,
+      statusDescription: codPaymentStatus.description,
+    },
+    {
+      id: 'payment-yoomoney-card',
+      value: 'yoomoney_card',
+      title: 'ЮMoney: банковская карта',
+      badge: 'Онлайн',
+      subtitle: 'Откроем защищенную форму ЮMoney и после оплаты вернем вас в личный кабинет.',
+      enabled: yooMoneyCapabilities.enabled,
+      working: yooMoneyCapabilities.allowBankCards,
+      statusLabel: yooMoneyCardStatus.label,
+      statusTone: yooMoneyCardStatus.tone,
+      statusDescription: yooMoneyCardStatus.description,
+    },
+    {
+      id: 'payment-yoomoney-wallet',
+      value: 'yoomoney_wallet',
+      title: 'ЮMoney: кошелек',
+      badge: 'Онлайн',
+      subtitle: 'Оплата через кошелек ЮMoney с подтверждением на стороне сервиса.',
+      enabled: yooMoneyCapabilities.enabled,
+      working: yooMoneyCapabilities.allowWallet,
+      statusLabel: yooMoneyWalletStatus.label,
+      statusTone: yooMoneyWalletStatus.tone,
+      statusDescription: yooMoneyWalletStatus.description,
+    },
+    {
+      id: 'payment-yookassa-card',
+      value: 'yookassa_card',
+      title: 'YooKassa: банковская карта',
+      badge: 'Онлайн',
+      subtitle: 'Переход на защищенную страницу YooKassa для оплаты банковской картой.',
+      enabled: yooKassaCapabilities.enabled,
+      working: yooKassaCapabilities.allowBankCards,
+      statusLabel: yooKassaCardStatus.label,
+      statusTone: yooKassaCardStatus.tone,
+      statusDescription: yooKassaCardStatus.description,
+    },
+    {
+      id: 'payment-yookassa-sbp',
+      value: 'yookassa_sbp',
+      title: 'YooKassa: СБП',
+      badge: 'Онлайн',
+      subtitle: 'Оплата через СБП на защищенной странице YooKassa.',
+      enabled: yooKassaCapabilities.enabled,
+      working: yooKassaCapabilities.allowSbp,
+      statusLabel: yooKassaSbpStatus.label,
+      statusTone: yooKassaSbpStatus.tone,
+      statusDescription: yooKassaSbpStatus.description,
+    },
+    {
+      id: 'payment-yookassa-yoomoney',
+      value: 'yookassa_yoomoney',
+      title: 'YooKassa: ЮMoney',
+      badge: 'Онлайн',
+      subtitle: 'Оплата ЮMoney внутри платежной страницы YooKassa.',
+      enabled: yooKassaCapabilities.enabled,
+      working: yooKassaCapabilities.allowYooMoney,
+      statusLabel: yooKassaYooMoneyStatus.label,
+      statusTone: yooKassaYooMoneyStatus.tone,
+      statusDescription: yooKassaYooMoneyStatus.description,
+    },
+    {
+      id: 'payment-robokassa',
+      value: 'robokassa',
+      title: 'RoboKassa',
+      badge: 'Онлайн',
+      subtitle: 'Переход на защищенную платежную форму RoboKassa с возвратом в личный кабинет после оплаты.',
+      enabled: roboKassaCapabilities.enabled,
+      working: roboKassaCapabilities.hasAnyMethod,
+      statusLabel: roboKassaStatus.label,
+      statusTone: roboKassaStatus.tone,
+      statusDescription: roboKassaStatus.description,
+    },
+  ];
+
+  const visiblePaymentOptions = paymentOptions.filter((option) => (
+    option.value === 'cod'
+      || (isAdmin ? true : option.working)
+  ));
 
   useEffect(() => {
     if (!isManagedDeliveryEnabled || !address.trim() || subtotal <= 0) {
       setHomeDeliveryLoading(false);
-      setHomeDelivery(null);
-      setHomeDeliveryError('');
-      setHomeDeliveryProvider(null);
+      setDeliveryProviders([]);
+      setDeliveryCalculationError('');
       setPickupDeliveryLoading(false);
-      setPickupDelivery(null);
-      setPickupDeliveryError('');
-      setPickupDeliveryProvider(null);
       return;
     }
 
@@ -473,8 +694,7 @@ export default function CheckoutPage() {
     const run = async () => {
       setHomeDeliveryLoading(true);
       setPickupDeliveryLoading(true);
-      setHomeDeliveryError('');
-      setPickupDeliveryError('');
+      setDeliveryCalculationError('');
 
       try {
         const res = await FLOW.deliveryCalculate({
@@ -492,36 +712,14 @@ export default function CheckoutPage() {
 
         const nextResponse = (res || null) as DeliveryProvidersResponse | null;
         const nextProviders = Array.isArray(nextResponse?.providers) ? nextResponse.providers : [];
-        const nextHomeProvider = pickBestDeliveryProvider(nextProviders, 'home');
-        const nextPickupProvider = pickBestDeliveryProvider(nextProviders, 'pickup');
-        const nextHomeDelivery = nextHomeProvider?.homeDelivery || null;
-        const nextPickupDelivery = nextPickupProvider?.pickupPointDelivery || null;
-
-        setHomeDeliveryProvider(nextHomeProvider);
-        setPickupDeliveryProvider(nextPickupProvider);
-        setHomeDelivery(nextHomeDelivery);
-        setPickupDelivery(nextPickupDelivery);
-        setHomeDeliveryError(
-          nextHomeDelivery?.available
-            ? ''
-            : nextHomeDelivery?.error || 'Службы доставки не вернули доступный вариант до двери.'
-        );
-        setPickupDeliveryError(
-          nextPickupDelivery?.available
-            ? ''
-            : nextPickupDelivery?.error || 'Службы доставки не вернули доступный вариант до пункта выдачи.'
-        );
+        setDeliveryProviders(nextProviders);
       } catch (error) {
         if (cancelled) {
           return;
         }
 
-        setHomeDelivery(null);
-        setHomeDeliveryProvider(null);
-        setHomeDeliveryError(getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE));
-        setPickupDelivery(null);
-        setPickupDeliveryProvider(null);
-        setPickupDeliveryError(getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE));
+        setDeliveryProviders([]);
+        setDeliveryCalculationError(getErrorMessage(error, DELIVERY_CALCULATION_ERROR_MESSAGE));
       } finally {
         if (!cancelled) {
           setHomeDeliveryLoading(false);
@@ -537,8 +735,193 @@ export default function CheckoutPage() {
     };
   }, [address, isManagedDeliveryEnabled, paymentMethod, requestedWeightKg, subtotal]);
 
+  const deliveryProviderConfigs: DeliveryProviderConfig[] = [
+    {
+      provider: 'yandex_delivery',
+      label: 'Яндекс Доставка',
+      enabled: isSettingEnabled(publicSettings?.yandex_delivery_enabled, true),
+      ready: true,
+      supportsHome: true,
+      supportsPickup: true,
+      pickupTitle: 'Пункт выдачи',
+    },
+    {
+      provider: 'cdek',
+      label: 'СДЭК',
+      enabled: isSettingEnabled(publicSettings?.delivery_cdek_enabled),
+      ready: isSettingEnabled(publicSettings?.delivery_cdek_ready),
+      supportsHome: true,
+      supportsPickup: true,
+      pickupTitle: 'ПВЗ',
+    },
+    {
+      provider: 'russian_post',
+      label: 'Почта России',
+      enabled: isSettingEnabled(publicSettings?.delivery_russian_post_enabled),
+      ready: isSettingEnabled(publicSettings?.delivery_russian_post_ready),
+      supportsHome: true,
+      supportsPickup: true,
+      pickupTitle: 'Отделение',
+    },
+    {
+      provider: 'avito',
+      label: 'Avito',
+      enabled: isSettingEnabled(publicSettings?.delivery_avito_enabled),
+      ready: isSettingEnabled(publicSettings?.delivery_avito_ready),
+      supportsHome: false,
+      supportsPickup: false,
+      pickupTitle: 'Пункт выдачи',
+    },
+  ];
+
+  const deliveryProviderMap = new Map(
+    deliveryProviders.map((provider) => [String(provider.provider || '').trim().toLowerCase(), provider] as const),
+  );
+  const isDeliveryCalculationPending = (homeDeliveryLoading || pickupDeliveryLoading) && Boolean(address.trim());
+
+  const buildDeliveryCard = (
+    config: DeliveryProviderConfig,
+    method: ManagedDeliveryMethod,
+  ): CheckoutDeliveryCard => {
+    const providerQuote = deliveryProviderMap.get(config.provider) || null;
+    const quote = method === 'home'
+      ? providerQuote?.homeDelivery || null
+      : providerQuote?.pickupPointDelivery || null;
+    const available = Boolean(quote?.available);
+    const optionError = normalizeDeliveryError(quote?.error);
+    const title = `${config.label}: ${method === 'home' ? 'до двери' : config.pickupTitle}`;
+    const caption = getDeliveryProviderCaption(providerQuote) || config.label;
+    const deliveryDaysLabel = available ? formatDeliveryDays(quote?.deliveryDays) : null;
+
+    let priceLabel = 'Недоступно';
+    let summary = '';
+    let statusLabel = 'Недоступно';
+    let statusTone: StatusTone = 'danger';
+    let statusDescription = '';
+
+    if (!config.ready) {
+      priceLabel = 'Не настроено';
+      summary = `${config.label} включен, но публичный checkout еще не готов для расчета.`;
+      statusLabel = 'Не готово';
+      statusTone = 'warning';
+      statusDescription = 'Провайдер включен, но его публичная конфигурация еще не завершена.';
+    } else if (!address.trim()) {
+      priceLabel = 'Нужен адрес';
+      summary = method === 'home'
+        ? 'Укажите адрес, чтобы рассчитать стоимость и срок доставки до двери.'
+        : 'Укажите адрес, чтобы подобрать ближайшие пункты выдачи.';
+      statusLabel = 'Нужен адрес';
+      statusTone = 'muted';
+      statusDescription = 'Без адреса этот вариант нельзя рассчитать.';
+    } else if (available) {
+      priceLabel = formatProductPrice(quote?.estimatedCost ?? 0);
+      summary = method === 'home'
+        ? `Доставка по адресу: ${address}`
+        : `Выберите удобный ${config.pickupTitle.toLowerCase()} из списка ниже.`;
+      statusLabel = 'Работает';
+      statusTone = 'success';
+      statusDescription = 'Вариант доступен для оформления заказа.';
+    } else if (isDeliveryCalculationPending && !providerQuote) {
+      priceLabel = 'Расчет...';
+      summary = `Запрашиваем тарифы ${config.label}.`;
+      statusLabel = 'Расчет';
+      statusTone = 'muted';
+      statusDescription = 'Ждем ответ от провайдера.';
+    } else if (optionError) {
+      priceLabel = 'Недоступно';
+      summary = getVisibleDeliveryError(optionError, isAdmin);
+      statusLabel = 'Не работает';
+      statusTone = 'danger';
+      statusDescription = 'Провайдер ответил ошибкой для этого сценария доставки.';
+    } else if (!providerQuote && deliveryCalculationError) {
+      priceLabel = 'Нет ответа';
+      summary = getVisibleDeliveryError(deliveryCalculationError, isAdmin);
+      statusLabel = 'Нет ответа';
+      statusTone = 'danger';
+      statusDescription = 'Общий запрос расчета завершился ошибкой.';
+    } else if (!providerQuote) {
+      priceLabel = 'Нет ответа';
+      summary = isAdmin
+        ? `${config.label} включен, но не вернул расчет для этого адреса и способа оплаты.`
+        : DELIVERY_CALCULATION_ERROR_MESSAGE;
+      statusLabel = 'Нет ответа';
+      statusTone = 'danger';
+      statusDescription = 'Провайдер не вернул расчет в общем запросе доставки.';
+    } else {
+      priceLabel = 'Недоступно';
+      summary = method === 'home'
+        ? 'Служба не вернула доступный вариант доставки до двери.'
+        : 'Служба не вернула доступный вариант доставки до пункта выдачи.';
+      statusLabel = 'Недоступно';
+      statusTone = 'danger';
+      statusDescription = 'Провайдер ответил, но этот тип доставки сейчас не доступен.';
+    }
+
+    return {
+      key: `${config.provider}:${method}`,
+      provider: config.provider,
+      providerLabel: config.label,
+      method,
+      title,
+      quote,
+      providerQuote,
+      available,
+      disabled: !address.trim() || !available,
+      priceLabel,
+      summary,
+      statusLabel,
+      statusTone,
+      statusDescription,
+      deliveryDaysLabel,
+      caption,
+    };
+  };
+
+  const deliveryCards = deliveryProviderConfigs.flatMap((config) => {
+    if (!config.enabled) {
+      return [];
+    }
+
+    const nextCards: CheckoutDeliveryCard[] = [];
+    if (config.supportsHome) {
+      nextCards.push(buildDeliveryCard(config, 'home'));
+    }
+
+    if (config.supportsPickup) {
+      nextCards.push(buildDeliveryCard(config, 'pickup'));
+    }
+
+    return nextCards;
+  });
+
+  const visibleDeliveryCards = deliveryCards.filter((card) => isAdmin || card.available);
+  const adminDeliveryDiagnostics = isAdmin
+    ? deliveryProviderConfigs
+      .filter((config) => config.enabled && !config.supportsHome && !config.supportsPickup)
+      .map((config) => ({
+        provider: config.provider,
+        label: config.label,
+        statusLabel: config.ready ? 'Нет checkout-метода' : 'Не готово',
+        statusTone: config.ready ? 'warning' as const : 'danger' as const,
+        description: config.ready
+          ? `${config.label} включен, но в storefront пока нет подключенного checkout-сценария.`
+          : `${config.label} включен, но публичный checkout-контур пока не готов.`,
+      }))
+    : [];
+
   useEffect(() => {
-    if (!isManagedDeliveryEnabled || !address.trim() || subtotal <= 0 || !pickupDeliveryProvider?.provider || !pickupDelivery?.available) {
+    const selectedPickupCard = selectedDeliveryMethod === 'pickup'
+      ? deliveryCards.find((card) => card.provider === selectedDeliveryProviderCode && card.method === 'pickup')
+      : null;
+
+    if (
+      !isManagedDeliveryEnabled
+      || !address.trim()
+      || subtotal <= 0
+      || selectedDeliveryMethod !== 'pickup'
+      || !selectedPickupCard?.provider
+      || !selectedPickupCard.available
+    ) {
       setPickupPointsLoading(false);
       setPickupPoints([]);
       setPickupPointsError('');
@@ -557,7 +940,7 @@ export default function CheckoutPage() {
       try {
         const response = await FLOW.getDeliveryPickupPoints({
           input: {
-            provider: pickupDeliveryProvider.provider,
+            provider: selectedPickupCard.provider,
             toAddress: address,
             limit: 8,
             paymentMethod,
@@ -610,7 +993,7 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, isManagedDeliveryEnabled, paymentMethod, pickupDelivery?.available, pickupDeliveryProvider, requestedWeightKg, subtotal]);
+  }, [address, deliveryCards, isManagedDeliveryEnabled, paymentMethod, requestedWeightKg, selectedDeliveryMethod, selectedDeliveryProviderCode, subtotal]);
 
   const selectedPickupPoint = pickupPoints.find((point) => point.id === selectedPickupPointId) || null;
   const selfPickupDelivery: DeliveryQuoteOption = {
@@ -622,54 +1005,73 @@ export default function CheckoutPage() {
   };
 
   useEffect(() => {
-    if (!selectedPickupPointId) {
-      return;
-    }
-
-    const selectedPoint = pickupPoints.find((point) => point.id === selectedPickupPointId);
-    if (!selectedPoint) {
-      return;
-    }
-
-    setPickupDelivery((prev) => {
-      if (!prev) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        estimatedCost: selectedPoint.estimatedCost ?? prev.estimatedCost,
-        deliveryDays: selectedPoint.deliveryDays ?? prev.deliveryDays,
-      };
-    });
-  }, [pickupPoints, selectedPickupPointId]);
-
-  useEffect(() => {
     if (!isManagedDeliveryEnabled) {
-      if (selectedDeliveryMethod !== 'self_pickup') {
+      if (selectedDeliveryMethod !== 'self_pickup' || selectedDeliveryProviderCode !== null) {
         setSelectedDeliveryMethod('self_pickup');
+        setSelectedDeliveryProviderCode(null);
       }
+      return;
     }
-  }, [isManagedDeliveryEnabled, selectedDeliveryMethod]);
 
+    if (selectedDeliveryMethod === 'self_pickup') {
+      return;
+    }
+
+    const currentSelection = deliveryCards.find((card) => (
+      card.provider === selectedDeliveryProviderCode
+      && card.method === selectedDeliveryMethod
+      && card.available
+    ));
+
+    if (currentSelection) {
+      return;
+    }
+
+    const firstAvailableCard = deliveryCards.find((card) => card.available);
+    if (firstAvailableCard) {
+      setSelectedDeliveryMethod(firstAvailableCard.method);
+      setSelectedDeliveryProviderCode(firstAvailableCard.provider);
+      return;
+    }
+
+    setSelectedDeliveryMethod('self_pickup');
+    setSelectedDeliveryProviderCode(null);
+  }, [deliveryCards, isManagedDeliveryEnabled, selectedDeliveryMethod, selectedDeliveryProviderCode]);
+
+  const selectedManagedDeliveryCard = selectedDeliveryMethod === 'self_pickup'
+    ? null
+    : deliveryCards.find((card) => (
+      card.provider === selectedDeliveryProviderCode
+      && card.method === selectedDeliveryMethod
+    )) || null;
+  const selectedManagedDeliveryQuote = selectedManagedDeliveryCard?.quote || null;
+  const selectedDeliveryProvider = selectedManagedDeliveryCard?.providerQuote || null;
+  const pickupDelivery = selectedDeliveryMethod === 'pickup' && selectedManagedDeliveryQuote
+    ? {
+        ...selectedManagedDeliveryQuote,
+        estimatedCost: selectedPickupPoint?.estimatedCost ?? selectedManagedDeliveryQuote.estimatedCost,
+        deliveryDays: selectedPickupPoint?.deliveryDays ?? selectedManagedDeliveryQuote.deliveryDays,
+      }
+    : selectedManagedDeliveryQuote;
   const selectedDeliveryOption = selectedDeliveryMethod === 'pickup'
     ? pickupDelivery
     : selectedDeliveryMethod === 'self_pickup'
       ? selfPickupDelivery
-      : homeDelivery;
+      : selectedManagedDeliveryQuote;
   const isPickupSelected = selectedDeliveryMethod === 'pickup';
   const isSelfPickupSelected = selectedDeliveryMethod === 'self_pickup';
-  const isHomeSelected = selectedDeliveryMethod === 'home';
-  const isHomeMethodDisabled = !isManagedDeliveryEnabled || !address.trim() || !homeDeliveryProvider || !homeDelivery?.available;
-  const isPickupMethodDisabled = !isManagedDeliveryEnabled || !address.trim() || !pickupDeliveryProvider || !pickupDelivery?.available;
   const shipping = Number(selectedDeliveryOption?.estimatedCost ?? 0);
   const total = subtotal - promoDiscount + shipping;
-  const visibleHomeDeliveryError = getVisibleDeliveryError(homeDeliveryError, isAdmin);
   const visiblePickupPointsError = pickupPointsError
     ? getVisibleDeliveryError(pickupPointsError, isAdmin)
     : '';
-  const visiblePickupDeliveryError = pickupDeliveryError
-    ? getVisibleDeliveryError(pickupDeliveryError, isAdmin)
+  const visibleSelectedDeliveryError = selectedManagedDeliveryCard
+    ? getVisibleDeliveryError(
+        selectedManagedDeliveryCard.quote?.error
+          || (!selectedManagedDeliveryCard.providerQuote ? deliveryCalculationError : '')
+          || DELIVERY_CALCULATION_ERROR_MESSAGE,
+        isAdmin,
+      )
     : '';
   const isShippingLoading = selectedDeliveryMethod === 'pickup'
     ? pickupPointsLoading || pickupDeliveryLoading
@@ -685,25 +1087,23 @@ export default function CheckoutPage() {
       selectedDeliveryMethod === 'self_pickup'
         ? true
         : selectedDeliveryMethod === 'home'
-        ? Boolean(homeDelivery?.available)
+        ? Boolean(selectedManagedDeliveryQuote?.available)
         : Boolean(selectedPickupPoint?.id && pickupDelivery?.available)
     );
   const selectedShippingProvider = selectedDeliveryMethod === 'home'
-    ? homeDeliveryProvider?.provider || null
+    ? selectedDeliveryProvider?.provider || selectedDeliveryProviderCode || null
     : selectedDeliveryMethod === 'pickup'
-      ? pickupDeliveryProvider?.provider || null
+      ? selectedDeliveryProvider?.provider || selectedDeliveryProviderCode || null
       : 'self_pickup';
   const selectedShippingTariff = selectedDeliveryMethod === 'home'
-    ? homeDelivery?.tariff || null
+    ? selectedManagedDeliveryQuote?.tariff || null
     : selectedDeliveryMethod === 'pickup'
       ? pickupDelivery?.tariff || null
       : 'self_pickup';
-  const homeDeliveryProviderCaption = getDeliveryProviderCaption(homeDeliveryProvider);
-  const pickupDeliveryProviderCaption = getDeliveryProviderCaption(pickupDeliveryProvider);
   const selectedDeliveryProviderCaption = selectedDeliveryMethod === 'home'
-    ? homeDeliveryProviderCaption
+    ? getDeliveryProviderCaption(selectedDeliveryProvider) || selectedManagedDeliveryCard?.providerLabel || null
     : selectedDeliveryMethod === 'pickup'
-      ? pickupDeliveryProviderCaption
+      ? getDeliveryProviderCaption(selectedDeliveryProvider) || selectedManagedDeliveryCard?.providerLabel || null
       : 'Самовывоз';
 
   const resolveSelectedShippingAddress = () => {
@@ -712,7 +1112,7 @@ export default function CheckoutPage() {
     }
 
     if (selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address) {
-      return `ПВЗ: ${selectedPickupPoint.address}`;
+      return `Пункт выдачи: ${selectedPickupPoint.address}`;
     }
 
     return address.trim();
@@ -726,17 +1126,23 @@ export default function CheckoutPage() {
     return `${window.location.origin}/profile?tab=orders`;
   };
 
-  const handleDeliveryMethodSelect = (method: DeliveryMethod, disabled = false) => {
+  const handleDeliveryMethodSelect = (
+    method: DeliveryMethod,
+    providerCode: string | null = null,
+    disabled = false,
+  ) => {
     if (disabled) {
       return;
     }
 
     setSelectedDeliveryMethod(method);
+    setSelectedDeliveryProviderCode(method === 'self_pickup' ? null : providerCode);
   };
 
   const handleDeliveryMethodKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
     method: DeliveryMethod,
+    providerCode: string | null = null,
     disabled = false,
   ) => {
     if (disabled) {
@@ -746,6 +1152,7 @@ export default function CheckoutPage() {
     if (event.key === ' ' || event.key === 'Enter') {
       event.preventDefault();
       setSelectedDeliveryMethod(method);
+      setSelectedDeliveryProviderCode(method === 'self_pickup' ? null : providerCode);
     }
   };
 
@@ -879,16 +1286,12 @@ export default function CheckoutPage() {
     }
 
     if (selectedDeliveryMethod === 'pickup' && !selectedPickupPoint?.id) {
-      toast.error('Выберите доступный ПВЗ из списка.');
+      toast.error('Выберите доступный пункт выдачи из списка.');
       return;
     }
 
     if (!selectedDeliveryOption?.available) {
-      toast.error(
-        selectedDeliveryMethod === 'pickup'
-          ? visiblePickupDeliveryError || DELIVERY_CALCULATION_ERROR_MESSAGE
-          : visibleHomeDeliveryError || DELIVERY_CALCULATION_ERROR_MESSAGE,
-      );
+      toast.error(visibleSelectedDeliveryError || DELIVERY_CALCULATION_ERROR_MESSAGE);
       return;
     }
 
@@ -1017,82 +1420,28 @@ export default function CheckoutPage() {
 
                 <div className="space-y-4">
                   <h2 className="border-b pb-2 text-xl font-bold uppercase tracking-wider">СПОСОБ ОПЛАТЫ</h2>
+                  {isAdmin ? (
+                    <p className="text-sm text-muted-foreground">
+                      Для администратора показаны все способы оплаты, включая отключенные и неготовые. Покупателю видны только рабочие варианты.
+                    </p>
+                  ) : null}
                   <div className="space-y-3" role="radiogroup" aria-label="Способ оплаты">
-                    <PaymentOptionCard
-                      id="payment-cod"
-                      value="cod"
-                      currentValue={paymentMethod}
-                      onSelect={setPaymentMethod}
-                      title="Оплата при получении"
-                      badge="При получении"
-                      subtitle="Оплатите заказ при получении или примерке."
-                    />
-                    {yooMoneyCapabilities.allowBankCards && (
+                    {visiblePaymentOptions.map((option) => (
                       <PaymentOptionCard
-                        id="payment-yoomoney-card"
-                        value="yoomoney_card"
+                        key={option.id}
+                        id={option.id}
+                        value={option.value}
                         currentValue={paymentMethod}
                         onSelect={setPaymentMethod}
-                        title="ЮMoney: банковская карта"
-                        badge="Онлайн"
-                        subtitle="Откроем защищенную форму ЮMoney и после оплаты вернем вас в личный кабинет."
+                        title={option.title}
+                        badge={option.badge}
+                        subtitle={option.subtitle}
+                        disabled={!option.working}
+                        statusLabel={isAdmin ? option.statusLabel : undefined}
+                        statusTone={option.statusTone}
+                        statusDescription={isAdmin ? option.statusDescription : undefined}
                       />
-                    )}
-                    {yooMoneyCapabilities.allowWallet && (
-                      <PaymentOptionCard
-                        id="payment-yoomoney-wallet"
-                        value="yoomoney_wallet"
-                        currentValue={paymentMethod}
-                        onSelect={setPaymentMethod}
-                        title="ЮMoney: кошелек"
-                        badge="Онлайн"
-                        subtitle="Оплата через кошелек ЮMoney с подтверждением на стороне сервиса."
-                      />
-                    )}
-                    {yooKassaCapabilities.allowBankCards && (
-                      <PaymentOptionCard
-                        id="payment-yookassa-card"
-                        value="yookassa_card"
-                        currentValue={paymentMethod}
-                        onSelect={setPaymentMethod}
-                        title="YooKassa: банковская карта"
-                        badge="Онлайн"
-                        subtitle="Переход на защищенную страницу YooKassa для оплаты банковской картой."
-                      />
-                    )}
-                    {yooKassaCapabilities.allowSbp && (
-                      <PaymentOptionCard
-                        id="payment-yookassa-sbp"
-                        value="yookassa_sbp"
-                        currentValue={paymentMethod}
-                        onSelect={setPaymentMethod}
-                        title="YooKassa: СБП"
-                        badge="Онлайн"
-                        subtitle="Оплата через СБП на защищенной странице YooKassa."
-                      />
-                    )}
-                    {yooKassaCapabilities.allowYooMoney && (
-                      <PaymentOptionCard
-                        id="payment-yookassa-yoomoney"
-                        value="yookassa_yoomoney"
-                        currentValue={paymentMethod}
-                        onSelect={setPaymentMethod}
-                        title="YooKassa: ЮMoney"
-                        badge="Онлайн"
-                        subtitle="Оплата ЮMoney внутри платежной страницы YooKassa."
-                      />
-                    )}
-                    {roboKassaCapabilities.hasAnyMethod && (
-                      <PaymentOptionCard
-                        id="payment-robokassa"
-                        value="robokassa"
-                        currentValue={paymentMethod}
-                        onSelect={setPaymentMethod}
-                        title="RoboKassa"
-                        badge="Онлайн"
-                        subtitle="Переход на защищенную платежную форму RoboKassa с возвратом в личный кабинет после оплаты."
-                      />
-                    )}
+                    ))}
                   </div>
                 </div>
 
@@ -1111,15 +1460,20 @@ export default function CheckoutPage() {
                       Для доставки до двери и ПВЗ сначала укажите адрес. Самовывоз доступен без адреса.
                     </p>
                   )}
+                  {isAdmin ? (
+                    <p className="text-sm text-muted-foreground">
+                      Для администратора показаны все включенные службы доставки и их статус. Покупателю видны только рабочие варианты.
+                    </p>
+                  ) : null}
 
                   <div className="grid gap-2" role="radiogroup" aria-label="Способ доставки">
-                      <div
-                        role="radio"
-                        aria-checked={isSelfPickupSelected}
-                        aria-labelledby="checkout-delivery-self-pickup-label"
-                        tabIndex={0}
-                        className={cn(
-                          'space-y-3 rounded-none border p-4 transition',
+                    <div
+                      role="radio"
+                      aria-checked={isSelfPickupSelected}
+                      aria-labelledby="checkout-delivery-self-pickup-label"
+                      tabIndex={0}
+                      className={cn(
+                        'space-y-3 rounded-none border p-4 transition',
                         isSelfPickupSelected
                           ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
                           : 'cursor-pointer border-gray-200 hover:border-black/40',
@@ -1143,225 +1497,234 @@ export default function CheckoutPage() {
                           )}>
                             Заберете заказ самостоятельно. После оформления мы свяжемся с вами и подтвердим детали выдачи.
                           </div>
+                          {isAdmin ? (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <span className={cn(
+                                'inline-flex items-center border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
+                                STATUS_TONE_CLASS_NAMES.success,
+                              )}>
+                                Работает
+                              </span>
+                              <span className={cn('text-xs', isSelfPickupSelected ? 'text-black/60' : 'text-muted-foreground')}>
+                                Самовывоз доступен независимо от интеграций доставки.
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
+                    {visibleDeliveryCards.map((card) => {
+                      const isSelected = selectedDeliveryMethod === card.method && selectedDeliveryProviderCode === card.provider;
 
-                    {isManagedDeliveryEnabled && (
-                      <div
-                        role="radio"
-                        aria-checked={isHomeSelected}
-                        aria-labelledby="checkout-delivery-home-label"
-                        aria-disabled={isHomeMethodDisabled}
-                        tabIndex={isHomeMethodDisabled ? -1 : 0}
-                        className={cn(
-                          'space-y-3 rounded-none border p-4 transition',
-                          isHomeSelected
-                            ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
-                            : !isHomeMethodDisabled
-                              ? 'cursor-pointer border-gray-200 hover:border-black/40'
-                              : 'border-gray-200 opacity-80',
-                        )}
-                        onClick={!isHomeMethodDisabled ? () => handleDeliveryMethodSelect('home') : undefined}
-                        onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'home', isHomeMethodDisabled)}
-                      >
+                      return (
+                        <div
+                          key={card.key}
+                          role="radio"
+                          aria-checked={isSelected}
+                          aria-labelledby={`checkout-delivery-${card.key}-label`}
+                          aria-disabled={card.disabled}
+                          tabIndex={card.disabled ? -1 : 0}
+                          className={cn(
+                            'space-y-3 rounded-none border p-4 transition',
+                            isSelected
+                              ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
+                              : !card.disabled
+                                ? 'cursor-pointer border-gray-200 hover:border-black/40'
+                                : 'border-gray-200 opacity-80',
+                          )}
+                          onClick={!card.disabled ? () => handleDeliveryMethodSelect(card.method, card.provider) : undefined}
+                          onKeyDown={(event) => handleDeliveryMethodKeyDown(event, card.method, card.provider, card.disabled)}
+                        >
                           <div className="flex items-start gap-3">
-                            <DeliveryOptionIndicator selected={isHomeSelected} disabled={isHomeMethodDisabled} />
+                            <DeliveryOptionIndicator selected={isSelected} disabled={card.disabled} />
                             <div className="flex-1 space-y-2">
                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                <span id="checkout-delivery-home-label" className="font-bold">До двери</span>
-                                <span className="font-black">
-                                  {!address.trim()
-                                    ? 'Нужен адрес'
-                                    : homeDelivery?.available
-                                      ? formatProductPrice(homeDelivery.estimatedCost ?? 0)
-                                      : 'Недоступно'}
-                                </span>
+                                <span id={`checkout-delivery-${card.key}-label`} className="font-bold">{card.title}</span>
+                                <span className="font-black">{card.priceLabel}</span>
                               </div>
-                              <div className="text-sm text-muted-foreground">
-                                {!address.trim()
-                                  ? 'Укажите адрес, чтобы рассчитать стоимость и срок доставки до двери.'
-                                  : homeDelivery?.available
-                                  ? `Адрес получателя: ${address}`
-                                  : visibleHomeDeliveryError}
-                              </div>
-                              {homeDelivery?.available && formatDeliveryDays(homeDelivery.deliveryDays) && (
+                              <div className="text-sm text-muted-foreground">{card.summary}</div>
+                              {card.deliveryDaysLabel ? (
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                                  Срок доставки: {formatDeliveryDays(homeDelivery.deliveryDays)}
+                                  Срок доставки: {card.deliveryDaysLabel}
                                 </div>
-                              )}
-                              {homeDeliveryProviderCaption && (
+                              ) : null}
+                              {card.caption ? (
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                                  Расчет: {homeDeliveryProviderCaption}
+                                  Расчет: {card.caption}
                                 </div>
-                              )}
+                              ) : null}
+                              {isAdmin ? (
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                  <span className={cn(
+                                    'inline-flex items-center border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
+                                    STATUS_TONE_CLASS_NAMES[card.statusTone],
+                                  )}>
+                                    {card.statusLabel}
+                                  </span>
+                                  <span className={cn('text-xs', isSelected ? 'text-black/60' : 'text-muted-foreground')}>
+                                    {card.statusDescription}
+                                  </span>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
-                      </div>
-                    )}
-
-                    {isManagedDeliveryEnabled && (
-                      <div
-                        role="radio"
-                        aria-checked={isPickupSelected}
-                        aria-labelledby="checkout-delivery-pickup-label"
-                        aria-disabled={isPickupMethodDisabled}
-                        tabIndex={isPickupMethodDisabled ? -1 : 0}
-                        className={cn(
-                          'space-y-4 rounded-none border p-4 transition',
-                          isPickupSelected
-                            ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
-                            : !isPickupMethodDisabled
-                              ? 'cursor-pointer border-gray-200 hover:border-black/40'
-                              : 'border-gray-200 opacity-80',
-                        )}
-                        onClick={!isPickupMethodDisabled ? () => handleDeliveryMethodSelect('pickup') : undefined}
-                        onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'pickup', isPickupMethodDisabled)}
-                      >
-                          <div className="flex items-start gap-3">
-                            <DeliveryOptionIndicator selected={isPickupSelected} disabled={isPickupMethodDisabled} />
-                            <div className="flex-1 space-y-3">
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <span id="checkout-delivery-pickup-label" className="font-bold">ПВЗ</span>
-                                <span className="font-black">
-                                  {!address.trim()
-                                    ? 'Нужен адрес'
-                                    : pickupDelivery?.available
-                                    ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
-                                    : pickupDeliveryLoading
-                                      ? 'Расчет...'
-                                      : pickupPointsLoading
-                                        ? 'Загрузка ПВЗ...'
-                                        : pickupPoints.length > 0
-                                          ? 'Выберите ПВЗ'
-                                          : 'Недоступно'}
-                                </span>
-                              </div>
-
-                              {isPickupSelected && selectedPickupPoint?.id ? (
-                                <div className="space-y-1 text-sm text-muted-foreground">
-                                  <p className="font-medium text-foreground">Выбранный ПВЗ</p>
-                                  <p>{selectedPickupPoint.address}</p>
-                                  {selectedPickupPoint.instruction && <p>{selectedPickupPoint.instruction}</p>}
-                                  <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide">
-                                    {pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
-                                      <span>Срок: {formatDeliveryDays(pickupDelivery.deliveryDays)}</span>
-                                    )}
-                                    {formatPickupDistance(selectedPickupPoint.distanceKm) && (
-                                      <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
-                                    )}
-                                  </div>
-                                  {pickupDeliveryProviderCaption && (
-                                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                                      Расчет: {pickupDeliveryProviderCaption}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <p className="text-sm text-muted-foreground">
-                                  {!address.trim()
-                                    ? 'Укажите адрес, чтобы мы подобрали ближайшие ПВЗ.'
-                                    : 'Выберите удобный пункт выдачи из списка. Стоимость и срок рассчитаем после выбора точки.'}
-                                </p>
-                              )}
-
-                              {isPickupSelected && pickupPointsLoading && (
-                                <p className="text-sm text-muted-foreground">
-                                  Подбираем ПВЗ рядом с вашим адресом...
-                                </p>
-                              )}
-
-                              {isPickupSelected && pickupDeliveryError && selectedPickupPoint?.id && !pickupDeliveryLoading && (
-                                <p className="text-sm text-red-700">
-                                  {visiblePickupDeliveryError}
-                                </p>
-                              )}
-
-                              {isPickupSelected && pickupPointsError && (
-                                <p className="text-sm text-red-700">
-                                  {visiblePickupPointsError}
-                                </p>
-                              )}
-
-                              {isPickupSelected && pickupPoints.length > 0 && (
-                                <div className="space-y-2 border border-black/10 bg-white p-3">
-                                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                                    Пункты выдачи для вашего адреса
-                                  </div>
-                                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                                    {pickupPoints.map((point) => {
-                                      const isSelected = point.id === selectedPickupPointId;
-
-                                      return (
-                                        <button
-                                          key={point.id}
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            setSelectedPickupPointId(point.id);
-                                            setSelectedDeliveryMethod('pickup');
-                                          }}
-                                          className={`w-full border p-3 text-left transition ${
-                                            isSelected
-                                              ? 'border-black bg-stone-50 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
-                                              : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
-                                          }`}
-                                        >
-                                          <div className="flex flex-wrap items-start justify-between gap-3">
-                                            <div className="space-y-1">
-                                              <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
-                                              <p className="text-sm text-muted-foreground">
-                                                {point.address || 'Адрес не указан'}
-                                              </p>
-                                              {point.instruction && (
-                                                <p className="text-xs text-muted-foreground">
-                                                  {point.instruction}
-                                                </p>
-                                              )}
-                                            </div>
-                                            <div className="text-right">
-                                              <p className="font-black">
-                                                {isSelected
-                                                  ? pickupDeliveryLoading
-                                                    ? 'Расчет...'
-                                                    : pickupDelivery?.available
-                                                      ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
-                                                      : 'Выбрано'
-                                                  : 'Выбрать'}
-                                              </p>
-                                              {isSelected && !pickupDelivery?.available && !pickupDeliveryLoading && (
-                                                <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                                                  Выбрано
-                                                </p>
-                                              )}
-                                              {isSelected && pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) && (
-                                                <p className="text-xs uppercase text-muted-foreground">
-                                                  {formatDeliveryDays(pickupDelivery.deliveryDays)}
-                                                </p>
-                                              )}
-                                              {formatPickupDistance(point.distanceKm) && (
-                                                <p className="text-xs uppercase text-muted-foreground">
-                                                  {formatPickupDistance(point.distanceKm)}
-                                                </p>
-                                              )}
-                                            </div>
-                                          </div>
-                                          {isSelected && pickupDeliveryError && !pickupDeliveryLoading && (
-                                            <p className="mt-2 text-xs text-red-700">
-                                              {visiblePickupDeliveryError}
-                                            </p>
-                                          )}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                      </div>
-                    )}
+                        </div>
+                      );
+                    })}
                   </div>
+
+                  {isManagedDeliveryEnabled && visibleDeliveryCards.length === 0 && address.trim() ? (
+                    <p className="text-sm text-muted-foreground">
+                      Для этого адреса сейчас нет доступных онлайн-вариантов доставки. Самовывоз остается доступным.
+                    </p>
+                  ) : null}
+
+                  {adminDeliveryDiagnostics.length > 0 ? (
+                    <div className="space-y-2 border border-black/10 bg-white p-4">
+                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Включенные службы без checkout-сценария
+                      </div>
+                      <div className="space-y-2">
+                        {adminDeliveryDiagnostics.map((service) => (
+                          <div key={service.provider} className="flex flex-col gap-2 border border-black/10 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <div className="font-bold">{service.label}</div>
+                              <div className="text-sm text-muted-foreground">{service.description}</div>
+                            </div>
+                            <span className={cn(
+                              'inline-flex items-center border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
+                              STATUS_TONE_CLASS_NAMES[service.statusTone],
+                            )}>
+                              {service.statusLabel}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {isPickupSelected ? (
+                    <div className="space-y-4 border border-black/10 bg-white p-4">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h3 className="font-bold uppercase tracking-wide">Пункт выдачи</h3>
+                          {selectedDeliveryProviderCaption ? (
+                            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                              {selectedDeliveryProviderCaption}
+                            </span>
+                          ) : null}
+                        </div>
+                        {selectedPickupPoint?.id ? (
+                          <div className="space-y-1 text-sm text-muted-foreground">
+                            <p className="font-medium text-foreground">Выбранный пункт</p>
+                            <p>{selectedPickupPoint.address}</p>
+                            {selectedPickupPoint.instruction ? <p>{selectedPickupPoint.instruction}</p> : null}
+                            <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide">
+                              {pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) ? (
+                                <span>Срок: {formatDeliveryDays(pickupDelivery.deliveryDays)}</span>
+                              ) : null}
+                              {formatPickupDistance(selectedPickupPoint.distanceKm) ? (
+                                <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Выберите удобный пункт выдачи из списка. Стоимость и срок уже рассчитаны выбранной службой.
+                          </p>
+                        )}
+                      </div>
+
+                      {pickupPointsLoading ? (
+                        <p className="text-sm text-muted-foreground">
+                          Подбираем пункты выдачи рядом с вашим адресом...
+                        </p>
+                      ) : null}
+
+                      {!pickupPointsLoading && pickupPointsError ? (
+                        <p className="text-sm text-red-700">
+                          {visiblePickupPointsError}
+                        </p>
+                      ) : null}
+
+                      {!pickupPointsLoading && !pickupPointsError && selectedPickupPoint?.id && !pickupDelivery?.available ? (
+                        <p className="text-sm text-red-700">
+                          {visibleSelectedDeliveryError}
+                        </p>
+                      ) : null}
+
+                      {pickupPoints.length > 0 ? (
+                        <div className="space-y-2 border border-black/10 bg-white p-3">
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Пункты выдачи для вашего адреса
+                          </div>
+                          <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                            {pickupPoints.map((point) => {
+                              const isSelected = point.id === selectedPickupPointId;
+
+                              return (
+                                <button
+                                  key={point.id}
+                                  type="button"
+                                  onClick={() => setSelectedPickupPointId(point.id)}
+                                  className={`w-full border p-3 text-left transition ${
+                                    isSelected
+                                      ? 'border-black bg-stone-50 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
+                                      : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                      <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
+                                      <p className="text-sm text-muted-foreground">
+                                        {point.address || 'Адрес не указан'}
+                                      </p>
+                                      {point.instruction ? (
+                                        <p className="text-xs text-muted-foreground">
+                                          {point.instruction}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="font-black">
+                                        {isSelected
+                                          ? pickupDeliveryLoading
+                                            ? 'Расчет...'
+                                            : pickupDelivery?.available
+                                              ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
+                                              : 'Выбрано'
+                                          : 'Выбрать'}
+                                      </p>
+                                      {isSelected && !pickupDelivery?.available && !pickupDeliveryLoading ? (
+                                        <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                          Выбрано
+                                        </p>
+                                      ) : null}
+                                      {isSelected && pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) ? (
+                                        <p className="text-xs uppercase text-muted-foreground">
+                                          {formatDeliveryDays(pickupDelivery.deliveryDays)}
+                                        </p>
+                                      ) : null}
+                                      {formatPickupDistance(point.distanceKm) ? (
+                                        <p className="text-xs uppercase text-muted-foreground">
+                                          {formatPickupDistance(point.distanceKm)}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  {isSelected && !pickupDelivery?.available && !pickupDeliveryLoading ? (
+                                    <p className="mt-2 text-xs text-red-700">
+                                      {visibleSelectedDeliveryError}
+                                    </p>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 <Button
@@ -1493,7 +1856,7 @@ export default function CheckoutPage() {
                 )}
                 {selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address && (
                   <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
-                    ПВЗ: {selectedPickupPoint.address}
+                    Пункт выдачи: {selectedPickupPoint.address}
                   </div>
                 )}
                 <div className="mt-4 flex justify-between border-t border-black pt-4 text-xl font-black">

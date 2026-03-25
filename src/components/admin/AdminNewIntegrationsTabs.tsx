@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -197,6 +198,15 @@ export function AdminRoboKassaIntegrationTab({ settings, updateSetting }: Integr
     <div className="min-w-0 space-y-3 overflow-hidden border p-3">
       <div className="flex items-start gap-2"><Checkbox id="payments-robokassa-enabled" checked={isSettingEnabled(settings.payments_robokassa_enabled)} onCheckedChange={(checked) => updateSetting("payments_robokassa_enabled", checked ? "true" : "false")} /><Label htmlFor="payments-robokassa-enabled" className="leading-snug">Включить RoboKassa</Label></div>
       <IssueBox enabled={isSettingEnabled(settings.payments_robokassa_enabled)} issues={issues} summary="Hosted checkout, test mode, подпись ResultURL и формирование чека через Receipt при необходимости." />
+      <HelpBox title="Как настроить RoboKassa">
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>Заполните `MerchantLogin`, `Password #1` и `Password #2` из кабинета RoboKassa.</li>
+          <li>Для тестового режима включите `robokassa_test_mode=true` и укажите свои тестовые пароли `#1` и `#2` из кабинета.</li>
+          <li>Публичных универсальных тестовых логина и паролей RoboKassa не предоставляет, поэтому успешная внешняя оплата возможна только с вашей тестовой учетной записью.</li>
+          <li>После сохранения настроек задайте `ResultURL` на адрес ниже и запустите проверку интеграции.</li>
+          <li>Тест в админке проверяет локальную генерацию формы, набор полей, подпись и готовность callback `ResultURL`.</li>
+        </ol>
+      </HelpBox>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="space-y-1"><Label htmlFor="robokassa-merchant-login">Merchant Login</Label><NoAutofillInput id="robokassa-merchant-login" name="integration-robokassa-merchant-login" value={settings.robokassa_merchant_login || ""} onChange={(event) => updateSetting("robokassa_merchant_login", event.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="robokassa-label-prefix">Префикс</Label><Input id="robokassa-label-prefix" value={settings.robokassa_label_prefix || "FD"} onChange={(event) => updateSetting("robokassa_label_prefix", event.target.value)} /></div>
@@ -233,13 +243,16 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
   const issues = useMemo(() => getCdekIssues(settings), [settings]);
   const cdekResult = result && typeof result === "object" ? result as {
     tokenReceived?: boolean;
+    note?: string;
     cityCode?: string;
     quote?: {
+      details?: Record<string, string> | null;
       homeDelivery?: { available?: boolean; estimatedCost?: number | null; tariff?: string | null } | null;
       pickupPointDelivery?: { available?: boolean; estimatedCost?: number | null; tariff?: string | null } | null;
     } | null;
     pickupPoints?: Array<{ id?: string; address?: string }> | null;
   } : null;
+  const cdekUsesTrainingFallback = String(cdekResult?.quote?.details?.quoteSource || "").trim().toLowerCase() === "training_fallback";
 
   const runTest = async () => {
     setRunning(true);
@@ -277,6 +290,7 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
           <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите тест интеграции.</li>
           <li>Чтобы checkout увидел СДЭК, после сохранения в `public-shell` должно появиться `delivery_cdek_enabled=true`.</li>
           <li>Успешный тест должен вернуть `tokenReceived=true`, `cityCode`, тарифы и список ПВЗ.</li>
+          <li>Если учебный калькулятор СДЭК ответит `v2_internal_error`, система покажет резервные demo-тарифы учебного контура вместо падения теста.</li>
         </ol>
         <div className="grid grid-cols-1 gap-2 border border-black/10 bg-slate-50 p-3 font-mono text-xs md:grid-cols-[180px_minmax(0,1fr)]">
           <div className="font-semibold text-black">Account</div>
@@ -305,14 +319,26 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
       </div>
       <div className="flex items-center gap-2"><Checkbox id="delivery-cdek-test-environment" checked={isSettingEnabled(settings.delivery_cdek_use_test_environment, true)} onCheckedChange={(checked) => updateSetting("delivery_cdek_use_test_environment", checked ? "true" : "false")} /><Label htmlFor="delivery-cdek-test-environment">Учебный контур api.edu.cdek.ru</Label></div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="space-y-1 md:col-span-3"><Label htmlFor="delivery-cdek-test-address">Тестовый адрес</Label><Input id="delivery-cdek-test-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="630099, Новосибирск, Красный проспект, 25" /></div>
+        <div className="space-y-1 md:col-span-3">
+          <Label htmlFor="delivery-cdek-test-address">Тестовый адрес</Label>
+          <AddressAutocompleteInput
+            id="delivery-cdek-test-address"
+            name="delivery_cdek_test_address"
+            value={address}
+            onValueChange={setAddress}
+            placeholder="630099, Новосибирск, Красный проспект, 25"
+            inputClassName="rounded-none"
+            suggestionsClassName="rounded-none"
+          />
+        </div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-test-weight">Вес, кг</Label><Input id="delivery-cdek-test-weight" value={weightKg} onChange={(event) => setWeightKg(event.target.value)} placeholder="0.300" /></div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-test-cost">Объявленная стоимость, ₽</Label><Input id="delivery-cdek-test-cost" value={declaredCost} onChange={(event) => setDeclaredCost(event.target.value)} placeholder="1000" /></div>
         <div className="flex items-end"><Button type="button" className="w-full rounded-none md:w-auto" disabled={running || !isSettingEnabled(settings.delivery_cdek_enabled)} onClick={runTest}>{running ? "Проверяем..." : "Проверить интеграцию"}</Button></div>
       </div>
       {cdekResult?.tokenReceived && (
-        <div className="rounded-none border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <div className={`rounded-none border p-3 text-sm ${cdekUsesTrainingFallback ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
           Проверка прошла: OAuth token получен, город распознан как `{cdekResult.cityCode || "—"}`, тариф до двери {cdekResult.quote?.homeDelivery?.available ? `доступен (${cdekResult.quote?.homeDelivery?.estimatedCost ?? "—"} ₽, тариф ${cdekResult.quote?.homeDelivery?.tariff || "—"})` : "не найден"}, тариф до ПВЗ {cdekResult.quote?.pickupPointDelivery?.available ? `доступен (${cdekResult.quote?.pickupPointDelivery?.estimatedCost ?? "—"} ₽, тариф ${cdekResult.quote?.pickupPointDelivery?.tariff || "—"})` : "не найден"}, найдено ПВЗ: {Array.isArray(cdekResult.pickupPoints) ? cdekResult.pickupPoints.length : 0}.
+          {cdekResult.note ? ` ${cdekResult.note}` : ""}
         </div>
       )}
       <ResultBox error={error} result={result} />
@@ -360,10 +386,14 @@ export function AdminRussianPostIntegrationTab({ settings, updateSetting }: Inte
         <ol className="list-decimal space-y-1 pl-5">
           <li>Используйте официальный API `otpravka-api.pochta.ru` и учетные данные из кабинета Отправки.</li>
           <li>Заполните `AccessToken`, `X-User-Authorization`, индекс отправителя и параметры типа отправления.</li>
+          <li>Публичных универсальных demo-token для этого API нет: успешный тест требует ваши реальные данные из кабинета Отправки.</li>
           <li>Для доставки в отделение обычно подходят `POSTAL_PARCEL` и `ORDINARY`, для курьерского сценария используйте типы вроде `EMS` или `ONLINE_COURIER`.</li>
           <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите тест интеграции.</li>
           <li>Чтобы checkout увидел Почту России, после сохранения в `public-shell` должно появиться `delivery_russian_post_enabled=true`.</li>
         </ol>
+        <div className="rounded-none border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          Из некоторых сетей raw-запросы к `otpravka-api.pochta.ru` могут блокироваться антибот-защитой до полноценной авторизации. Если видите ошибку доступа, сначала проверьте реальные ключи и повторите тест через сервер проекта.
+        </div>
       </HelpBox>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="space-y-1"><Label htmlFor="delivery-russian-post-token">AccessToken</Label><NoAutofillInput id="delivery-russian-post-token" name="integration-russian-post-token" type="password" autoComplete="new-password" value={settings.delivery_russian_post_access_token || ""} onChange={(event) => updateSetting("delivery_russian_post_access_token", event.target.value)} placeholder="Токен из кабинета Отправка" /></div>
@@ -376,7 +406,18 @@ export function AdminRussianPostIntegrationTab({ settings, updateSetting }: Inte
         <div className="space-y-1"><Label htmlFor="delivery-russian-dimension-type">DimensionType</Label><Input id="delivery-russian-dimension-type" value={settings.delivery_russian_post_dimension_type || "PACK"} onChange={(event) => updateSetting("delivery_russian_post_dimension_type", event.target.value)} placeholder="PACK" /></div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <div className="space-y-1 md:col-span-4"><Label htmlFor="delivery-russian-test-address">Тестовый адрес</Label><Input id="delivery-russian-test-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="630099, Новосибирск, Красный проспект, 25" /></div>
+        <div className="space-y-1 md:col-span-4">
+          <Label htmlFor="delivery-russian-test-address">Тестовый адрес</Label>
+          <AddressAutocompleteInput
+            id="delivery-russian-test-address"
+            name="delivery_russian_test_address"
+            value={address}
+            onValueChange={setAddress}
+            placeholder="630099, Новосибирск, Красный проспект, 25"
+            inputClassName="rounded-none"
+            suggestionsClassName="rounded-none"
+          />
+        </div>
         <div className="space-y-1"><Label htmlFor="delivery-russian-test-weight">Вес, кг</Label><Input id="delivery-russian-test-weight" value={weightKg} onChange={(event) => setWeightKg(event.target.value)} placeholder="0.300" /></div>
         <div className="space-y-1"><Label htmlFor="delivery-russian-test-cost">Объявленная стоимость, ₽</Label><Input id="delivery-russian-test-cost" value={declaredCost} onChange={(event) => setDeclaredCost(event.target.value)} placeholder="1000" /></div>
         <div className="flex items-end"><Button type="button" className="w-full rounded-none md:w-auto" disabled={running || !isSettingEnabled(settings.delivery_russian_post_enabled)} onClick={runTest}>{running ? "Проверяем..." : "Проверить интеграцию"}</Button></div>
@@ -424,6 +465,7 @@ export function AdminAvitoIntegrationTab({ settings, updateSetting }: Integratio
       <HelpBox title="Как настроить Avito">
         <ol className="list-decimal space-y-1 pl-5">
           <li>Заполните `Client ID` и `Client Secret` из кабинета разработчика Avito.</li>
+          <li>Публичной универсальной тестовой пары `client_id/client_secret` Avito не выдает, поэтому выпуск токена возможен только для вашего приложения.</li>
           <li>При необходимости укажите `scope` и адрес склада для внутренней привязки настроек.</li>
           <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите OAuth test.</li>
           <li>Этот тест проверяет только доступность OAuth-контура и учетные данные.</li>
@@ -434,7 +476,18 @@ export function AdminAvitoIntegrationTab({ settings, updateSetting }: Integratio
         <div className="space-y-1"><Label htmlFor="delivery-avito-client-id">Client ID</Label><NoAutofillInput id="delivery-avito-client-id" name="integration-avito-client-id" value={settings.delivery_avito_client_id || ""} onChange={(event) => updateSetting("delivery_avito_client_id", event.target.value)} placeholder="ID приложения Avito" /></div>
         <div className="space-y-1"><Label htmlFor="delivery-avito-client-secret">Client Secret</Label><NoAutofillInput id="delivery-avito-client-secret" name="integration-avito-client-secret" type="password" autoComplete="new-password" value={settings.delivery_avito_client_secret || ""} onChange={(event) => updateSetting("delivery_avito_client_secret", event.target.value)} placeholder="Секрет приложения Avito" /></div>
         <div className="space-y-1"><Label htmlFor="delivery-avito-scope">OAuth scope</Label><Input id="delivery-avito-scope" value={settings.delivery_avito_scope || "items:info"} onChange={(event) => updateSetting("delivery_avito_scope", event.target.value)} placeholder="items:info" /></div>
-        <div className="space-y-1"><Label htmlFor="delivery-avito-address">Адрес склада</Label><Input id="delivery-avito-address" value={settings.delivery_avito_warehouse_address || ""} onChange={(event) => updateSetting("delivery_avito_warehouse_address", event.target.value)} placeholder="Новосибирск, Красный проспект, 25" /></div>
+        <div className="space-y-1">
+          <Label htmlFor="delivery-avito-address">Адрес склада</Label>
+          <AddressAutocompleteInput
+            id="delivery-avito-address"
+            name="delivery_avito_warehouse_address"
+            value={settings.delivery_avito_warehouse_address || ""}
+            onValueChange={(nextValue) => updateSetting("delivery_avito_warehouse_address", nextValue)}
+            placeholder="Новосибирск, Красный проспект, 25"
+            inputClassName="rounded-none"
+            suggestionsClassName="rounded-none"
+          />
+        </div>
         <div className="space-y-1 md:col-span-2"><Label htmlFor="delivery-avito-notes">Примечание</Label><Textarea id="delivery-avito-notes" value={settings.delivery_avito_notes || ""} onChange={(event) => updateSetting("delivery_avito_notes", event.target.value)} rows={4} /></div>
       </div>
       {avitoResult?.tokenEndpointReachable && (
