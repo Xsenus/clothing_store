@@ -55,6 +55,7 @@ export default function AuthPage() {
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramWidgetEnabled, setTelegramWidgetEnabled] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [vkEnabled, setVkEnabled] = useState(false);
   const [yandexEnabled, setYandexEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
   const [telegramAuthState, setTelegramAuthState] = useState("");
@@ -77,6 +78,7 @@ export default function AuthPage() {
       setTelegramEnabled(isEnabled(settings?.telegram_login_enabled));
       setTelegramWidgetEnabled(isEnabled(settings?.telegram_widget_enabled));
       setGoogleEnabled(isEnabled(settings?.google_login_enabled));
+      setVkEnabled(isEnabled(settings?.vk_login_enabled));
       setYandexEnabled(isEnabled(settings?.yandex_login_enabled));
       setTelegramBotUsername(settings?.telegram_bot_username || "");
     };
@@ -92,6 +94,7 @@ export default function AuthPage() {
 
   const getProviderLabel = (provider) => {
     if (provider === "google") return "Google";
+    if (provider === "vk") return "VK";
     if (provider === "yandex") return "Яндекс";
     return "Telegram";
   };
@@ -611,13 +614,18 @@ export default function AuthPage() {
               </form>
             ) : (
               <>
-                {(googleEnabled || yandexEnabled || (telegramEnabled && telegramBotUsername)) && (
+                {(googleEnabled || vkEnabled || yandexEnabled || (telegramEnabled && telegramBotUsername)) && (
                   <div className="mb-5 space-y-3">
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">Быстрый вход и регистрация</p>
                       {googleEnabled && (
                         <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("google")} disabled={loading}>
                           Продолжить через Google
+                        </Button>
+                      )}
+                      {vkEnabled && (
+                        <Button type="button" variant="outline" className="w-full h-9" onClick={() => handleExternalSignIn("vk")} disabled={loading}>
+                          Продолжить через VK
                         </Button>
                       )}
                       {yandexEnabled && (

@@ -217,7 +217,7 @@ interface AdminExternalAuthTestStatus {
 }
 
 interface AdminExternalAuthTestSession {
-  provider: "telegram" | "google" | "yandex";
+  provider: "telegram" | "google" | "vk" | "yandex";
   kind: "telegram" | "external";
   state: string;
   expiresAt: number;
@@ -512,7 +512,16 @@ interface AdminOrder {
   paymentMethod?: string;
   purchaseChannel?: string;
   shippingMethod?: string;
+  shippingProvider?: string | null;
+  shippingTariff?: string | null;
   pickupPointId?: string | null;
+  shippingProviderOrderId?: string | null;
+  shippingTrackingNumber?: string | null;
+  shippingTrackingUrl?: string | null;
+  shippingStatus?: string | null;
+  shippingStatusDescription?: string | null;
+  shippingStatusUpdatedAt?: string | number | null;
+  shippingLastSyncError?: string | null;
   yandexRequestId?: string | null;
   yandexDeliveryStatus?: string | null;
   yandexDeliveryStatusDescription?: string | null;
@@ -663,7 +672,16 @@ Object.assign(PAYMENT_METHOD_LABELS, YOO_KASSA_PAYMENT_METHOD_LABELS);
 
 const SHIPPING_METHOD_LABELS: Record<string, string> = {
   home: "До двери",
-  pickup: "ПВЗ",
+  pickup: "Пункт выдачи",
+  self_pickup: "Самовывоз",
+};
+
+const SHIPPING_PROVIDER_LABELS: Record<string, string> = {
+  yandex_delivery: "Яндекс Доставка",
+  yandex: "Яндекс Доставка",
+  cdek: "СДЭК",
+  russian_post: "Почта России",
+  avito: "Avito",
   self_pickup: "Самовывоз",
 };
 
@@ -678,8 +696,13 @@ const ORDER_HISTORY_FIELD_LABELS: Record<string, string> = {
   paymentMethod: "Способ оплаты",
   purchaseChannel: "Канал заказа",
   shippingMethod: "Способ доставки",
+  shippingProvider: "Служба доставки",
+  shippingTariff: "Тариф доставки",
   shippingAmount: "Стоимость доставки",
   pickupPointId: "ID ПВЗ",
+  shippingProviderOrderId: "ID отправления",
+  shippingTrackingNumber: "Трек-номер",
+  shippingStatus: "Статус доставки",
   yandexRequestId: "ID заявки Яндекс.Доставки",
   customerName: "Получатель",
   customerEmail: "Email",
@@ -1183,7 +1206,7 @@ const resolveCatalogImageUrl = (
 
 const hasConfiguredValue = (value?: string | null) => String(value || "").trim().length > 0;
 
-const getExternalAuthCallbackUrl = (provider: "google" | "yandex") => {
+const getExternalAuthCallbackUrl = (provider: "google" | "vk" | "yandex") => {
   if (typeof window === "undefined") {
     return `/api/auth/external/callback/${provider}`;
   }
@@ -1246,6 +1269,9 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   google_login_enabled: "false",
   google_auth_client_id: "",
   google_auth_client_secret: "",
+  vk_login_enabled: "false",
+  vk_auth_client_id: "",
+  vk_auth_client_secret: "",
   yandex_login_enabled: "false",
   yandex_auth_client_id: "",
   yandex_auth_client_secret: "",
@@ -1547,6 +1573,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     [telegramBots]
   );
   const googleCallbackUrl = useMemo(() => getExternalAuthCallbackUrl("google"), []);
+  const vkCallbackUrl = useMemo(() => getExternalAuthCallbackUrl("vk"), []);
   const yandexCallbackUrl = useMemo(() => getExternalAuthCallbackUrl("yandex"), []);
   const telegramWidgetUsername = useMemo(
     () => String(settings["telegram_bot_username"] || loginTelegramBot?.username || "").trim(),
@@ -2397,6 +2424,34 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return SHIPPING_METHOD_LABELS[normalized] || value || "—";
   };
 
+  const formatShippingProvider = (value?: string | null) => {
+    const normalized = value?.trim().toLowerCase() || "";
+    return SHIPPING_PROVIDER_LABELS[normalized] || value || "—";
+  };
+
+  const formatOrderShippingSelection = (order?: AdminOrder | null) => {
+    if (!order) return "—";
+
+    const normalizedMethod = String(order.shippingMethod || "").trim().toLowerCase();
+    if (normalizedMethod === "self_pickup") {
+      return SHIPPING_METHOD_LABELS.self_pickup;
+    }
+
+    const provider = String(order.shippingProvider || "").trim().toLowerCase();
+    const providerLabel = provider
+      ? formatShippingProvider(provider)
+      : String(order.yandexRequestId || "").trim()
+        ? SHIPPING_PROVIDER_LABELS.yandex_delivery
+        : "";
+    const methodLabel = formatShippingMethod(order.shippingMethod);
+
+    if (providerLabel && methodLabel && providerLabel !== methodLabel) {
+      return `${providerLabel} · ${methodLabel}`;
+    }
+
+    return providerLabel || methodLabel || "—";
+  };
+
   const formatYandexDeliveryStatus = (order?: AdminOrder | null) => {
     const description = String(order?.yandexDeliveryStatusDescription || "").trim();
     if (description) {
@@ -2615,6 +2670,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         return formatPurchaseChannel(textValue);
       case "shippingMethod":
         return formatShippingMethod(textValue);
+      case "shippingProvider":
+        return formatShippingProvider(textValue);
       case "totalAmount": {
         const numeric = Number(textValue);
         return Number.isFinite(numeric) ? `${numeric.toFixed(2)} ₽` : textValue;
@@ -2974,6 +3031,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const getExternalAuthTestLabel = (provider: string) => {
     if (provider === "google") return "Google";
+    if (provider === "vk") return "VK";
     if (provider === "yandex") return "Яндекс";
     if (provider === "telegram_widget") return "Telegram Widget";
     return "Telegram";
@@ -3055,8 +3113,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     }
   };
 
-  const startExternalOAuthTest = async (provider: "google" | "yandex") => {
-    const settingKey = provider === "google" ? "google_login_enabled" : "yandex_login_enabled";
+  const startExternalOAuthTest = async (provider: "google" | "vk" | "yandex") => {
+    const settingKey = provider === "google"
+      ? "google_login_enabled"
+      : provider === "vk"
+        ? "vk_login_enabled"
+        : "yandex_login_enabled";
     const label = getExternalAuthTestLabel(provider);
 
     if (!isSettingEnabled(settingKey)) {
@@ -6813,17 +6875,27 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <div className="text-xs text-emerald-700">Скидка: -{formatRubles(promoDiscount)}</div>
                                 ) : null}
                                 <div className="text-xs text-muted-foreground">
-                                  {formatPaymentMethod(order.paymentMethod)} · {formatShippingMethod(order.shippingMethod)}
+                                  {formatPaymentMethod(order.paymentMethod)} · {formatOrderShippingSelection(order)}
                                 </div>
                               </div>
                             </div>
 
                             <div>
                               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Доставка</div>
+                              <div className="mt-1 text-sm font-medium">{formatOrderShippingSelection(order)}</div>
                               <div className="mt-1 text-sm">{customer.shippingAddress || "—"}</div>
                               <div className="text-xs text-muted-foreground">
                                 Стоимость: {Number.isFinite(Number(order.shippingAmount)) ? formatRubles(order.shippingAmount) : "—"}
                               </div>
+                              {order.pickupPointId ? (
+                                <div className="text-xs text-muted-foreground">Точка выдачи: {order.pickupPointId}</div>
+                              ) : null}
+                              {order.shippingTariff ? (
+                                <div className="text-xs text-muted-foreground">Тариф: {order.shippingTariff}</div>
+                              ) : null}
+                              {order.shippingProviderOrderId ? (
+                                <div className="text-xs text-muted-foreground">Отправление: {order.shippingProviderOrderId}</div>
+                              ) : null}
                             </div>
 
                             <div className="space-y-2">
@@ -7027,7 +7099,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   return (
                                     <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
                                       <div>{formatPaymentMethod(order.paymentMethod)}</div>
-                                      <div className="text-xs text-muted-foreground">Доставка: {formatShippingMethod(order.shippingMethod)}</div>
+                                      <div className="text-xs text-muted-foreground">Доставка: {formatOrderShippingSelection(order)}</div>
                                       <div className="text-xs text-muted-foreground">Канал: {formatPurchaseChannel(order.purchaseChannel)}</div>
                                     </TableCell>
                                   );
@@ -7036,11 +7108,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 if (column.id === "delivery") {
                                   return (
                                     <TableCell key={column.id} className="align-top" style={getOrderTableColumnCellStyle(column.id)}>
+                                      <div className="font-medium">{formatOrderShippingSelection(order)}</div>
                                       <div className="text-xs text-muted-foreground">
                                         Стоимость: {Number.isFinite(Number(order.shippingAmount)) ? formatRubles(order.shippingAmount) : "—"}
                                       </div>
                                       <div className="text-sm">{customer.shippingAddress || "—"}</div>
                                       <div className="text-xs text-muted-foreground">Получатель: {customer.name || "—"}</div>
+                                      {order.pickupPointId ? (
+                                        <div className="text-xs text-muted-foreground">Точка выдачи: {order.pickupPointId}</div>
+                                      ) : null}
+                                      {order.shippingTariff ? (
+                                        <div className="text-xs text-muted-foreground">Тариф: {order.shippingTariff}</div>
+                                      ) : null}
+                                      {order.shippingTrackingNumber ? (
+                                        <div className="text-xs text-muted-foreground">Трек: {order.shippingTrackingNumber}</div>
+                                      ) : null}
                                     </TableCell>
                                   );
                                 }
@@ -7357,10 +7439,40 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   </div>
                                 ) : null}
                                 <div className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">Доставка</div>
-                                <div>{formatShippingMethod(editingOrder.shippingMethod)}</div>
+                                <div>{formatOrderShippingSelection(editingOrder)}</div>
                                 <div className="text-xs text-muted-foreground">
                                   {Number.isFinite(Number(editingOrder.shippingAmount)) ? formatRubles(editingOrder.shippingAmount) : "—"}
                                 </div>
+                                {editingOrder.shippingTariff ? (
+                                  <div className="text-xs text-muted-foreground">Тариф: {editingOrder.shippingTariff}</div>
+                                ) : null}
+                                {editingOrder.pickupPointId ? (
+                                  <div className="text-xs text-muted-foreground break-all">Точка выдачи: {editingOrder.pickupPointId}</div>
+                                ) : null}
+                                {editingOrder.shippingProviderOrderId ? (
+                                  <div className="text-xs text-muted-foreground break-all">ID отправления: {editingOrder.shippingProviderOrderId}</div>
+                                ) : null}
+                                {editingOrder.shippingTrackingNumber ? (
+                                  <div className="text-xs text-muted-foreground break-all">Трек-номер: {editingOrder.shippingTrackingNumber}</div>
+                                ) : null}
+                                {editingOrder.shippingStatusDescription || editingOrder.shippingStatus ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    Статус: {editingOrder.shippingStatusDescription || editingOrder.shippingStatus}
+                                  </div>
+                                ) : null}
+                                {editingOrder.shippingTrackingUrl ? (
+                                  <a
+                                    href={editingOrder.shippingTrackingUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex text-xs underline underline-offset-2"
+                                  >
+                                    Открыть трекинг доставки
+                                  </a>
+                                ) : null}
+                                {editingOrder.shippingLastSyncError ? (
+                                  <div className="text-xs text-red-600">{editingOrder.shippingLastSyncError}</div>
+                                ) : null}
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Канал заказа</div>
@@ -7848,6 +7960,65 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
+                                <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: открывается окно VK OAuth, пользователь подтверждает доступ, после чего VK-аккаунт используется для входа или привязки.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-vk-login-enabled"
+                                checked={isSettingEnabled("vk_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("vk_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-client-id">Client ID</Label>
+                              <Input
+                                id="auth-vk-client-id"
+                                value={settings["vk_auth_client_id"] || ""}
+                                onChange={(e) => updateSetting("vk_auth_client_id", e.target.value)}
+                                placeholder="VK App ID / Client ID"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-client-secret">Client Secret</Label>
+                              <Input
+                                id="auth-vk-client-secret"
+                                type="password"
+                                value={settings["vk_auth_client_secret"] || ""}
+                                onChange={(e) => updateSetting("vk_auth_client_secret", e.target.value)}
+                                placeholder="VK Secure key / Client Secret"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-callback-url">Callback URL</Label>
+                              <Input id="auth-vk-callback-url" value={vkCallbackUrl} readOnly className="bg-slate-50" />
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: добавить этот callback URL в настройках приложения VK как разрешенный redirect URI.</div>
+                              <div>Client ID: {hasConfiguredValue(settings["vk_auth_client_id"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientId"}.</div>
+                              <div>Client Secret: {hasConfiguredValue(settings["vk_auth_client_secret"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientSecret"}.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full rounded-none"
+                                onClick={() => startExternalOAuthTest("vk")}
+                                disabled={externalAuthTestRunning === "vk"}
+                              >
+                                {externalAuthTestRunning === "vk" ? "Запускаем тест..." : "Проверить VK OAuth"}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Публичного универсального sandbox для VK OAuth нет, поэтому тест откроет реальное окно провайдера. Для первичной проверки достаточно убедиться, что backend выдает корректный OAuth URL и VK принимает запрос без мгновенной ошибки.
+                              </p>
+                              {renderExternalAuthTestStatus("vk")}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
                                 <Label htmlFor="auth-telegram-login-enabled" className="text-sm font-semibold">Telegram</Label>
                                 <p className="text-xs leading-5 text-muted-foreground">
                                   Вход через Telegram-бота с переходом в бот и подтверждением входа.
@@ -8235,7 +8406,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <div className="space-y-1">
                           <h4 className="font-semibold">Внешние способы входа</h4>
                           <p className="text-sm text-muted-foreground">
-                            Здесь собраны все настройки, которых достаточно с нашей стороны для входа через Telegram, Google и Яндекс. Отдельно у провайдеров все равно нужно разрешить callback URL, который показан ниже в карточках Google и Яндекс.
+                            Здесь собраны все настройки, которых достаточно с нашей стороны для входа через Telegram, Google, VK и Яндекс. Отдельно у провайдеров все равно нужно разрешить callback URL, который показан ниже в карточках OAuth-провайдеров.
                           </p>
                           <p className="text-xs leading-5 text-muted-foreground">
                             Кнопки проверки ниже используют уже сохраненные настройки сервера. Если вы только что изменили поля в этой форме, сначала нажмите общую кнопку сохранения настроек внизу страницы.
@@ -8401,6 +8572,65 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 Тест откроет реальное окно Google OAuth. Если не хотите создавать или использовать реальный аккаунт, достаточно проверить, что окно провайдера открылось без мгновенной ошибки backend.
                               </p>
                               {renderExternalAuthTestStatus("google")}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: открывается окно VK OAuth, пользователь подтверждает доступ, после чего VK-аккаунт используется для входа или привязки.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-vk-login-enabled"
+                                checked={isSettingEnabled("vk_login_enabled")}
+                                onCheckedChange={(checked) => updateSetting("vk_login_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-client-id">Client ID</Label>
+                              <Input
+                                id="auth-vk-client-id"
+                                value={settings["vk_auth_client_id"] || ""}
+                                onChange={(e) => updateSetting("vk_auth_client_id", e.target.value)}
+                                placeholder="VK App ID / Client ID"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-client-secret">Client Secret</Label>
+                              <Input
+                                id="auth-vk-client-secret"
+                                type="password"
+                                value={settings["vk_auth_client_secret"] || ""}
+                                onChange={(e) => updateSetting("vk_auth_client_secret", e.target.value)}
+                                placeholder="VK Secure key / Client Secret"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="auth-vk-callback-url">Callback URL</Label>
+                              <Input id="auth-vk-callback-url" value={vkCallbackUrl} readOnly className="bg-slate-50" />
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Что нужно: добавить этот callback URL в настройках приложения VK как разрешенный redirect URI.</div>
+                              <div>Client ID: {hasConfiguredValue(settings["vk_auth_client_id"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientId"}.</div>
+                              <div>Client Secret: {hasConfiguredValue(settings["vk_auth_client_secret"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientSecret"}.</div>
+                            </div>
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full rounded-none"
+                                onClick={() => startExternalOAuthTest("vk")}
+                                disabled={externalAuthTestRunning === "vk"}
+                              >
+                                {externalAuthTestRunning === "vk" ? "Запускаем тест..." : "Проверить VK OAuth"}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Публичного универсального sandbox для VK OAuth нет, поэтому тест откроет реальное окно провайдера. Для первичной проверки достаточно убедиться, что backend выдает корректный OAuth URL и VK принимает запрос без мгновенной ошибки.
+                              </p>
+                              {renderExternalAuthTestStatus("vk")}
                             </div>
                           </div>
 
@@ -8794,17 +9024,34 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       <p className="text-sm text-muted-foreground">Интеграции разнесены по вкладкам, чтобы каждый сервис было удобно настраивать отдельно.</p>
 
                       <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="min-w-0 w-full">
-                        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 sm:grid-cols-3 md:flex md:justify-start md:gap-2 md:overflow-x-auto md:border-b md:pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:min-w-0 [&>*]:shrink-0">
-                          <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Telegram</TabsTrigger>
-                          <TabsTrigger value="yoomoney" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">YooMoney</TabsTrigger>
-                          <TabsTrigger value="yookassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">YooKassa</TabsTrigger>
-                          <TabsTrigger value="robokassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">RoboKassa</TabsTrigger>
-                          <TabsTrigger value="dadata" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">DaData</TabsTrigger>
-                          <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Яндекс.Доставка</TabsTrigger>
-                          <TabsTrigger value="cdek" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">СДЭК</TabsTrigger>
-                          <TabsTrigger value="russian-post" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Почта России</TabsTrigger>
-                          <TabsTrigger value="avito" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Avito</TabsTrigger>
-                        </TabsList>
+                        <div className="space-y-4">
+                          <div className="space-y-2 border border-black/10 bg-slate-50 p-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Системные сервисы</div>
+                            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0">
+                              <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram</TabsTrigger>
+                              <TabsTrigger value="dadata" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">DaData</TabsTrigger>
+                            </TabsList>
+                          </div>
+
+                          <div className="space-y-2 border border-black/10 bg-slate-50 p-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Платежные сервисы</div>
+                            <TabsList className="grid h-auto w-full grid-cols-1 gap-2 rounded-none bg-transparent p-0 sm:grid-cols-3">
+                              <TabsTrigger value="yoomoney" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">YooMoney</TabsTrigger>
+                              <TabsTrigger value="yookassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">YooKassa</TabsTrigger>
+                              <TabsTrigger value="robokassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">RoboKassa</TabsTrigger>
+                            </TabsList>
+                          </div>
+
+                          <div className="space-y-2 border border-black/10 bg-slate-50 p-3">
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Сервисы доставки</div>
+                            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-4">
+                              <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Яндекс.Доставка</TabsTrigger>
+                              <TabsTrigger value="cdek" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">СДЭК</TabsTrigger>
+                              <TabsTrigger value="russian-post" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Почта России</TabsTrigger>
+                              <TabsTrigger value="avito" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Avito</TabsTrigger>
+                            </TabsList>
+                          </div>
+                        </div>
 
                         <TabsContent value="telegram" className="mt-3 space-y-3">
                           <div className="min-w-0 space-y-3 overflow-hidden border p-3">

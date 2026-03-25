@@ -311,6 +311,7 @@ const formatOrderDisplayNumber = (order) => {
 const EXTERNAL_AUTH_PROVIDERS = [
   { id: "telegram", label: "Telegram" },
   { id: "google", label: "Google" },
+  { id: "vk", label: "VK" },
   { id: "yandex", label: "Яндекс" },
 ];
 
@@ -331,6 +332,7 @@ const normalizeProfileTab = (value, allowAdmin = false) => {
 
 const getExternalProviderLabel = (provider) => {
   if (provider === "google") return "Google";
+  if (provider === "vk") return "VK";
   if (provider === "yandex") return "Яндекс";
   return "Telegram";
 };
@@ -350,6 +352,7 @@ export default function ProfilePage() {
   const [availableExternalAuthProviders, setAvailableExternalAuthProviders] = useState({
     telegram: false,
     google: false,
+    vk: false,
     yandex: false,
   });
   const [linkingProvider, setLinkingProvider] = useState("");
@@ -468,6 +471,7 @@ export default function ProfilePage() {
         setAvailableExternalAuthProviders({
           telegram: isPublicSettingEnabled(publicSettings?.telegram_login_enabled) || isPublicSettingEnabled(publicSettings?.telegram_widget_enabled),
           google: isPublicSettingEnabled(publicSettings?.google_login_enabled),
+          vk: isPublicSettingEnabled(publicSettings?.vk_login_enabled),
           yandex: isPublicSettingEnabled(publicSettings?.yandex_login_enabled),
         });
       } catch (error) {
