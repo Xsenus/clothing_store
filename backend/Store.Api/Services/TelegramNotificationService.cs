@@ -58,8 +58,9 @@ public class TelegramNotificationService
         if (!string.IsNullOrWhiteSpace(managerComment))
             text.Append("Комментарий: ").AppendLine(managerComment.Trim());
 
-        if (!string.IsNullOrWhiteSpace(order.YandexDeliveryTrackingUrl))
-            text.Append("Отслеживание: ").AppendLine(order.YandexDeliveryTrackingUrl.Trim());
+        var trackingUrl = ResolveTrackingUrl(order);
+        if (!string.IsNullOrWhiteSpace(trackingUrl))
+            text.Append("Отслеживание: ").AppendLine(trackingUrl);
 
         await TrySendToConfirmedTelegramAsync(order.UserId, text.ToString().Trim(), cancellationToken);
     }
@@ -71,7 +72,9 @@ public class TelegramNotificationService
         CancellationToken cancellationToken = default)
     {
         var previousLabel = ResolveDeliveryStatusLabel(previousDeliveryStatus, previousDeliveryDescription);
-        var nextLabel = ResolveDeliveryStatusLabel(order.YandexDeliveryStatus, order.YandexDeliveryStatusDescription);
+        var nextLabel = ResolveDeliveryStatusLabel(
+            string.IsNullOrWhiteSpace(order.ShippingStatus) ? order.YandexDeliveryStatus : order.ShippingStatus,
+            string.IsNullOrWhiteSpace(order.ShippingStatusDescription) ? order.YandexDeliveryStatusDescription : order.ShippingStatusDescription);
         var formattedOrderNumber = ResolveOrderNumber(order);
 
         var text = new StringBuilder()
@@ -86,8 +89,9 @@ public class TelegramNotificationService
         if (!string.IsNullOrWhiteSpace(order.YandexPickupCode))
             text.Append("Код получения: ").AppendLine(order.YandexPickupCode.Trim());
 
-        if (!string.IsNullOrWhiteSpace(order.YandexDeliveryTrackingUrl))
-            text.Append("Отслеживание: ").AppendLine(order.YandexDeliveryTrackingUrl.Trim());
+        var trackingUrl = ResolveTrackingUrl(order);
+        if (!string.IsNullOrWhiteSpace(trackingUrl))
+            text.Append("Отслеживание: ").AppendLine(trackingUrl);
 
         await TrySendToConfirmedTelegramAsync(order.UserId, text.ToString().Trim(), cancellationToken);
     }
@@ -166,5 +170,15 @@ public class TelegramNotificationService
 
         var normalizedCode = statusCode?.Trim();
         return string.IsNullOrWhiteSpace(normalizedCode) ? "Статус уточняется" : normalizedCode;
+    }
+
+    private static string? ResolveTrackingUrl(Order order)
+    {
+        var genericUrl = order.ShippingTrackingUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(genericUrl))
+            return genericUrl;
+
+        var yandexUrl = order.YandexDeliveryTrackingUrl?.Trim();
+        return string.IsNullOrWhiteSpace(yandexUrl) ? null : yandexUrl;
     }
 }

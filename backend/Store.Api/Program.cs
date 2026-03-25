@@ -54,8 +54,13 @@ builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestSer
 builder.Services.AddScoped<IOrderPaymentService, OrderPaymentService>();
 builder.Services.AddScoped<IYooMoneyPaymentService, YooMoneyPaymentService>();
 builder.Services.AddScoped<IYooKassaPaymentService, YooKassaPaymentService>();
+builder.Services.AddScoped<IRoboKassaPaymentService, RoboKassaPaymentService>();
 builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
 builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
+builder.Services.AddScoped<ICdekDeliveryService, CdekDeliveryService>();
+builder.Services.AddScoped<IRussianPostDeliveryService, RussianPostDeliveryService>();
+builder.Services.AddScoped<IAvitoDeliveryService, AvitoDeliveryService>();
+builder.Services.AddScoped<IDeliveryIntegrationService, DeliveryIntegrationService>();
 builder.Services.AddScoped<PromoCodeService>();
 builder.Services.AddScoped<TransactionalEmailService>();
 builder.Services.AddScoped<TelegramNotificationService>();

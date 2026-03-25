@@ -44,18 +44,22 @@ public sealed class OrderPaymentService : IOrderPaymentService
     private readonly StoreDbContext _db;
     private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
     private readonly IYooKassaPaymentService _yooKassaPaymentService;
+    private readonly IRoboKassaPaymentService _roboKassaPaymentService;
     private readonly IOrderInventoryService _orderInventoryService;
     private readonly IOrderEmailQueue _orderEmailQueue;
+
     public OrderPaymentService(
         StoreDbContext db,
         IYooMoneyPaymentService yooMoneyPaymentService,
         IYooKassaPaymentService yooKassaPaymentService,
+        IRoboKassaPaymentService roboKassaPaymentService,
         IOrderInventoryService orderInventoryService,
         IOrderEmailQueue orderEmailQueue)
     {
         _db = db;
         _yooMoneyPaymentService = yooMoneyPaymentService;
         _yooKassaPaymentService = yooKassaPaymentService;
+        _roboKassaPaymentService = roboKassaPaymentService;
         _orderInventoryService = orderInventoryService;
         _orderEmailQueue = orderEmailQueue;
     }
@@ -69,7 +73,8 @@ public sealed class OrderPaymentService : IOrderPaymentService
             or "yookassa"
             or "yookassa_card"
             or "yookassa_sbp"
-            or "yookassa_yoomoney";
+            or "yookassa_yoomoney"
+            or "robokassa";
     }
 
     public async Task<IReadOnlySet<string>> GetManualRefreshAvailableProvidersAsync(CancellationToken cancellationToken = default)
@@ -80,6 +85,9 @@ public sealed class OrderPaymentService : IOrderPaymentService
 
         if (await _yooKassaPaymentService.IsManualRefreshAvailableAsync(cancellationToken))
             providers.Add("yookassa");
+
+        if (await _roboKassaPaymentService.IsManualRefreshAvailableAsync(cancellationToken))
+            providers.Add("robokassa");
 
         return providers;
     }
@@ -128,14 +136,13 @@ public sealed class OrderPaymentService : IOrderPaymentService
     {
         var normalizedMethod = NormalizePaymentMethod(paymentMethod);
         if (normalizedMethod.StartsWith("yoomoney", StringComparison.Ordinal))
-        {
             return MapCheckout(await _yooMoneyPaymentService.CreatePaymentAsync(order, normalizedMethod, returnUrl, cancellationToken));
-        }
 
         if (normalizedMethod.StartsWith("yookassa", StringComparison.Ordinal))
-        {
             return await _yooKassaPaymentService.CreatePaymentAsync(order, normalizedMethod, returnUrl, cancellationToken);
-        }
+
+        if (normalizedMethod.StartsWith("robokassa", StringComparison.Ordinal))
+            return MapCheckout(await _roboKassaPaymentService.CreatePaymentAsync(order, normalizedMethod, returnUrl, cancellationToken));
 
         throw new InvalidOperationException("Для заказа не выбран поддерживаемый онлайн-способ оплаты.");
     }
@@ -160,6 +167,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
                 {
                     "yoomoney" => MapCheckout(await _yooMoneyPaymentService.GetCheckoutAsync(order, returnUrl, cancellationToken)),
                     "yookassa" => await _yooKassaPaymentService.GetCheckoutAsync(order, returnUrl, cancellationToken),
+                    "robokassa" => MapCheckout(await _roboKassaPaymentService.GetCheckoutAsync(order, returnUrl, cancellationToken)),
                     _ => throw new InvalidOperationException("Для заказа найден неподдерживаемый платежный провайдер.")
                 };
             }
@@ -185,6 +193,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
         {
             "yoomoney" => await _yooMoneyPaymentService.RefreshOrderPaymentAsync(order, cancellationToken),
             "yookassa" => await _yooKassaPaymentService.RefreshOrderPaymentAsync(order, cancellationToken),
+            "robokassa" => await _roboKassaPaymentService.RefreshOrderPaymentAsync(order, cancellationToken),
             _ => throw new InvalidOperationException("Для заказа найден неподдерживаемый платежный провайдер.")
         };
     }
@@ -196,6 +205,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
     {
         await _yooMoneyPaymentService.CancelPendingPaymentsForOrderAsync(orderId, reason, cancellationToken);
         await _yooKassaPaymentService.CancelPendingPaymentsForOrderAsync(orderId, reason, cancellationToken);
+        await _roboKassaPaymentService.CancelPendingPaymentsForOrderAsync(orderId, reason, cancellationToken);
     }
 
     public async Task<int> ProcessPendingPaymentsAsync(CancellationToken cancellationToken = default)
@@ -203,6 +213,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
         var updatedCount = 0;
         updatedCount += await _yooMoneyPaymentService.ProcessPendingPaymentsAsync(cancellationToken);
         updatedCount += await _yooKassaPaymentService.ProcessPendingPaymentsAsync(cancellationToken);
+        updatedCount += await _roboKassaPaymentService.ProcessPendingPaymentsAsync(cancellationToken);
         updatedCount += await ProcessExpiredReservationsAsync(cancellationToken);
         return updatedCount;
     }
@@ -280,9 +291,7 @@ public sealed class OrderPaymentService : IOrderPaymentService
         }
 
         if (_db.ChangeTracker.HasChanges())
-        {
             await _db.SaveChangesAsync(cancellationToken);
-        }
 
         foreach (var order in notifications)
             _orderEmailQueue.QueueOrderStatusChangedEmail(order, PendingOrderStatus, "Срок ожидания онлайн-оплаты истек");
@@ -292,27 +301,18 @@ public sealed class OrderPaymentService : IOrderPaymentService
 
     private async Task<string> ResolveSystemUserIdAsync(string fallbackUserId, CancellationToken cancellationToken)
     {
-        var systemUserId = await _db.Users
-            .AsNoTracking()
-            .Where(x => x.IsSystem)
-            .Select(x => x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
+        var systemUserId = await _db.Users.AsNoTracking().Where(x => x.IsSystem).Select(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(systemUserId))
             return systemUserId!;
 
-        var adminUserId = await _db.Users
-            .AsNoTracking()
-            .Where(x => x.IsAdmin)
-            .Select(x => x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return string.IsNullOrWhiteSpace(adminUserId)
-            ? fallbackUserId
-            : adminUserId!;
+        var adminUserId = await _db.Users.AsNoTracking().Where(x => x.IsAdmin).Select(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(adminUserId) ? fallbackUserId : adminUserId!;
     }
 
     private static OrderPaymentCheckoutResult MapCheckout(YooMoneyCheckoutResult result)
+        => new(result.Payment, result.Action, result.Method, result.Fields);
+
+    private static OrderPaymentCheckoutResult MapCheckout(RoboKassaCheckoutResult result)
         => new(result.Payment, result.Action, result.Method, result.Fields);
 
     private static bool CanCreateReplacementPayment(Order order, OrderPayment? payment)

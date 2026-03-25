@@ -13,20 +13,26 @@ public class IntegrationsController : ControllerBase
     private readonly IDaDataAddressSuggestService _daDataAddressSuggestService;
     private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
     private readonly IYooKassaPaymentService _yooKassaPaymentService;
+    private readonly IRoboKassaPaymentService _roboKassaPaymentService;
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
+    private readonly IDeliveryIntegrationService _deliveryIntegrationService;
 
     public IntegrationsController(
         ITelegramBotManager telegramBotManager,
         IDaDataAddressSuggestService daDataAddressSuggestService,
         IYooMoneyPaymentService yooMoneyPaymentService,
         IYooKassaPaymentService yooKassaPaymentService,
-        IYandexDeliveryQuoteService yandexDeliveryQuoteService)
+        IRoboKassaPaymentService roboKassaPaymentService,
+        IYandexDeliveryQuoteService yandexDeliveryQuoteService,
+        IDeliveryIntegrationService deliveryIntegrationService)
     {
         _telegramBotManager = telegramBotManager;
         _daDataAddressSuggestService = daDataAddressSuggestService;
         _yooMoneyPaymentService = yooMoneyPaymentService;
         _yooKassaPaymentService = yooKassaPaymentService;
+        _roboKassaPaymentService = roboKassaPaymentService;
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
+        _deliveryIntegrationService = deliveryIntegrationService;
     }
 
     [HttpPost("telegram/webhook/{id}")]
@@ -90,6 +96,24 @@ public class IntegrationsController : ControllerBase
         {
             return Results.BadRequest(new { detail = ex.Message });
         }
+    }
+
+    [HttpPost("robokassa/result")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public async Task<IResult> RoboKassaResult([FromForm] RoboKassaCallbackPayload payload, CancellationToken cancellationToken)
+        => await HandleRoboKassaResultAsync(payload, cancellationToken);
+
+    [HttpGet("robokassa/result")]
+    public async Task<IResult> RoboKassaResultGet([FromQuery] RoboKassaCallbackPayload payload, CancellationToken cancellationToken)
+        => await HandleRoboKassaResultAsync(payload, cancellationToken);
+
+    private async Task<IResult> HandleRoboKassaResultAsync(RoboKassaCallbackPayload payload, CancellationToken cancellationToken)
+    {
+        var result = await _roboKassaPaymentService.HandleResultAsync(payload, cancellationToken);
+        if (!result.Accepted)
+            return Results.Text(result.ResponseText, "text/plain", statusCode: StatusCodes.Status400BadRequest);
+
+        return Results.Text(result.ResponseText, "text/plain");
     }
 
     [HttpGet("yandex/delivery/widget-config")]
@@ -208,6 +232,78 @@ public class IntegrationsController : ControllerBase
                     requestedWeightKg = quote.Details.RequestedWeightKg,
                     declaredCost = quote.Details.DeclaredCost
                 }
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("delivery/calculate")]
+    public async Task<IResult> CalculateDelivery([FromBody] DeliveryCalculatePayload payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _deliveryIntegrationService.CalculateAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                toAddress = result.DestinationAddress,
+                providers = result.Providers.Select(provider => new
+                {
+                    provider = provider.Provider,
+                    label = provider.Label,
+                    currency = provider.Currency,
+                    homeDelivery = new
+                    {
+                        available = provider.HomeDelivery.Available,
+                        estimatedCost = provider.HomeDelivery.EstimatedCost,
+                        deliveryDays = provider.HomeDelivery.DeliveryDays,
+                        tariff = provider.HomeDelivery.Tariff,
+                        error = provider.HomeDelivery.Error
+                    },
+                    pickupPointDelivery = new
+                    {
+                        available = provider.PickupPointDelivery.Available,
+                        estimatedCost = provider.PickupPointDelivery.EstimatedCost,
+                        deliveryDays = provider.PickupPointDelivery.DeliveryDays,
+                        tariff = provider.PickupPointDelivery.Tariff,
+                        error = provider.PickupPointDelivery.Error
+                    },
+                    details = provider.Details
+                })
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("delivery/pickup-points")]
+    public async Task<IResult> GetDeliveryPickupPoints([FromBody] DeliveryPickupPointsPayload payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var points = await _deliveryIntegrationService.ListPickupPointsAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = payload.Provider,
+                points = points.Select(point => new
+                {
+                    id = point.Id,
+                    name = point.Name,
+                    address = point.Address,
+                    instruction = point.Instruction,
+                    latitude = point.Latitude,
+                    longitude = point.Longitude,
+                    distanceKm = point.DistanceKm,
+                    paymentMethods = point.PaymentMethods,
+                    available = point.Available,
+                    estimatedCost = point.EstimatedCost,
+                    deliveryDays = point.DeliveryDays,
+                    error = point.Error
+                })
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)

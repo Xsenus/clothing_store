@@ -120,7 +120,16 @@ public class OrdersController : ControllerBase
                 order.Status,
                 order.PaymentMethod,
                 order.ShippingMethod,
+                order.ShippingProvider,
+                order.ShippingTariff,
                 order.PickupPointId,
+                order.ShippingProviderOrderId,
+                order.ShippingTrackingNumber,
+                order.ShippingTrackingUrl,
+                order.ShippingStatus,
+                order.ShippingStatusDescription,
+                order.ShippingStatusUpdatedAt,
+                order.ShippingLastSyncError,
                 order.YandexRequestId,
                 order.YandexDeliveryStatus,
                 order.YandexDeliveryStatusDescription,
@@ -285,6 +294,12 @@ public class OrdersController : ControllerBase
             var resolvedPickupPointId = resolvedShippingMethod != "pickup" || string.IsNullOrWhiteSpace(payload.PickupPointId)
                 ? null
                 : payload.PickupPointId.Trim();
+            var resolvedShippingProvider = resolvedShippingMethod == "self_pickup"
+                ? null
+                : NormalizeOptionalText(payload.ShippingProvider);
+            var resolvedShippingTariff = resolvedShippingMethod == "self_pickup"
+                ? null
+                : NormalizeOptionalText(payload.ShippingTariff);
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
             var confirmedUserEmail = await _userIdentityService.GetConfirmedEmailAsync(user.Id, null, HttpContext.RequestAborted);
             var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
@@ -317,6 +332,8 @@ public class OrdersController : ControllerBase
                 VisitorId = resolvedVisitorId,
                 ViewerKey = resolvedViewerKey,
                 ShippingMethod = resolvedShippingMethod,
+                ShippingProvider = resolvedShippingProvider,
+                ShippingTariff = resolvedShippingTariff,
                 ShippingAmount = resolvedShippingAmount,
                 PromoCode = resolvedPromoCode,
                 PromoDiscountAmount = promoCodeDiscountAmount,
@@ -505,6 +522,12 @@ public class OrdersController : ControllerBase
             _ when int.TryParse(value?.ToString(), out var parsed) => parsed,
             _ => 0
         };
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
 }

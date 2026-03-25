@@ -279,10 +279,12 @@ public class TransactionalEmailService
         var variables = await BuildOrderVariablesAsync(order, previousStatus: null, managerComment: null, cancellationToken);
         variables["previous_delivery_status"] = NormalizeKey(previousDeliveryStatus);
         variables["previous_delivery_status_label"] = ResolveDeliveryStatusLabel(previousDeliveryStatus, previousDeliveryDescription);
-        variables["delivery_status"] = NormalizeKey(order.YandexDeliveryStatus);
-        variables["delivery_status_label"] = ResolveDeliveryStatusLabel(order.YandexDeliveryStatus, order.YandexDeliveryStatusDescription);
-        variables["delivery_tracking_url"] = string.IsNullOrWhiteSpace(order.YandexDeliveryTrackingUrl) ? "не указана" : order.YandexDeliveryTrackingUrl.Trim();
-        variables["pickup_code"] = string.IsNullOrWhiteSpace(order.YandexPickupCode) ? "не указан" : order.YandexPickupCode.Trim();
+        variables["delivery_status"] = NormalizeKey(ResolveDeliveryStatusCode(order));
+        variables["delivery_status_label"] = ResolveDeliveryStatusLabel(
+            ResolveDeliveryStatusCode(order),
+            ResolveDeliveryStatusDescription(order));
+        variables["delivery_tracking_url"] = ResolveTrackingUrl(order) ?? "не указана";
+        variables["pickup_code"] = ResolvePickupCode(order) ?? "не указан";
 
         await TrySendTemplateEmailAsync(EmailTemplateCatalog.OrderDeliveryUpdated, recipientEmail, variables, cancellationToken);
     }
@@ -516,6 +518,14 @@ public class TransactionalEmailService
             ["customer_email"] = NormalizeEmail(order.CustomerEmail),
             ["customer_phone"] = order.CustomerPhone?.Trim(),
             ["shipping_address"] = order.ShippingAddress?.Trim(),
+            ["shipping_provider"] = NormalizeKey(order.ShippingProvider),
+            ["shipping_provider_label"] = ResolveShippingProviderLabel(order),
+            ["shipping_status"] = NormalizeKey(ResolveDeliveryStatusCode(order)),
+            ["shipping_status_label"] = ResolveDeliveryStatusLabel(
+                ResolveDeliveryStatusCode(order),
+                ResolveDeliveryStatusDescription(order)),
+            ["tracking_number"] = NormalizeOptionalText(order.ShippingTrackingNumber),
+            ["tracking_url"] = ResolveTrackingUrl(order),
             ["total_amount"] = formattedTotal,
             ["order_items"] = orderItems,
             ["manager_comment"] = string.IsNullOrWhiteSpace(managerComment) ? "без комментария" : managerComment.Trim()
@@ -698,9 +708,41 @@ public class TransactionalEmailService
             "yookassa_card" => "YooKassa: банковская карта",
             "yookassa_sbp" => "YooKassa: СБП",
             "yookassa_yoomoney" => "YooKassa: ЮMoney",
+            "robokassa" => "RoboKassa",
             _ => normalized
         };
     }
+
+    private static string ResolveShippingProviderLabel(Order order)
+    {
+        var normalizedProvider = NormalizeKey(order.ShippingProvider);
+        if (string.IsNullOrWhiteSpace(normalizedProvider) && !string.IsNullOrWhiteSpace(order.YandexRequestId))
+            normalizedProvider = "yandex_delivery";
+
+        return normalizedProvider switch
+        {
+            "cdek" => "СДЭК",
+            "russian_post" => "Почта России",
+            "avito" => "Avito",
+            "yandex_delivery" or "yandex" => "Яндекс Доставка",
+            "self_pickup" => "Самовывоз",
+            _ => string.IsNullOrWhiteSpace(normalizedProvider)
+                ? string.Empty
+                : normalizedProvider
+        };
+    }
+
+    private static string? ResolveDeliveryStatusCode(Order order)
+        => NormalizeOptionalText(order.ShippingStatus) ?? NormalizeOptionalText(order.YandexDeliveryStatus);
+
+    private static string? ResolveDeliveryStatusDescription(Order order)
+        => NormalizeOptionalText(order.ShippingStatusDescription) ?? NormalizeOptionalText(order.YandexDeliveryStatusDescription);
+
+    private static string? ResolveTrackingUrl(Order order)
+        => NormalizeOptionalText(order.ShippingTrackingUrl) ?? NormalizeOptionalText(order.YandexDeliveryTrackingUrl);
+
+    private static string? ResolvePickupCode(Order order)
+        => NormalizeOptionalText(order.YandexPickupCode);
 
     private static string ResolveDeliveryStatusLabel(string? statusCode, string? description)
     {

@@ -28,7 +28,15 @@ public class PublicSettingsController : ControllerBase
         "yookassa_allow_bank_cards",
         "yookassa_allow_sbp",
         "yookassa_allow_yoomoney",
+        "payments_robokassa_enabled",
+        "payments_robokassa_ready",
         "yandex_delivery_enabled",
+        "delivery_cdek_enabled",
+        "delivery_cdek_ready",
+        "delivery_russian_post_enabled",
+        "delivery_russian_post_ready",
+        "delivery_avito_enabled",
+        "delivery_avito_ready",
         "site_title",
         "site_favicon_url",
         "site_loading_animation_enabled",
@@ -255,6 +263,17 @@ public class PublicSettingsController : ControllerBase
         if (requested.Contains("payments_yookassa_ready"))
             result["payments_yookassa_ready"] = await IsYooKassaReadyAsync() ? "true" : "false";
 
+        if (requested.Contains("payments_robokassa_enabled"))
+        {
+            result["payments_robokassa_enabled"] = await GetBooleanSettingAsync(
+                "payments_robokassa_enabled",
+                "Integrations:RoboKassa:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("payments_robokassa_ready"))
+            result["payments_robokassa_ready"] = await IsRoboKassaReadyAsync() ? "true" : "false";
+
         if (requested.Contains("yandex_delivery_enabled"))
         {
             result["yandex_delivery_enabled"] = await GetBooleanSettingAsync(
@@ -262,6 +281,39 @@ public class PublicSettingsController : ControllerBase
                 "Integrations:YandexDelivery:Enabled",
                 fallback: true) ? "true" : "false";
         }
+
+        if (requested.Contains("delivery_cdek_enabled"))
+        {
+            result["delivery_cdek_enabled"] = await GetBooleanSettingAsync(
+                "delivery_cdek_enabled",
+                "Integrations:Cdek:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("delivery_cdek_ready"))
+            result["delivery_cdek_ready"] = await IsCdekReadyAsync() ? "true" : "false";
+
+        if (requested.Contains("delivery_russian_post_enabled"))
+        {
+            result["delivery_russian_post_enabled"] = await GetBooleanSettingAsync(
+                "delivery_russian_post_enabled",
+                "Integrations:RussianPost:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("delivery_russian_post_ready"))
+            result["delivery_russian_post_ready"] = await IsRussianPostReadyAsync() ? "true" : "false";
+
+        if (requested.Contains("delivery_avito_enabled"))
+        {
+            result["delivery_avito_enabled"] = await GetBooleanSettingAsync(
+                "delivery_avito_enabled",
+                "Integrations:Avito:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("delivery_avito_ready"))
+            result["delivery_avito_ready"] = await IsAvitoReadyAsync() ? "true" : "false";
     }
 
     private void ApplyShortTermPublicCaching()
@@ -334,6 +386,98 @@ public class PublicSettingsController : ControllerBase
         return !string.IsNullOrWhiteSpace(shopId)
             && !string.IsNullOrWhiteSpace(secretKey)
             && (allowBankCards || allowSbp || allowYooMoney);
+    }
+
+    private async Task<bool> IsRoboKassaReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "payments_robokassa_enabled",
+            "Integrations:RoboKassa:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var merchantLogin = await GetSettingOrConfigAsync(
+            "robokassa_merchant_login",
+            "Integrations:RoboKassa:MerchantLogin");
+        var password1 = await GetSettingOrConfigAsync(
+            "robokassa_password1",
+            "Integrations:RoboKassa:Password1");
+        var password2 = await GetSettingOrConfigAsync(
+            "robokassa_password2",
+            "Integrations:RoboKassa:Password2");
+
+        return !string.IsNullOrWhiteSpace(merchantLogin)
+            && !string.IsNullOrWhiteSpace(password1)
+            && !string.IsNullOrWhiteSpace(password2);
+    }
+
+    private async Task<bool> IsCdekReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "delivery_cdek_enabled",
+            "Integrations:Cdek:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var account = await GetSettingOrConfigAsync(
+            "delivery_cdek_account",
+            "Integrations:Cdek:Account");
+        var password = await GetSettingOrConfigAsync(
+            "delivery_cdek_password",
+            "Integrations:Cdek:Password");
+        var fromPostalCode = await GetSettingOrConfigAsync(
+            "delivery_cdek_from_postal_code",
+            "Integrations:Cdek:FromPostalCode");
+
+        return !string.IsNullOrWhiteSpace(account)
+            && !string.IsNullOrWhiteSpace(password)
+            && !string.IsNullOrWhiteSpace(fromPostalCode);
+    }
+
+    private async Task<bool> IsRussianPostReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "delivery_russian_post_enabled",
+            "Integrations:RussianPost:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var accessToken = await GetSettingOrConfigAsync(
+            "delivery_russian_post_access_token",
+            "Integrations:RussianPost:AccessToken");
+        var authorizationKey = await GetSettingOrConfigAsync(
+            "delivery_russian_post_authorization_key",
+            "Integrations:RussianPost:AuthorizationKey");
+        var fromPostalCode = await GetSettingOrConfigAsync(
+            "delivery_russian_post_from_postal_code",
+            "Integrations:RussianPost:FromPostalCode");
+
+        return !string.IsNullOrWhiteSpace(accessToken)
+            && !string.IsNullOrWhiteSpace(authorizationKey)
+            && !string.IsNullOrWhiteSpace(fromPostalCode);
+    }
+
+    private async Task<bool> IsAvitoReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "delivery_avito_enabled",
+            "Integrations:Avito:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var clientId = await GetSettingOrConfigAsync(
+            "delivery_avito_client_id",
+            "Integrations:Avito:ClientId");
+        var clientSecret = await GetSettingOrConfigAsync(
+            "delivery_avito_client_secret",
+            "Integrations:Avito:ClientSecret");
+
+        return !string.IsNullOrWhiteSpace(clientId)
+            && !string.IsNullOrWhiteSpace(clientSecret);
     }
 
     private async Task<bool> IsTelegramLoginReadyAsync()

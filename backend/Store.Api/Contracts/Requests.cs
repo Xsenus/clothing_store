@@ -69,6 +69,8 @@ public record OrderPayload(
     double TotalAmount,
     double? ShippingAmount,
     string? ShippingMethod,
+    string? ShippingProvider,
+    string? ShippingTariff,
     string? PickupPointId,
     string? Status,
     string? CustomerName,
@@ -176,6 +178,24 @@ public record YooKassaAdminTestPayload(
     decimal? Amount,
     string? ReturnUrl);
 
+public record RoboKassaAdminTestPayload(
+    bool Enabled,
+    string? MerchantLogin,
+    string? Password1,
+    string? Password2,
+    string? TestPassword1,
+    string? TestPassword2,
+    bool TestMode,
+    string? LabelPrefix,
+    int? PaymentTimeoutMinutes,
+    string? CurrencyLabel,
+    string? PaymentMethods,
+    bool ReceiptEnabled,
+    string? ReceiptTax,
+    string? TaxSystem,
+    decimal? Amount,
+    string? ReturnUrl);
+
 public record YandexDeliveryAdminTestPayload(
     bool Enabled,
     bool UseTestEnvironment,
@@ -187,6 +207,42 @@ public record YandexDeliveryAdminTestPayload(
     string ToAddress,
     decimal? WeightKg,
     decimal? DeclaredCost);
+
+public record CdekDeliveryAdminTestPayload(
+    bool Enabled,
+    bool UseTestEnvironment,
+    string? Account,
+    string? Password,
+    string? FromPostalCode,
+    string ToAddress,
+    decimal? WeightKg,
+    decimal? DeclaredCost,
+    int? PackageLengthCm,
+    int? PackageHeightCm,
+    int? PackageWidthCm);
+
+public record RussianPostDeliveryAdminTestPayload(
+    bool Enabled,
+    string? AccessToken,
+    string? AuthorizationKey,
+    string? FromPostalCode,
+    string ToAddress,
+    decimal? WeightKg,
+    decimal? DeclaredCost,
+    string? MailType,
+    string? MailCategory,
+    string? DimensionType,
+    int? PackageLengthCm,
+    int? PackageHeightCm,
+    int? PackageWidthCm);
+
+public record AvitoDeliveryAdminTestPayload(
+    bool Enabled,
+    string? ClientId,
+    string? ClientSecret,
+    string? Scope,
+    string? WarehouseAddress,
+    string? Notes);
 
 /// <summary>
 /// Параметры поиска адреса через DaData.
@@ -204,6 +260,20 @@ public record YandexDeliveryCalculatePayload(
     string? PickupPointId = null);
 
 public record YandexDeliveryPickupPointsPayload(
+    string ToAddress,
+    string? PaymentMethod = null,
+    int? Limit = null,
+    decimal? WeightKg = null,
+    decimal? DeclaredCost = null);
+
+public record DeliveryCalculatePayload(
+    string ToAddress,
+    decimal? WeightKg,
+    decimal? DeclaredCost,
+    string? PaymentMethod = null);
+
+public record DeliveryPickupPointsPayload(
+    string Provider,
     string ToAddress,
     string? PaymentMethod = null,
     int? Limit = null,

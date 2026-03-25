@@ -1159,6 +1159,36 @@ public class Order
     [Column("pickup_point_id")]
     public string? PickupPointId { get; set; }
 
+    [Column("shipping_provider")]
+    public string? ShippingProvider { get; set; }
+
+    [Column("shipping_tariff")]
+    public string? ShippingTariff { get; set; }
+
+    [Column("shipping_provider_order_id")]
+    public string? ShippingProviderOrderId { get; set; }
+
+    [Column("shipping_tracking_number")]
+    public string? ShippingTrackingNumber { get; set; }
+
+    [Column("shipping_tracking_url")]
+    public string? ShippingTrackingUrl { get; set; }
+
+    [Column("shipping_status")]
+    public string? ShippingStatus { get; set; }
+
+    [Column("shipping_status_description")]
+    public string? ShippingStatusDescription { get; set; }
+
+    [Column("shipping_status_updated_at")]
+    public long? ShippingStatusUpdatedAt { get; set; }
+
+    [Column("shipping_last_sync_error")]
+    public string? ShippingLastSyncError { get; set; }
+
+    [Column("shipping_data_json", TypeName = "jsonb")]
+    public string? ShippingDataJson { get; set; }
+
     [Column("yandex_request_id")]
     public string? YandexRequestId { get; set; }
 

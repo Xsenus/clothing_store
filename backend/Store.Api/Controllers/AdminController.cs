@@ -30,7 +30,11 @@ public class AdminController : ControllerBase
     private readonly IOrderPaymentService _orderPaymentService;
     private readonly IYooMoneyPaymentService _yooMoneyPaymentService;
     private readonly IYooKassaPaymentService _yooKassaPaymentService;
+    private readonly IRoboKassaPaymentService _roboKassaPaymentService;
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
+    private readonly ICdekDeliveryService _cdekDeliveryService;
+    private readonly IRussianPostDeliveryService _russianPostDeliveryService;
+    private readonly IAvitoDeliveryService _avitoDeliveryService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
     private readonly DatabaseBackupService _databaseBackupService;
 
@@ -48,7 +52,11 @@ public class AdminController : ControllerBase
         IOrderPaymentService orderPaymentService,
         IYooMoneyPaymentService yooMoneyPaymentService,
         IYooKassaPaymentService yooKassaPaymentService,
+        IRoboKassaPaymentService roboKassaPaymentService,
         IYandexDeliveryQuoteService yandexDeliveryQuoteService,
+        ICdekDeliveryService cdekDeliveryService,
+        IRussianPostDeliveryService russianPostDeliveryService,
+        IAvitoDeliveryService avitoDeliveryService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService,
         DatabaseBackupService databaseBackupService)
     {
@@ -62,7 +70,11 @@ public class AdminController : ControllerBase
         _orderPaymentService = orderPaymentService;
         _yooMoneyPaymentService = yooMoneyPaymentService;
         _yooKassaPaymentService = yooKassaPaymentService;
+        _roboKassaPaymentService = roboKassaPaymentService;
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
+        _cdekDeliveryService = cdekDeliveryService;
+        _russianPostDeliveryService = russianPostDeliveryService;
+        _avitoDeliveryService = avitoDeliveryService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
         _databaseBackupService = databaseBackupService;
     }
@@ -275,7 +287,16 @@ public class AdminController : ControllerBase
                     o.PaymentMethod,
                     o.PurchaseChannel,
                     o.ShippingMethod,
+                    o.ShippingProvider,
+                    o.ShippingTariff,
                     o.PickupPointId,
+                    o.ShippingProviderOrderId,
+                    o.ShippingTrackingNumber,
+                    o.ShippingTrackingUrl,
+                    o.ShippingStatus,
+                    o.ShippingStatusDescription,
+                    o.ShippingStatusUpdatedAt,
+                    o.ShippingLastSyncError,
                     o.YandexRequestId,
                     o.YandexDeliveryStatus,
                     o.YandexDeliveryStatusDescription,
@@ -1788,6 +1809,52 @@ public class AdminController : ControllerBase
         }
     }
 
+    [HttpPost("settings/robokassa/test")]
+    public async Task<IResult> TestRoboKassa([FromBody] RoboKassaAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _roboKassaPaymentService.TestIntegrationAsync(
+                new RoboKassaIntegrationOverrides(
+                    Enabled: payload.Enabled,
+                    MerchantLogin: payload.MerchantLogin,
+                    Password1: payload.Password1,
+                    Password2: payload.Password2,
+                    TestPassword1: payload.TestPassword1,
+                    TestPassword2: payload.TestPassword2,
+                    TestMode: payload.TestMode,
+                    LabelPrefix: payload.LabelPrefix,
+                    PaymentTimeoutMinutes: payload.PaymentTimeoutMinutes,
+                    CurrencyLabel: payload.CurrencyLabel,
+                    PaymentMethods: payload.PaymentMethods,
+                    ReceiptEnabled: payload.ReceiptEnabled,
+                    ReceiptTax: payload.ReceiptTax,
+                    TaxSystem: payload.TaxSystem),
+                payload.Amount,
+                payload.ReturnUrl,
+                cancellationToken);
+
+            return Results.Ok(new
+            {
+                provider = "robokassa",
+                merchantLogin = result.MerchantLogin,
+                testMode = result.TestMode,
+                requestedAmount = result.RequestedAmount,
+                checkoutAction = result.CheckoutAction,
+                checkoutMethod = result.CheckoutMethod,
+                checkoutFields = result.CheckoutFields,
+                resultUrlNote = result.ResultUrlNote,
+                note = result.Note
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
     [HttpPost("settings/yandex-delivery/test")]
     public async Task<IResult> TestYandexDelivery([FromBody] YandexDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
     {
@@ -1884,6 +1951,99 @@ public class AdminController : ControllerBase
                     requestedWeightKg = quote.Details.RequestedWeightKg,
                     declaredCost = quote.Details.DeclaredCost
                 }
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/cdek-delivery/test")]
+    public async Task<IResult> TestCdekDelivery([FromBody] CdekDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _cdekDeliveryService.TestIntegrationAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = "cdek",
+                tokenReceived = result.TokenReceived,
+                environment = result.Environment,
+                cityCode = result.CityCode,
+                quote = result.Quote is null
+                    ? null
+                    : new
+                    {
+                        provider = result.Quote.Provider,
+                        label = result.Quote.Label,
+                        currency = result.Quote.Currency,
+                        homeDelivery = result.Quote.HomeDelivery,
+                        pickupPointDelivery = result.Quote.PickupPointDelivery,
+                        details = result.Quote.Details
+                    },
+                pickupPoints = result.PickupPoints,
+                note = result.Note
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/russian-post-delivery/test")]
+    public async Task<IResult> TestRussianPostDelivery([FromBody] RussianPostDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _russianPostDeliveryService.TestIntegrationAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = "russian_post",
+                fromPostalCode = result.FromPostalCode,
+                destinationPostalCode = result.DestinationPostalCode,
+                quote = result.Quote is null
+                    ? null
+                    : new
+                    {
+                        provider = result.Quote.Provider,
+                        label = result.Quote.Label,
+                        currency = result.Quote.Currency,
+                        homeDelivery = result.Quote.HomeDelivery,
+                        pickupPointDelivery = result.Quote.PickupPointDelivery,
+                        details = result.Quote.Details
+                    },
+                pickupPoints = result.PickupPoints,
+                note = result.Note
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/avito-delivery/test")]
+    public async Task<IResult> TestAvitoDelivery([FromBody] AvitoDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _avitoDeliveryService.TestIntegrationAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = "avito",
+                tokenEndpointReachable = result.TokenEndpointReachable,
+                tokenIssued = result.TokenIssued,
+                scope = result.Scope,
+                detail = result.Detail,
+                note = result.Note
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)

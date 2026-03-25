@@ -132,6 +132,7 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<GalleryImage>().HasIndex(x => x.Name);
         modelBuilder.Entity<Order>().HasIndex(x => x.OrderNumber).IsUnique();
         modelBuilder.Entity<Order>().HasIndex(x => x.YandexRequestId);
+        modelBuilder.Entity<Order>().HasIndex(x => x.ShippingProviderOrderId);
         modelBuilder.Entity<OrderPayment>().HasIndex(x => x.OrderId);
         modelBuilder.Entity<OrderPayment>().HasIndex(x => x.Label).IsUnique();
         modelBuilder.Entity<OrderPayment>().HasIndex(x => x.OperationId).IsUnique();
