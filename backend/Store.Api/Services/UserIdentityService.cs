@@ -240,7 +240,7 @@ public class UserIdentityService
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == normalizedUserId, cancellationToken);
         if (user is null)
-            throw new InvalidOperationException("User not found.");
+            throw new InvalidOperationException("Пользователь не найден.");
 
         var normalizedEmail = NormalizeConfirmedEmail(email, emailVerified: true);
         if (string.IsNullOrWhiteSpace(normalizedEmail))
@@ -273,62 +273,81 @@ public class UserIdentityService
         var normalizedSourceUserId = (sourceUserId ?? string.Empty).Trim();
         var normalizedTargetUserId = (targetUserId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(normalizedSourceUserId) || string.IsNullOrWhiteSpace(normalizedTargetUserId))
-            throw new InvalidOperationException("Both source and target users are required for merging.");
+            throw new InvalidOperationException("Для объединения нужно выбрать основной профиль и хотя бы один аккаунт-источник.");
         if (string.Equals(normalizedSourceUserId, normalizedTargetUserId, StringComparison.Ordinal))
-            throw new InvalidOperationException("Choose two different users to merge.");
+            throw new InvalidOperationException("Нельзя объединить аккаунт сам с собой. Выберите другой источник.");
 
-        var sourceUser = await _db.Users.FirstOrDefaultAsync(x => x.Id == normalizedSourceUserId, cancellationToken);
-        var targetUser = await _db.Users.FirstOrDefaultAsync(x => x.Id == normalizedTargetUserId, cancellationToken);
-        if (sourceUser is null || targetUser is null)
-            throw new InvalidOperationException("One of the selected users was not found.");
-        if (sourceUser.IsSystem || targetUser.IsSystem)
-            throw new InvalidOperationException("System users cannot be merged.");
-        if (!await CanSafelyConsolidateUserIntoTargetAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken))
+        return await MergeUsersAsync(
+            new[] { normalizedSourceUserId },
+            normalizedTargetUserId,
+            preferredEmail,
+            preferredPhone,
+            cancellationToken);
+    }
+
+    public async Task<User> MergeUsersAsync(
+        IEnumerable<string> sourceUserIds,
+        string targetUserId,
+        string? preferredEmail = null,
+        string? preferredPhone = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedTargetUserId = (targetUserId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTargetUserId))
+            throw new InvalidOperationException("Для объединения нужно выбрать основной профиль.");
+
+        var normalizedSourceUserIds = (sourceUserIds ?? Array.Empty<string>())
+            .Select(userId => (userId ?? string.Empty).Trim())
+            .Where(userId => !string.IsNullOrWhiteSpace(userId))
+            .Distinct(StringComparer.Ordinal)
+            .Where(userId => !string.Equals(userId, normalizedTargetUserId, StringComparison.Ordinal))
+            .ToList();
+
+        if (normalizedSourceUserIds.Count == 0)
+            throw new InvalidOperationException("Выберите хотя бы один аккаунт-источник для объединения.");
+
+        var allUserIds = normalizedSourceUserIds
+            .Append(normalizedTargetUserId)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var users = await _db.Users
+            .Where(x => allUserIds.Contains(x.Id))
+            .ToListAsync(cancellationToken);
+        var usersById = users.ToDictionary(x => x.Id, StringComparer.Ordinal);
+
+        if (!usersById.TryGetValue(normalizedTargetUserId, out var targetUser))
+            throw new InvalidOperationException("Один из выбранных пользователей не найден.");
+
+        var sourceUsers = new List<User>(normalizedSourceUserIds.Count);
+        foreach (var normalizedSourceUserId in normalizedSourceUserIds)
         {
-            throw new InvalidOperationException(
-                "Users cannot be merged because they have conflicting external accounts from the same provider.");
+            if (!usersById.TryGetValue(normalizedSourceUserId, out var sourceUser))
+                throw new InvalidOperationException("Один из выбранных пользователей не найден.");
+
+            sourceUsers.Add(sourceUser);
         }
 
-        var sourceProfile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == normalizedSourceUserId, cancellationToken);
-        var targetProfile = await EnsureUserProfileAsync(targetUser, cancellationToken);
+        if (targetUser.IsSystem || sourceUsers.Any(sourceUser => sourceUser.IsSystem))
+            throw new InvalidOperationException("Системных пользователей объединять нельзя.");
+        if (!await CanSafelyConsolidateUsersIntoTargetAsync(normalizedSourceUserIds, normalizedTargetUserId, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Нельзя объединить выбранные аккаунты: у них есть конфликтующие внешние привязки одного провайдера.");
+        }
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            MergeUserCore(targetUser, sourceUser);
-            MergeProfileCore(targetProfile, sourceProfile);
-            MergeProfileAddressBook(targetProfile, sourceProfile);
+            foreach (var sourceUser in sourceUsers)
+            {
+                await MergeUserIntoTargetAsync(
+                    sourceUser,
+                    targetUser,
+                    preferredEmail,
+                    preferredPhone,
+                    cancellationToken);
+            }
 
-            await ApplyMergedContactSelectionAsync(
-                sourceUser,
-                targetUser,
-                sourceProfile,
-                targetProfile,
-                preferredEmail,
-                preferredPhone,
-                cancellationToken);
-
-            await MergeCartItemsAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
-
-            var affectedProductIds = await MergeLikesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
-
-            await MergeProductReviewsAsync(
-                normalizedSourceUserId,
-                normalizedTargetUserId,
-                resolveConflicts: true,
-                cancellationToken);
-
-            await MergeExternalIdentitiesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
-            await ReassignUserReferencesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
-            await RecalculateLikesCountAsync(affectedProductIds, cancellationToken);
-
-            await _db.SaveChangesAsync(cancellationToken);
-
-            if (sourceProfile is not null)
-                _db.Profiles.Remove(sourceProfile);
-            _db.Users.Remove(sourceUser);
-
-            await _db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return targetUser;
         }
@@ -337,6 +356,79 @@ public class UserIdentityService
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    private async Task MergeUserIntoTargetAsync(
+        User sourceUser,
+        User targetUser,
+        string? preferredEmail,
+        string? preferredPhone,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSourceUserId = sourceUser.Id;
+        var normalizedTargetUserId = targetUser.Id;
+        var sourceProfile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == normalizedSourceUserId, cancellationToken);
+        var targetProfile = await EnsureUserProfileAsync(targetUser, cancellationToken);
+
+        MergeUserCore(targetUser, sourceUser);
+        MergeProfileCore(targetProfile, sourceProfile);
+        MergeProfileAddressBook(targetProfile, sourceProfile);
+
+        await ApplyMergedContactSelectionAsync(
+            sourceUser,
+            targetUser,
+            sourceProfile,
+            targetProfile,
+            preferredEmail,
+            preferredPhone,
+            cancellationToken);
+
+        await MergeCartItemsAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
+
+        var affectedProductIds = await MergeLikesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
+
+        await MergeProductReviewsAsync(
+            normalizedSourceUserId,
+            normalizedTargetUserId,
+            resolveConflicts: true,
+            cancellationToken);
+
+        await MergeExternalIdentitiesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
+        await ReassignUserReferencesAsync(normalizedSourceUserId, normalizedTargetUserId, cancellationToken);
+        await RecalculateLikesCountAsync(affectedProductIds, cancellationToken);
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        if (sourceProfile is not null)
+            _db.Profiles.Remove(sourceProfile);
+        _db.Users.Remove(sourceUser);
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> CanSafelyConsolidateUsersIntoTargetAsync(
+        IEnumerable<string> sourceUserIds,
+        string targetUserId,
+        CancellationToken cancellationToken)
+    {
+        var userIds = (sourceUserIds ?? Array.Empty<string>())
+            .Append(targetUserId)
+            .Select(userId => (userId ?? string.Empty).Trim())
+            .Where(userId => !string.IsNullOrWhiteSpace(userId))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var identities = await _db.UserExternalIdentities
+            .AsNoTracking()
+            .Where(x => userIds.Contains(x.UserId))
+            .ToListAsync(cancellationToken);
+
+        return identities
+            .GroupBy(identity => identity.Provider, StringComparer.Ordinal)
+            .All(group => group
+                .Select(identity => (identity.ProviderUserId ?? string.Empty).Trim())
+                .Distinct(StringComparer.Ordinal)
+                .Count() <= 1);
     }
 
     public async Task<UserExternalIdentity?> GetVerifiedTelegramIdentityAsync(
@@ -421,7 +513,7 @@ public class UserIdentityService
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == normalizedUserId, cancellationToken);
         if (user is null)
-            throw new InvalidOperationException("User not found.");
+            throw new InvalidOperationException("Пользователь не найден.");
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var confirmedEmail = NormalizeConfirmedEmail(profile.Email, profile.EmailVerified);
@@ -448,7 +540,7 @@ public class UserIdentityService
                     normalizedUserId,
                     cancellationToken))
             {
-                throw new InvalidOperationException("This external account is already linked to another user.");
+                throw new InvalidOperationException("Этот способ входа уже привязан к другому аккаунту.");
             }
 
             conflictingIdentity = await _db.UserExternalIdentities
@@ -546,7 +638,7 @@ public class UserIdentityService
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == normalizedUserId, cancellationToken);
         if (user is null)
-            throw new InvalidOperationException("User not found.");
+            throw new InvalidOperationException("Пользователь не найден.");
 
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == normalizedUserId, cancellationToken);
         var explicitLinkedProviders = await _db.UserExternalIdentities
@@ -583,7 +675,7 @@ public class UserIdentityService
         if (!hasVerifiedRealEmail && !hasPassword && remainingProviders.Count == 0)
         {
             throw new InvalidOperationException(
-                "Cannot unlink the last sign-in method. Confirm email or link another account first.");
+                "Нельзя отвязать последний способ входа. Сначала подтвердите email или привяжите другой аккаунт.");
         }
 
         var identitiesToRemove = await _db.UserExternalIdentities

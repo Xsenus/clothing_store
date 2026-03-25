@@ -963,7 +963,8 @@ export const FLOW = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      sourceUserId: input.sourceUserId,
+      sourceUserId: input.sourceUserId || input.sourceUserIds?.[0],
+      sourceUserIds: Array.isArray(input.sourceUserIds) ? input.sourceUserIds : undefined,
       targetUserId: input.targetUserId,
       email: input.email,
       phone: input.phone,

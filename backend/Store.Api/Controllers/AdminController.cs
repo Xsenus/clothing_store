@@ -1651,14 +1651,21 @@ public class AdminController : ControllerBase
 
         try
         {
+            var sourceUserIds = (payload.SourceUserIds ?? new List<string>())
+                .Concat(string.IsNullOrWhiteSpace(payload.SourceUserId) ? Array.Empty<string>() : new[] { payload.SourceUserId })
+                .Select(userId => (userId ?? string.Empty).Trim())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
             var mergedUser = await _userIdentityService.MergeUsersAsync(
-                payload.SourceUserId,
+                sourceUserIds,
                 payload.TargetUserId,
                 payload.Email,
                 payload.Phone,
                 HttpContext.RequestAborted);
 
-            return Results.Ok(new { ok = true, userId = mergedUser.Id });
+            return Results.Ok(new { ok = true, userId = mergedUser.Id, mergedCount = sourceUserIds.Count });
         }
         catch (InvalidOperationException ex)
         {
@@ -3216,6 +3223,7 @@ public class AdminUserPatchPayload
 public class AdminUserMergePayload
 {
     public string SourceUserId { get; set; } = string.Empty;
+    public List<string>? SourceUserIds { get; set; }
     public string TargetUserId { get; set; } = string.Empty;
     public string? Email { get; set; }
     public string? Phone { get; set; }

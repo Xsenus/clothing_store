@@ -36,6 +36,29 @@ const normalizePhone = (value) => {
   return normalized;
 };
 
+const getExternalAuthErrorMessage = (value, fallback) => {
+  const message = typeof value === "string"
+    ? value.trim()
+    : String(value?.message || value?.detail || "").trim();
+
+  if (!message) return fallback;
+
+  const normalized = message.toLowerCase();
+  if (normalized.includes("already linked to another user")) {
+    return "Этот способ входа уже привязан к другому аккаунту.";
+  }
+
+  if (normalized.includes("cannot unlink the last sign-in method")) {
+    return "Нельзя отвязать последний способ входа. Сначала подтвердите email или привяжите другой аккаунт.";
+  }
+
+  if (normalized.includes("user not found")) {
+    return "Пользователь не найден.";
+  }
+
+  return message;
+};
+
 const createProfileAddressId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -697,7 +720,10 @@ export default function ProfilePage() {
           setExternalLinkSession(null);
           setLinkingProvider("");
           if (status?.status === "failed") {
-            toast.error(status?.detail || `Не удалось привязать ${getExternalProviderLabel(externalLinkSession.provider)}`);
+            toast.error(getExternalAuthErrorMessage(
+              status?.detail,
+              `Не удалось привязать ${getExternalProviderLabel(externalLinkSession.provider)}`
+            ));
           } else if (status?.status === "expired") {
             toast.error(`Сессия привязки ${getExternalProviderLabel(externalLinkSession.provider)} истекла. Начните заново.`);
           }
@@ -707,7 +733,10 @@ export default function ProfilePage() {
         closeExternalAuthPopup();
         setExternalLinkSession(null);
         setLinkingProvider("");
-        toast.error(error?.message || `Не удалось завершить привязку ${getExternalProviderLabel(externalLinkSession.provider)}`);
+        toast.error(getExternalAuthErrorMessage(
+          error,
+          `Не удалось завершить привязку ${getExternalProviderLabel(externalLinkSession.provider)}`
+        ));
       }
     }, 2000);
 
@@ -865,7 +894,10 @@ export default function ProfilePage() {
       setTelegramLinkState("");
       setExternalLinkSession(null);
       setLinkingProvider("");
-      toast.error(error?.message || `Не удалось начать привязку ${getExternalProviderLabel(provider)}`);
+      toast.error(getExternalAuthErrorMessage(
+        error,
+        `Не удалось начать привязку ${getExternalProviderLabel(provider)}`
+      ));
     }
   };
 
@@ -893,7 +925,10 @@ export default function ProfilePage() {
       ));
       toast.success(`${getExternalProviderLabel(provider)} отвязан`);
     } catch (error) {
-      toast.error(error?.message || `Не удалось отвязать ${getExternalProviderLabel(provider)}`);
+      toast.error(getExternalAuthErrorMessage(
+        error,
+        `Не удалось отвязать ${getExternalProviderLabel(provider)}`
+      ));
     } finally {
       setUnlinkingProvider("");
     }
@@ -1324,10 +1359,10 @@ export default function ProfilePage() {
                               const isLinking = linkingProvider === method.id;
                               const isUnlinking = unlinkingProvider === method.id;
                               const cardClassName = connected
-                                ? "space-y-2 rounded-none border border-emerald-200 bg-emerald-50 p-3"
+                                ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-emerald-200 bg-emerald-50 p-3"
                                 : method.available
-                                  ? "space-y-2 rounded-none border border-gray-200 bg-white p-3"
-                                  : "space-y-2 rounded-none border border-amber-200 bg-amber-50 p-3";
+                                  ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-gray-200 bg-white p-3"
+                                  : "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-amber-200 bg-amber-50 p-3";
                               const statusLabel = connected
                                 ? "Подключен"
                                 : method.available
@@ -1342,7 +1377,7 @@ export default function ProfilePage() {
                                   </div>
 
                                   {connected ? (
-                                    <div className="space-y-1 text-sm text-gray-700">
+                                    <div className="flex flex-1 flex-col gap-1 text-sm text-gray-700">
                                       {method.identity.displayName && <div>{method.identity.displayName}</div>}
                                       {method.identity.providerUsername && <div>@{method.identity.providerUsername}</div>}
                                       {method.identity.providerEmail && <div className="break-all">{method.identity.providerEmail}</div>}
@@ -1356,7 +1391,7 @@ export default function ProfilePage() {
                                       <Button
                                         type="button"
                                         variant="outline"
-                                        className="mt-2 h-10 w-full rounded-none"
+                                        className="mt-auto h-10 w-full rounded-none"
                                         onClick={() => handleUnlinkExternal(method.id)}
                                         disabled={isUnlinking || !!linkingProvider}
                                       >
@@ -1364,19 +1399,19 @@ export default function ProfilePage() {
                                       </Button>
                                     </div>
                                   ) : method.available ? (
-                                    <>
-                                    <p className="text-sm text-muted-foreground">
-                                      Этот способ входа доступен, но пока не привязан к вашему аккаунту.
-                                    </p>
-                                    <Button
-                                      type="button"
-                                      className="h-10 w-full rounded-none bg-black text-white hover:bg-gray-800"
-                                      onClick={() => handleLinkExternal(method.id)}
-                                      disabled={isLinking || !!unlinkingProvider}
-                                    >
-                                      {isLinking ? "Подключаем..." : "Привязать"}
-                                    </Button>
-                                    </>
+                                    <div className="flex flex-1 flex-col gap-3">
+                                      <p className="flex-1 text-sm text-muted-foreground">
+                                        Этот способ входа доступен, но пока не привязан к вашему аккаунту.
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        className="mt-auto h-10 w-full rounded-none bg-black text-white hover:bg-gray-800"
+                                        onClick={() => handleLinkExternal(method.id)}
+                                        disabled={isLinking || !!unlinkingProvider}
+                                      >
+                                        {isLinking ? "Подключаем..." : "Привязать"}
+                                      </Button>
+                                    </div>
                                   ) : null}
                                 </div>
                               );
