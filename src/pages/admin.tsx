@@ -9037,9 +9037,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             <AuthAutofillTrap scope="auth-vk-oauth" />
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
-                                <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK</Label>
+                                <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK ID</Label>
                                 <p className="text-xs leading-5 text-muted-foreground">
-                                  Как работает: открывается окно VK OAuth, пользователь подтверждает доступ, после чего VK-аккаунт используется для входа или привязки.
+                                  Как работает: открывается окно VK ID, пользователь подтверждает доступ, после чего VK-аккаунт используется для входа или привязки.
                                 </p>
                               </div>
                               <Checkbox
@@ -9050,19 +9050,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </div>
                             <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
                               <div className="space-y-1">
-                                <div className="text-sm font-semibold">Как получить ключи VK OAuth</div>
+                                <div className="text-sm font-semibold">Как получить ключи VK ID</div>
                                 <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
                                   <li>Откройте кабинет разработчика VK и создайте приложение для сайта.</li>
                                   <li>В настройках приложения найдите <code>App ID / Client ID</code> и <code>Secure key / Client Secret</code>.</li>
                                   <li>Добавьте callback URL из поля ниже в список разрешенных redirect URI.</li>
                                   <li>Сохраните значения в этой форме и включите VK-вход.</li>
-                                  <li>После сохранения нажмите кнопку теста: должен открыться официальный экран VK OAuth без мгновенной backend-ошибки.</li>
+                                  <li>После сохранения нажмите кнопку теста: должен открыться официальный экран VK ID без мгновенной backend-ошибки.</li>
                                 </ol>
                               </div>
                               <div className="flex flex-wrap gap-2 text-xs">
-                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru" target="_blank" rel="noreferrer">Кабинет разработчика VK</a>
-                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru/api/access-token/authcode-flow-user" target="_blank" rel="noreferrer">Auth code flow</a>
-                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru/reference/users.get" target="_blank" rel="noreferrer">users.get</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://id.vk.ru/about/business/go" target="_blank" rel="noreferrer">Кабинет VK ID</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://vkcom.github.io/vkid-web-sdk/docs/index.html" target="_blank" rel="noreferrer">VK ID SDK</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://id.vk.ru/about/business/go/docs/ru/vkid/latest/vk-id/connection/oauth2" target="_blank" rel="noreferrer">OAuth 2.1</a>
                               </div>
                             </div>
                             <div className="space-y-1">
@@ -9105,10 +9105,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 onClick={() => startExternalOAuthTest("vk")}
                                 disabled={externalAuthTestRunning === "vk"}
                               >
-                                {externalAuthTestRunning === "vk" ? "Запускаем тест..." : "Проверить VK OAuth"}
+                                {externalAuthTestRunning === "vk" ? "Запускаем тест..." : "Проверить VK ID"}
                               </Button>
                               <p className="text-xs text-muted-foreground">
-                                Публичного универсального sandbox для VK OAuth нет, поэтому тест откроет реальное окно провайдера. Для первичной проверки достаточно убедиться, что backend выдает корректный OAuth URL и VK принимает запрос без мгновенной ошибки.
+                                Публичного универсального sandbox для VK ID нет, поэтому тест откроет реальное окно провайдера. Для первичной проверки достаточно убедиться, что backend выдает корректный OAuth URL и VK принимает запрос без мгновенной ошибки.
                               </p>
                               {renderExternalAuthTestStatus("vk")}
                             </div>

@@ -463,6 +463,7 @@ public class AuthController : ControllerBase
         [FromRoute] string provider,
         [FromQuery] string? state,
         [FromQuery] string? code,
+        [FromQuery(Name = "device_id")] string? deviceId,
         [FromQuery] string? error,
         [FromQuery(Name = "error_description")] string? errorDescription)
     {
@@ -518,11 +519,13 @@ public class AuthController : ControllerBase
                 providerConfiguration,
                 code.Trim(),
                 redirectUri,
+                normalizedState,
+                deviceId?.Trim(),
                 HttpContext.RequestAborted);
             var externalProfile = normalizedProvider switch
             {
                 "google" => await LoadGoogleProfileAsync(tokenResult.AccessToken, HttpContext.RequestAborted),
-                "vk" => await LoadVkProfileAsync(tokenResult, HttpContext.RequestAborted),
+                "vk" => await LoadVkProfileAsync(providerConfiguration, tokenResult, HttpContext.RequestAborted),
                 "yandex" => await LoadYandexProfileAsync(tokenResult.AccessToken, HttpContext.RequestAborted),
                 _ => throw new InvalidOperationException("Unsupported external auth provider")
             };
@@ -749,9 +752,9 @@ public class AuthController : ControllerBase
                 clientIdConfigPath: "Auth:Vk:ClientId",
                 clientSecretSettingKey: "vk_auth_client_secret",
                 clientSecretConfigPath: "Auth:Vk:ClientSecret",
-                authorizationEndpoint: "https://oauth.vk.com/authorize",
-                tokenEndpoint: "https://oauth.vk.com/access_token",
-                userInfoEndpoint: "https://api.vk.com/method/users.get",
+                authorizationEndpoint: "https://id.vk.ru/authorize",
+                tokenEndpoint: "https://id.vk.ru/oauth2/auth",
+                userInfoEndpoint: "https://id.vk.ru/oauth2/user_info",
                 defaultScope: "email"),
             "yandex" => await ResolveExternalProviderConfigurationAsync(
                 provider: "yandex",
@@ -828,7 +831,11 @@ public class AuthController : ControllerBase
         }
         else if (string.Equals(configuration.Provider, "vk", StringComparison.Ordinal))
         {
-            query["display"] = "page";
+            var codeVerifier = BuildVkCodeVerifier(configuration, state);
+            query["app_id"] = configuration.ClientId;
+            query["sdk_type"] = "vkid";
+            query["code_challenge"] = BuildVkCodeChallenge(codeVerifier);
+            query["code_challenge_method"] = "s256";
         }
 
         return QueryHelpers.AddQueryString(configuration.AuthorizationEndpoint, query!);
@@ -896,21 +903,13 @@ public class AuthController : ControllerBase
         ExternalProviderConfiguration configuration,
         string code,
         string redirectUri,
+        string state,
+        string? deviceId,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
         using var request = string.Equals(configuration.Provider, "vk", StringComparison.Ordinal)
-            ? new HttpRequestMessage(
-                HttpMethod.Get,
-                QueryHelpers.AddQueryString(
-                    configuration.TokenEndpoint,
-                    new Dictionary<string, string?>
-                    {
-                        ["client_id"] = configuration.ClientId,
-                        ["client_secret"] = configuration.ClientSecret,
-                        ["redirect_uri"] = redirectUri,
-                        ["code"] = code
-                    }))
+            ? BuildVkTokenExchangeRequest(configuration, code, redirectUri, state, deviceId)
             : new HttpRequestMessage(HttpMethod.Post, configuration.TokenEndpoint)
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -991,21 +990,26 @@ public class AuthController : ControllerBase
             PhoneVerified: false);
     }
 
-    private async Task<ExternalIdentityProfile> LoadVkProfileAsync(ExternalAccessTokenResult tokenResult, CancellationToken cancellationToken)
+    private async Task<ExternalIdentityProfile> LoadVkProfileAsync(
+        ExternalProviderConfiguration configuration,
+        ExternalAccessTokenResult tokenResult,
+        CancellationToken cancellationToken)
     {
-        const string vkApiVersion = "5.199";
-
         var client = _httpClientFactory.CreateClient();
         using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+            HttpMethod.Post,
             QueryHelpers.AddQueryString(
-                "https://api.vk.com/method/users.get",
+                configuration.UserInfoEndpoint,
                 new Dictionary<string, string?>
                 {
-                    ["fields"] = "photo_200,screen_name",
-                    ["access_token"] = tokenResult.AccessToken,
-                    ["v"] = vkApiVersion
-                }));
+                    ["client_id"] = configuration.ClientId
+                }))
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["access_token"] = tokenResult.AccessToken
+            })
+        };
 
         using var response = await client.SendAsync(request, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -1014,22 +1018,13 @@ public class AuthController : ControllerBase
                 ?? "VK не вернул данные профиля.");
 
         using var document = JsonDocument.Parse(content);
-        if (!document.RootElement.TryGetProperty("response", out var responseEl)
-            || responseEl.ValueKind != JsonValueKind.Array
-            || responseEl.GetArrayLength() == 0)
+        if (!document.RootElement.TryGetProperty("user", out var userEl)
+            || userEl.ValueKind != JsonValueKind.Object)
         {
             throw new InvalidOperationException("VK не вернул данные пользователя.");
         }
 
-        var userEl = responseEl[0];
-        var providerUserId = userEl.TryGetProperty("id", out var idEl)
-            ? idEl.ValueKind switch
-            {
-                JsonValueKind.String => idEl.GetString()?.Trim(),
-                JsonValueKind.Number => idEl.GetInt64().ToString(),
-                _ => null
-            }
-            : null;
+        var providerUserId = ReadExternalString(userEl, "user_id", "id");
 
         if (string.IsNullOrWhiteSpace(providerUserId))
             providerUserId = tokenResult.ProviderUserId;
@@ -1041,8 +1036,13 @@ public class AuthController : ControllerBase
         var lastName = userEl.TryGetProperty("last_name", out var lastNameEl) ? lastNameEl.GetString() : null;
         var displayName = string.Join(" ", new[] { firstName, lastName }.Where(part => !string.IsNullOrWhiteSpace(part))).Trim();
         var username = userEl.TryGetProperty("screen_name", out var screenNameEl) ? screenNameEl.GetString() : null;
-        var avatarUrl = userEl.TryGetProperty("photo_200", out var photoEl) ? photoEl.GetString() : null;
-        var email = string.IsNullOrWhiteSpace(tokenResult.ProviderEmail) ? null : tokenResult.ProviderEmail.Trim();
+        var avatarUrl = userEl.TryGetProperty("avatar", out var avatarEl) ? avatarEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(avatarUrl) && userEl.TryGetProperty("photo_200", out var photoEl))
+            avatarUrl = photoEl.GetString();
+
+        var email = ReadExternalString(userEl, "email");
+        if (string.IsNullOrWhiteSpace(email))
+            email = string.IsNullOrWhiteSpace(tokenResult.ProviderEmail) ? null : tokenResult.ProviderEmail.Trim();
         var phone = ReadExternalPhone(userEl, "phone", "phone_number", "mobile_phone", "home_phone");
 
         return new ExternalIdentityProfile(
@@ -1126,6 +1126,27 @@ public class AuthController : ControllerBase
         return null;
     }
 
+    private static string? ReadExternalString(JsonElement root, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!root.TryGetProperty(propertyName, out var value))
+                continue;
+
+            var result = value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.GetRawText(),
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(result))
+                return result.Trim();
+        }
+
+        return null;
+    }
+
     private static string? TryReadNestedPhone(JsonElement root)
     {
         foreach (var propertyName in new[] { "number", "formatted", "value", "phone_number" })
@@ -1173,6 +1194,51 @@ public class AuthController : ControllerBase
         }
 
         return string.IsNullOrWhiteSpace(fallback) ? null : fallback.Trim();
+    }
+
+    private static HttpRequestMessage BuildVkTokenExchangeRequest(
+        ExternalProviderConfiguration configuration,
+        string code,
+        string redirectUri,
+        string state,
+        string? deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+            throw new InvalidOperationException("VK не вернул device_id для обмена кода авторизации.");
+
+        var codeVerifier = BuildVkCodeVerifier(configuration, state);
+        var requestUri = QueryHelpers.AddQueryString(
+            configuration.TokenEndpoint,
+            new Dictionary<string, string?>
+            {
+                ["grant_type"] = "authorization_code",
+                ["redirect_uri"] = redirectUri,
+                ["client_id"] = configuration.ClientId,
+                ["code_verifier"] = codeVerifier,
+                ["state"] = state,
+                ["device_id"] = deviceId
+            });
+
+        return new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["code"] = code
+            })
+        };
+    }
+
+    private static string BuildVkCodeVerifier(ExternalProviderConfiguration configuration, string state)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(configuration.ClientSecret));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes($"vkid:{configuration.ClientId}:{state}"));
+        return WebEncoders.Base64UrlEncode(hash);
+    }
+
+    private static string BuildVkCodeChallenge(string codeVerifier)
+    {
+        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier));
+        return WebEncoders.Base64UrlEncode(hash);
     }
 
     private static string NormalizeExternalProvider(string? provider)
