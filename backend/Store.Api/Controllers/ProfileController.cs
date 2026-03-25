@@ -437,13 +437,13 @@ public class ProfileController : ControllerBase
         }
 
         return identities
-            .Where(x => x.Provider == "telegram" || x.Provider == "google" || x.Provider == "yandex")
+            .Where(x => x.Provider == "telegram" || x.Provider == "google" || x.Provider == "vk" || x.Provider == "yandex")
             .GroupBy(x => x.Provider)
             .Select(group => group
                 .OrderByDescending(x => x.VerifiedAt ?? x.LastUsedAt ?? x.UpdatedAt)
                 .ThenByDescending(x => x.UpdatedAt)
                 .First())
-            .OrderBy(x => x.Provider == "telegram" ? 0 : x.Provider == "google" ? 1 : 2)
+            .OrderBy(x => x.Provider == "telegram" ? 0 : x.Provider == "google" ? 1 : x.Provider == "vk" ? 2 : 3)
             .Select(identity => (object)new
             {
                 provider = identity.Provider,

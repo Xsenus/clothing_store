@@ -182,6 +182,7 @@ internal static class AdminAnalyticsSupport
         {
             "telegram" => "telegram",
             "google" => "google",
+            "vk" => "vk",
             "yandex" => "yandex",
             _ => "other"
         };
@@ -195,6 +196,7 @@ internal static class AdminAnalyticsSupport
             "email" or "password" => "email",
             "telegram" => "telegram",
             "google" => "google",
+            "vk" => "vk",
             "yandex" => "yandex",
             _ => "other"
         };
@@ -516,6 +518,7 @@ internal static class AdminAnalyticsSupport
         "email" => "Email и пароль",
         "telegram" => "Telegram",
         "google" => "Google",
+        "vk" => "VK",
         "yandex" => "Яндекс",
         _ => "Другое"
     };
@@ -524,6 +527,7 @@ internal static class AdminAnalyticsSupport
     {
         "telegram" => "Telegram",
         "google" => "Google",
+        "vk" => "VK",
         "yandex" => "Яндекс",
         _ => "Другое"
     };
@@ -533,6 +537,7 @@ internal static class AdminAnalyticsSupport
         "email" => "Email Рё РїР°СЂРѕР»СЊ",
         "telegram" => "Telegram",
         "google" => "Google",
+        "vk" => "VK",
         "yandex" => "РЇРЅРґРµРєСЃ",
         _ => "Р”СЂСѓРіРѕРµ"
     };
@@ -544,6 +549,8 @@ internal static class AdminAnalyticsSupport
             return "telegram";
         if (normalized.StartsWith("google_", StringComparison.Ordinal) && normalized.EndsWith("@auth.local", StringComparison.Ordinal))
             return "google";
+        if (normalized.StartsWith("vk_", StringComparison.Ordinal) && normalized.EndsWith("@auth.local", StringComparison.Ordinal))
+            return "vk";
         if (normalized.StartsWith("yandex_", StringComparison.Ordinal) && normalized.EndsWith("@auth.local", StringComparison.Ordinal))
             return "yandex";
 

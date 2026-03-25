@@ -20,6 +20,7 @@ public class PublicSettingsController : ControllerBase
         "telegram_widget_enabled",
         "telegram_bot_username",
         "google_login_enabled",
+        "vk_login_enabled",
         "yandex_login_enabled",
         "payments_yoomoney_enabled",
         "yoomoney_allow_bank_cards",
@@ -188,6 +189,17 @@ public class PublicSettingsController : ControllerBase
                 "Auth:Google:ClientId",
                 "google_auth_client_secret",
                 "Auth:Google:ClientSecret") ? "true" : "false";
+        }
+
+        if (requested.Contains("vk_login_enabled"))
+        {
+            result["vk_login_enabled"] = await IsExternalProviderReadyAsync(
+                "vk_login_enabled",
+                "Auth:Vk:Enabled",
+                "vk_auth_client_id",
+                "Auth:Vk:ClientId",
+                "vk_auth_client_secret",
+                "Auth:Vk:ClientSecret") ? "true" : "false";
         }
 
         if (requested.Contains("yandex_login_enabled"))

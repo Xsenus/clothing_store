@@ -696,6 +696,9 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "google_login_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "google_auth_client_id", "");
         await EnsureAppSettingExistsAsync(db, "google_auth_client_secret", "");
+        await EnsureAppSettingExistsAsync(db, "vk_login_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "vk_auth_client_id", "");
+        await EnsureAppSettingExistsAsync(db, "vk_auth_client_secret", "");
         await EnsureAppSettingExistsAsync(db, "yandex_login_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "yandex_auth_client_id", "");
         await EnsureAppSettingExistsAsync(db, "yandex_auth_client_secret", "");

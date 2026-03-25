@@ -509,15 +509,16 @@ public class AuthController : ControllerBase
         try
         {
             var redirectUri = BuildAbsoluteUrl($"/auth/external/callback/{normalizedProvider}");
-            var accessToken = await ExchangeExternalAccessTokenAsync(
+            var tokenResult = await ExchangeExternalAccessTokenAsync(
                 providerConfiguration,
                 code.Trim(),
                 redirectUri,
                 HttpContext.RequestAborted);
             var externalProfile = normalizedProvider switch
             {
-                "google" => await LoadGoogleProfileAsync(accessToken, HttpContext.RequestAborted),
-                "yandex" => await LoadYandexProfileAsync(accessToken, HttpContext.RequestAborted),
+                "google" => await LoadGoogleProfileAsync(tokenResult.AccessToken, HttpContext.RequestAborted),
+                "vk" => await LoadVkProfileAsync(tokenResult, HttpContext.RequestAborted),
+                "yandex" => await LoadYandexProfileAsync(tokenResult.AccessToken, HttpContext.RequestAborted),
                 _ => throw new InvalidOperationException("Unsupported external auth provider")
             };
 
@@ -733,6 +734,19 @@ public class AuthController : ControllerBase
                 tokenEndpoint: "https://oauth2.googleapis.com/token",
                 userInfoEndpoint: "https://openidconnect.googleapis.com/v1/userinfo",
                 defaultScope: "openid email profile"),
+            "vk" => await ResolveExternalProviderConfigurationAsync(
+                provider: "vk",
+                displayName: "VK",
+                enabledSettingKey: "vk_login_enabled",
+                enabledConfigPath: "Auth:Vk:Enabled",
+                clientIdSettingKey: "vk_auth_client_id",
+                clientIdConfigPath: "Auth:Vk:ClientId",
+                clientSecretSettingKey: "vk_auth_client_secret",
+                clientSecretConfigPath: "Auth:Vk:ClientSecret",
+                authorizationEndpoint: "https://oauth.vk.com/authorize",
+                tokenEndpoint: "https://oauth.vk.com/access_token",
+                userInfoEndpoint: "https://api.vk.com/method/users.get",
+                defaultScope: "email"),
             "yandex" => await ResolveExternalProviderConfigurationAsync(
                 provider: "yandex",
                 displayName: "Yandex",
@@ -806,6 +820,10 @@ public class AuthController : ControllerBase
             query["include_granted_scopes"] = "true";
             query["prompt"] = "select_account";
         }
+        else if (string.Equals(configuration.Provider, "vk", StringComparison.Ordinal))
+        {
+            query["display"] = "page";
+        }
 
         return QueryHelpers.AddQueryString(configuration.AuthorizationEndpoint, query!);
     }
@@ -819,24 +837,36 @@ public class AuthController : ControllerBase
         return $"{Request.Scheme}://{Request.Host}{Request.PathBase}{normalizedPath}";
     }
 
-    private async Task<string> ExchangeExternalAccessTokenAsync(
+    private async Task<ExternalAccessTokenResult> ExchangeExternalAccessTokenAsync(
         ExternalProviderConfiguration configuration,
         string code,
         string redirectUri,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, configuration.TokenEndpoint)
-        {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+        using var request = string.Equals(configuration.Provider, "vk", StringComparison.Ordinal)
+            ? new HttpRequestMessage(
+                HttpMethod.Get,
+                QueryHelpers.AddQueryString(
+                    configuration.TokenEndpoint,
+                    new Dictionary<string, string?>
+                    {
+                        ["client_id"] = configuration.ClientId,
+                        ["client_secret"] = configuration.ClientSecret,
+                        ["redirect_uri"] = redirectUri,
+                        ["code"] = code
+                    }))
+            : new HttpRequestMessage(HttpMethod.Post, configuration.TokenEndpoint)
             {
-                ["grant_type"] = "authorization_code",
-                ["code"] = code,
-                ["client_id"] = configuration.ClientId,
-                ["client_secret"] = configuration.ClientSecret,
-                ["redirect_uri"] = redirectUri
-            })
-        };
+                Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["code"] = code,
+                    ["client_id"] = configuration.ClientId,
+                    ["client_secret"] = configuration.ClientSecret,
+                    ["redirect_uri"] = redirectUri
+                })
+            };
 
         using var response = await client.SendAsync(request, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -851,7 +881,22 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(accessToken))
             throw new InvalidOperationException($"{configuration.DisplayName} не вернул access token.");
 
-        return accessToken!;
+        var providerEmail = document.RootElement.TryGetProperty("email", out var emailEl)
+            ? emailEl.GetString()?.Trim()
+            : null;
+        var providerUserId = document.RootElement.TryGetProperty("user_id", out var userIdEl)
+            ? userIdEl.ValueKind switch
+            {
+                JsonValueKind.String => userIdEl.GetString()?.Trim(),
+                JsonValueKind.Number => userIdEl.GetInt64().ToString(),
+                _ => null
+            }
+            : null;
+
+        return new ExternalAccessTokenResult(
+            AccessToken: accessToken!,
+            ProviderEmail: providerEmail,
+            ProviderUserId: providerUserId);
     }
 
     private async Task<ExternalIdentityProfile> LoadGoogleProfileAsync(string accessToken, CancellationToken cancellationToken)
@@ -885,6 +930,69 @@ public class AuthController : ControllerBase
             EmailVerified: emailVerified,
             Username: null,
             DisplayName: displayName,
+            AvatarUrl: avatarUrl);
+    }
+
+    private async Task<ExternalIdentityProfile> LoadVkProfileAsync(ExternalAccessTokenResult tokenResult, CancellationToken cancellationToken)
+    {
+        const string vkApiVersion = "5.199";
+
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            QueryHelpers.AddQueryString(
+                "https://api.vk.com/method/users.get",
+                new Dictionary<string, string?>
+                {
+                    ["fields"] = "photo_200,screen_name",
+                    ["access_token"] = tokenResult.AccessToken,
+                    ["v"] = vkApiVersion
+                }));
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(GetExternalProviderErrorDetail(content, response.ReasonPhrase)
+                ?? "VK не вернул данные профиля.");
+
+        using var document = JsonDocument.Parse(content);
+        if (!document.RootElement.TryGetProperty("response", out var responseEl)
+            || responseEl.ValueKind != JsonValueKind.Array
+            || responseEl.GetArrayLength() == 0)
+        {
+            throw new InvalidOperationException("VK не вернул данные пользователя.");
+        }
+
+        var userEl = responseEl[0];
+        var providerUserId = userEl.TryGetProperty("id", out var idEl)
+            ? idEl.ValueKind switch
+            {
+                JsonValueKind.String => idEl.GetString()?.Trim(),
+                JsonValueKind.Number => idEl.GetInt64().ToString(),
+                _ => null
+            }
+            : null;
+
+        if (string.IsNullOrWhiteSpace(providerUserId))
+            providerUserId = tokenResult.ProviderUserId;
+
+        if (string.IsNullOrWhiteSpace(providerUserId))
+            throw new InvalidOperationException("VK не вернул идентификатор пользователя.");
+
+        var firstName = userEl.TryGetProperty("first_name", out var firstNameEl) ? firstNameEl.GetString() : null;
+        var lastName = userEl.TryGetProperty("last_name", out var lastNameEl) ? lastNameEl.GetString() : null;
+        var displayName = string.Join(" ", new[] { firstName, lastName }.Where(part => !string.IsNullOrWhiteSpace(part))).Trim();
+        var username = userEl.TryGetProperty("screen_name", out var screenNameEl) ? screenNameEl.GetString() : null;
+        var avatarUrl = userEl.TryGetProperty("photo_200", out var photoEl) ? photoEl.GetString() : null;
+        var email = string.IsNullOrWhiteSpace(tokenResult.ProviderEmail) ? null : tokenResult.ProviderEmail.Trim();
+
+        return new ExternalIdentityProfile(
+            Provider: "vk",
+            ProviderUserId: providerUserId!,
+            Email: email,
+            EmailVerified: TechnicalEmailHelper.IsValidRealEmail(email),
+            Username: username,
+            DisplayName: string.IsNullOrWhiteSpace(displayName) ? username : displayName,
             AvatarUrl: avatarUrl);
     }
 
@@ -943,7 +1051,19 @@ public class AuthController : ControllerBase
                 if (document.RootElement.TryGetProperty("error_description", out var descriptionEl))
                     return descriptionEl.GetString();
                 if (document.RootElement.TryGetProperty("error", out var errorEl))
-                    return errorEl.GetString();
+                {
+                    if (errorEl.ValueKind == JsonValueKind.String)
+                        return errorEl.GetString();
+                    if (errorEl.ValueKind == JsonValueKind.Object)
+                    {
+                        if (errorEl.TryGetProperty("error_description", out var nestedDescriptionEl))
+                            return nestedDescriptionEl.GetString();
+                        if (errorEl.TryGetProperty("error_msg", out var errorMsgEl))
+                            return errorMsgEl.GetString();
+                        if (errorEl.TryGetProperty("message", out var nestedMessageEl))
+                            return nestedMessageEl.GetString();
+                    }
+                }
                 if (document.RootElement.TryGetProperty("message", out var messageEl))
                     return messageEl.GetString();
             }
@@ -960,6 +1080,7 @@ public class AuthController : ControllerBase
         return provider?.Trim().ToLowerInvariant() switch
         {
             "google" => "google",
+            "vk" or "vkontakte" => "vk",
             "yandex" => "yandex",
             _ => string.Empty
         };
@@ -1125,6 +1246,7 @@ public class AuthController : ControllerBase
             "email" or "password" => "email",
             "telegram" => "telegram",
             "google" => "google",
+            "vk" or "vkontakte" => "vk",
             "yandex" => "yandex",
             _ => "other"
         };
@@ -1269,4 +1391,9 @@ public class AuthController : ControllerBase
         string TokenEndpoint,
         string UserInfoEndpoint,
         string Scope);
+
+    private sealed record ExternalAccessTokenResult(
+        string AccessToken,
+        string? ProviderEmail = null,
+        string? ProviderUserId = null);
 }

@@ -8,7 +8,8 @@ public static class TechnicalEmailHelper
     {
         "telegram",
         "google",
-        "yandex"
+        "yandex",
+        "vk"
     };
 
     private static readonly HashSet<string> TechnicalDomains = new(StringComparer.OrdinalIgnoreCase)
@@ -54,7 +55,8 @@ public static class TechnicalEmailHelper
 
         return localPart.StartsWith("telegram_", StringComparison.OrdinalIgnoreCase)
                || localPart.StartsWith("google_", StringComparison.OrdinalIgnoreCase)
-               || localPart.StartsWith("yandex_", StringComparison.OrdinalIgnoreCase);
+               || localPart.StartsWith("yandex_", StringComparison.OrdinalIgnoreCase)
+               || localPart.StartsWith("vk_", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsValidRealEmail(string? email)
