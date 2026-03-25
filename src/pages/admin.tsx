@@ -38,7 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
 import { COOKIE_CONSENT_TEXT, PRIVACY_POLICY, PUBLIC_OFFER, RETURN_POLICY, USER_AGREEMENT } from '@/lib/legal-texts';
-import { type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type ComponentProps, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductCardImageDisplayClasses,
   buildProductCardBackgroundStyleFromColor,
@@ -118,6 +118,61 @@ interface AdminYandexDeliveryTestOption {
 interface AdminYandexDeliveryTestPickupQuote extends AdminYandexDeliveryTestOption {
   point?: AdminYandexDeliveryTestPickupPoint | null;
 }
+
+const AUTH_NO_AUTOFILL_PROPS = {
+  autoComplete: "off",
+  autoCapitalize: "none",
+  autoCorrect: "off",
+  spellCheck: false,
+  "data-form-type": "other",
+  "data-lpignore": "true",
+  "data-1p-ignore": "true",
+  "data-bwignore": "true",
+} as const;
+
+type NoAutofillInputProps = ComponentProps<typeof Input>;
+
+const NoAutofillInput = ({
+  onFocus,
+  onPointerDown,
+  onMouseDown,
+  readOnly,
+  ...props
+}: NoAutofillInputProps) => {
+  const [locked, setLocked] = useState(true);
+
+  const unlock = () => setLocked(false);
+
+  return (
+    <Input
+      {...AUTH_NO_AUTOFILL_PROPS}
+      {...props}
+      readOnly={readOnly || locked}
+      onFocus={(event) => {
+        unlock();
+        onFocus?.(event);
+      }}
+      onPointerDown={(event) => {
+        unlock();
+        onPointerDown?.(event);
+      }}
+      onMouseDown={(event) => {
+        unlock();
+        onMouseDown?.(event);
+      }}
+    />
+  );
+};
+
+const AuthAutofillTrap = ({ scope }: { scope: string }) => (
+  <div
+    aria-hidden="true"
+    className="pointer-events-none absolute -left-[9999px] top-auto h-0 w-0 overflow-hidden opacity-0"
+  >
+    <input tabIndex={-1} type="text" name={`${scope}-username`} autoComplete="username" defaultValue="" />
+    <input tabIndex={-1} type="password" name={`${scope}-password`} autoComplete="current-password" defaultValue="" />
+  </div>
+);
 
 interface AdminYandexDeliveryTestPickupPoint {
   id?: string;
@@ -7948,152 +8003,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </div>
                         </div>
                       </div>
-                      {false && (
-                      <div className="space-y-4 rounded-none border border-gray-200 p-4">
-                        <div className="space-y-1">
-                          <h4 className="font-semibold">Внешние способы входа</h4>
-                          <p className="text-sm text-muted-foreground">
-                            Здесь включаются способы входа для покупателей. Telegram-бот настраивается в разделе интеграций Telegram, а ключи Google и Яндекс задаются на сервере через env.
-                          </p>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK</Label>
-                                <p className="text-xs leading-5 text-muted-foreground">
-                                  Как работает: открывается окно VK OAuth, пользователь подтверждает доступ, после чего VK-аккаунт используется для входа или привязки.
-                                </p>
-                              </div>
-                              <Checkbox
-                                id="auth-vk-login-enabled"
-                                checked={isSettingEnabled("vk_login_enabled")}
-                                onCheckedChange={(checked) => updateSetting("vk_login_enabled", checked ? "true" : "false")}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor="auth-vk-client-id">Client ID</Label>
-                              <Input
-                                id="auth-vk-client-id"
-                                value={settings["vk_auth_client_id"] || ""}
-                                onChange={(e) => updateSetting("vk_auth_client_id", e.target.value)}
-                                placeholder="VK App ID / Client ID"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor="auth-vk-client-secret">Client Secret</Label>
-                              <Input
-                                id="auth-vk-client-secret"
-                                type="password"
-                                value={settings["vk_auth_client_secret"] || ""}
-                                onChange={(e) => updateSetting("vk_auth_client_secret", e.target.value)}
-                                placeholder="VK Secure key / Client Secret"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor="auth-vk-callback-url">Callback URL</Label>
-                              <Input id="auth-vk-callback-url" value={vkCallbackUrl} readOnly className="bg-slate-50" />
-                            </div>
-                            <div className="space-y-1 text-xs text-muted-foreground">
-                              <div>Что нужно: добавить этот callback URL в настройках приложения VK как разрешенный redirect URI.</div>
-                              <div>Client ID: {hasConfiguredValue(settings["vk_auth_client_id"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientId"}.</div>
-                              <div>Client Secret: {hasConfiguredValue(settings["vk_auth_client_secret"]) ? "задан в панели" : "не задан в панели, можно использовать env Auth__Vk__ClientSecret"}.</div>
-                            </div>
-                            <div className="space-y-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="w-full rounded-none"
-                                onClick={() => startExternalOAuthTest("vk")}
-                                disabled={externalAuthTestRunning === "vk"}
-                              >
-                                {externalAuthTestRunning === "vk" ? "Запускаем тест..." : "Проверить VK OAuth"}
-                              </Button>
-                              <p className="text-xs text-muted-foreground">
-                                Публичного универсального sandbox для VK OAuth нет, поэтому тест откроет реальное окно провайдера. Для первичной проверки достаточно убедиться, что backend выдает корректный OAuth URL и VK принимает запрос без мгновенной ошибки.
-                              </p>
-                              {renderExternalAuthTestStatus("vk")}
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="auth-telegram-login-enabled" className="text-sm font-semibold">Telegram</Label>
-                                <p className="text-xs leading-5 text-muted-foreground">
-                                  Вход через Telegram-бота с переходом в бот и подтверждением входа.
-                                </p>
-                              </div>
-                              <Checkbox
-                                id="auth-telegram-login-enabled"
-                                checked={isSettingEnabled("telegram_login_enabled")}
-                                onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label htmlFor="auth-telegram-bot-username">Username бота</Label>
-                              <Input
-                                id="auth-telegram-bot-username"
-                                value={settings["telegram_bot_username"] || ""}
-                                onChange={(e) => updateSetting("telegram_bot_username", e.target.value)}
-                                placeholder="fashion_demon_bot"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                Если оставить пустым, будет использован username активного login-бота из интеграций.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="auth-telegram-widget-enabled" className="text-sm font-semibold">Telegram Widget</Label>
-                                <p className="text-xs leading-5 text-muted-foreground">
-                                  Быстрый вход через официальный Telegram Login Widget прямо на странице авторизации.
-                                </p>
-                              </div>
-                              <Checkbox
-                                id="auth-telegram-widget-enabled"
-                                checked={isSettingEnabled("telegram_widget_enabled")}
-                                onCheckedChange={(checked) => updateSetting("telegram_widget_enabled", checked ? "true" : "false")}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="auth-google-login-enabled" className="text-sm font-semibold">Google</Label>
-                                <p className="text-xs leading-5 text-muted-foreground">
-                                  Кнопка входа через Google появится на сайте, если она включена здесь и на сервере заданы `Auth__Google__ClientId` и `Auth__Google__ClientSecret`.
-                                </p>
-                              </div>
-                              <Checkbox
-                                id="auth-google-login-enabled"
-                                checked={isSettingEnabled("google_login_enabled")}
-                                onCheckedChange={(checked) => updateSetting("google_login_enabled", checked ? "true" : "false")}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="auth-yandex-login-enabled" className="text-sm font-semibold">Яндекс</Label>
-                                <p className="text-xs leading-5 text-muted-foreground">
-                                  Кнопка входа через Яндекс появится на сайте, если она включена здесь и на сервере заданы `Auth__Yandex__ClientId` и `Auth__Yandex__ClientSecret`.
-                                </p>
-                              </div>
-                              <Checkbox
-                                id="auth-yandex-login-enabled"
-                                checked={isSettingEnabled("yandex_login_enabled")}
-                                onCheckedChange={(checked) => updateSetting("yandex_login_enabled", checked ? "true" : "false")}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      )}
                     </div>
                   )}
 
@@ -8411,8 +8320,20 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <p className="text-xs leading-5 text-muted-foreground">
                             Кнопки проверки ниже используют уже сохраненные настройки сервера. Если вы только что изменили поля в этой форме, сначала нажмите общую кнопку сохранения настроек внизу страницы.
                           </p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Выберите вкладку нужного провайдера: внутри каждой собраны поля, callback URL, тест и пошаговая инструкция со ссылками в официальный кабинет.
+                          </p>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <Tabs defaultValue="telegram" className="space-y-4">
+                          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-5">
+                            <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram</TabsTrigger>
+                            <TabsTrigger value="telegram-widget" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram Widget</TabsTrigger>
+                            <TabsTrigger value="google" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Google</TabsTrigger>
+                            <TabsTrigger value="vk" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">VK</TabsTrigger>
+                            <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Яндекс</TabsTrigger>
+                          </TabsList>
+
+                          <TabsContent value="telegram" className="mt-0">
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
@@ -8426,6 +8347,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 checked={isSettingEnabled("telegram_login_enabled")}
                                 onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
                               />
+                            </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как настроить Telegram-вход</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Откройте BotFather и создайте нового бота через команду <code>/newbot</code>, если бота еще нет.</li>
+                                  <li>Скопируйте токен бота и добавьте его в разделе интеграций Telegram.</li>
+                                  <li>Включите у этого бота флаг <code>использовать для входа</code>.</li>
+                                  <li>Проверьте, что у бота есть username, потому что именно он используется для deep-link входа.</li>
+                                  <li>После сохранения настроек нажмите кнопку проверки ниже: должен открыться Telegram-бот с параметром входа.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://t.me/BotFather" target="_blank" rel="noreferrer">Открыть BotFather</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank" rel="noreferrer">Инструкция по ботам</a>
+                              </div>
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-telegram-bot-username">Username бота</Label>
@@ -8460,7 +8397,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {renderExternalAuthTestStatus("telegram")}
                             </div>
                           </div>
+                          </TabsContent>
 
+                          <TabsContent value="telegram-widget" className="mt-0">
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
@@ -8474,6 +8413,22 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 checked={isSettingEnabled("telegram_widget_enabled")}
                                 onCheckedChange={(checked) => updateSetting("telegram_widget_enabled", checked ? "true" : "false")}
                               />
+                            </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как настроить Telegram Widget</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Сначала полностью настройте обычный Telegram-вход через login-бота во вкладке Telegram.</li>
+                                  <li>Убедитесь, что у бота есть username и он указан в интеграции.</li>
+                                  <li>В BotFather выполните <code>/setdomain</code> и укажите домен сайта, на котором будет отображаться виджет.</li>
+                                  <li>Включите Telegram Widget в этой вкладке и сохраните настройки.</li>
+                                  <li>Сначала проверьте тестовый виджет в админке, а затем откройте страницу <code>/auth</code> и убедитесь, что виджет появился и там.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://t.me/BotFather" target="_blank" rel="noreferrer">Открыть BotFather</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://core.telegram.org/widgets/login" target="_blank" rel="noreferrer">Документация Widget</a>
+                              </div>
                             </div>
                             <div className="space-y-1 text-xs text-muted-foreground">
                               <div>Что нужно: тот же login-бот из интеграций должен быть включен и иметь username.</div>
@@ -8515,8 +8470,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {renderExternalAuthTestStatus("telegram_widget")}
                             </div>
                           </div>
+                          </TabsContent>
 
+                          <TabsContent value="google" className="mt-0">
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <AuthAutofillTrap scope="auth-google-oauth" />
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
                                 <Label htmlFor="auth-google-login-enabled" className="text-sm font-semibold">Google</Label>
@@ -8530,10 +8488,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 onCheckedChange={(checked) => updateSetting("google_login_enabled", checked ? "true" : "false")}
                               />
                             </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как получить ключи Google OAuth</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Откройте Google Cloud Console и выберите проект или создайте новый.</li>
+                                  <li>В разделе Google Auth Platform заполните экран брендинга и при необходимости добавьте test users.</li>
+                                  <li>Перейдите в Credentials и создайте OAuth Client ID типа <code>Web application</code>.</li>
+                                  <li>Добавьте callback URL из поля ниже в список <code>Authorized redirect URIs</code>.</li>
+                                  <li>Скопируйте <code>Client ID</code> и <code>Client Secret</code> в поля этой формы, сохраните настройки и запустите тест.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noreferrer">Google Auth Platform</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">OAuth Credentials</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://developers.google.com/identity/protocols/oauth2/web-server" target="_blank" rel="noreferrer">Официальная инструкция</a>
+                              </div>
+                            </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-google-client-id">Client ID</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-google-client-id"
+                                name="auth-google-oauth-client-id"
+                                autoComplete="new-password"
                                 value={settings["google_auth_client_id"] || ""}
                                 onChange={(e) => updateSetting("google_auth_client_id", e.target.value)}
                                 placeholder="Google OAuth Client ID"
@@ -8541,9 +8518,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-google-client-secret">Client Secret</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-google-client-secret"
+                                name="auth-google-oauth-client-secret"
                                 type="password"
+                                autoComplete="new-password"
                                 value={settings["google_auth_client_secret"] || ""}
                                 onChange={(e) => updateSetting("google_auth_client_secret", e.target.value)}
                                 placeholder="Google OAuth Client Secret"
@@ -8574,8 +8553,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {renderExternalAuthTestStatus("google")}
                             </div>
                           </div>
+                          </TabsContent>
 
+                          <TabsContent value="vk" className="mt-0">
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <AuthAutofillTrap scope="auth-vk-oauth" />
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
                                 <Label htmlFor="auth-vk-login-enabled" className="text-sm font-semibold">VK</Label>
@@ -8589,10 +8571,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 onCheckedChange={(checked) => updateSetting("vk_login_enabled", checked ? "true" : "false")}
                               />
                             </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как получить ключи VK OAuth</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Откройте кабинет разработчика VK и создайте приложение для сайта.</li>
+                                  <li>В настройках приложения найдите <code>App ID / Client ID</code> и <code>Secure key / Client Secret</code>.</li>
+                                  <li>Добавьте callback URL из поля ниже в список разрешенных redirect URI.</li>
+                                  <li>Сохраните значения в этой форме и включите VK-вход.</li>
+                                  <li>После сохранения нажмите кнопку теста: должен открыться официальный экран VK OAuth без мгновенной backend-ошибки.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru" target="_blank" rel="noreferrer">Кабинет разработчика VK</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru/api/access-token/authcode-flow-user" target="_blank" rel="noreferrer">Auth code flow</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://dev.vk.com/ru/reference/users.get" target="_blank" rel="noreferrer">users.get</a>
+                              </div>
+                            </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-vk-client-id">Client ID</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-vk-client-id"
+                                name="auth-vk-oauth-client-id"
+                                autoComplete="new-password"
                                 value={settings["vk_auth_client_id"] || ""}
                                 onChange={(e) => updateSetting("vk_auth_client_id", e.target.value)}
                                 placeholder="VK App ID / Client ID"
@@ -8600,9 +8601,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-vk-client-secret">Client Secret</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-vk-client-secret"
+                                name="auth-vk-oauth-client-secret"
                                 type="password"
+                                autoComplete="new-password"
                                 value={settings["vk_auth_client_secret"] || ""}
                                 onChange={(e) => updateSetting("vk_auth_client_secret", e.target.value)}
                                 placeholder="VK Secure key / Client Secret"
@@ -8633,8 +8636,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {renderExternalAuthTestStatus("vk")}
                             </div>
                           </div>
+                          </TabsContent>
 
+                          <TabsContent value="yandex" className="mt-0">
                           <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <AuthAutofillTrap scope="auth-yandex-oauth" />
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1">
                                 <Label htmlFor="auth-yandex-login-enabled" className="text-sm font-semibold">Яндекс</Label>
@@ -8648,10 +8654,29 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 onCheckedChange={(checked) => updateSetting("yandex_login_enabled", checked ? "true" : "false")}
                               />
                             </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как получить ключи Яндекс OAuth</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Откройте кабинет приложений Яндекс OAuth и создайте новое приложение.</li>
+                                  <li>Выберите веб-сервис и укажите callback URL из поля ниже как адрес возврата.</li>
+                                  <li>После создания приложения скопируйте его <code>Client ID</code> и пароль приложения <code>Client Secret</code>.</li>
+                                  <li>Вставьте оба значения в эту форму и сохраните настройки.</li>
+                                  <li>Запустите тест: должно открыться окно Яндекс OAuth, а backend не должен падать на старте запроса.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://oauth.yandex.com/client/new/id/" target="_blank" rel="noreferrer">Создать приложение</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://yandex.ru/dev/id/doc/ru/register-client" target="_blank" rel="noreferrer">Регистрация приложения</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://yandex.ru/dev/id/doc/ru/codes/code-and-token" target="_blank" rel="noreferrer">Auth code flow</a>
+                              </div>
+                            </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-yandex-client-id">Client ID</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-yandex-client-id"
+                                name="auth-yandex-oauth-client-id"
+                                autoComplete="new-password"
                                 value={settings["yandex_auth_client_id"] || ""}
                                 onChange={(e) => updateSetting("yandex_auth_client_id", e.target.value)}
                                 placeholder="Yandex OAuth Client ID"
@@ -8659,9 +8684,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor="auth-yandex-client-secret">Client Secret</Label>
-                              <Input
+                              <NoAutofillInput
                                 id="auth-yandex-client-secret"
+                                name="auth-yandex-oauth-client-secret"
                                 type="password"
+                                autoComplete="new-password"
                                 value={settings["yandex_auth_client_secret"] || ""}
                                 onChange={(e) => updateSetting("yandex_auth_client_secret", e.target.value)}
                                 placeholder="Yandex OAuth Client Secret"
@@ -8692,7 +8719,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               {renderExternalAuthTestStatus("yandex")}
                             </div>
                           </div>
-                        </div>
+                          </TabsContent>
+                        </Tabs>
                       </div>
                     </div>
                   )}
