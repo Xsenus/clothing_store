@@ -3,6 +3,12 @@ import Footer from '@/components/Footer';
 import "./admin.css";
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
 import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
+import {
+  AdminAvitoIntegrationTab,
+  AdminCdekIntegrationTab,
+  AdminRoboKassaIntegrationTab,
+  AdminRussianPostIntegrationTab,
+} from '@/components/admin/AdminNewIntegrationsTabs';
 import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
 import { useConfirmDialog } from '@/components/ConfirmDialogProvider';
 import { Button } from '@/components/ui/button';
@@ -947,7 +953,7 @@ const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
-const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "dadata", "yandex"] as const;
+const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
 
 const DEFAULT_ADMIN_NAVIGATION_STATE = {
@@ -1260,6 +1266,20 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   yookassa_allow_bank_cards: "true",
   yookassa_allow_sbp: "true",
   yookassa_allow_yoomoney: "true",
+  payments_robokassa_enabled: "false",
+  robokassa_merchant_login: "",
+  robokassa_password1: "",
+  robokassa_password2: "",
+  robokassa_test_password1: "",
+  robokassa_test_password2: "",
+  robokassa_test_mode: "true",
+  robokassa_label_prefix: "FD",
+  robokassa_payment_timeout_minutes: "60",
+  robokassa_currency_label: "",
+  robokassa_payment_methods: "",
+  robokassa_receipt_enabled: "false",
+  robokassa_receipt_tax: "none",
+  robokassa_tax_system: "osn",
   catalog_filter_categories_enabled: "true",
   catalog_filter_sizes_enabled: "true",
   catalog_filter_materials_enabled: "true",
@@ -1295,6 +1315,30 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   yandex_delivery_package_length_cm: "30",
   yandex_delivery_package_height_cm: "20",
   yandex_delivery_package_width_cm: "10",
+  delivery_cdek_enabled: "false",
+  delivery_cdek_use_test_environment: "true",
+  delivery_cdek_account: "",
+  delivery_cdek_password: "",
+  delivery_cdek_from_postal_code: "630099",
+  delivery_cdek_package_length_cm: "30",
+  delivery_cdek_package_height_cm: "20",
+  delivery_cdek_package_width_cm: "10",
+  delivery_russian_post_enabled: "false",
+  delivery_russian_post_access_token: "",
+  delivery_russian_post_authorization_key: "",
+  delivery_russian_post_from_postal_code: "630099",
+  delivery_russian_post_mail_type: "POSTAL_PARCEL",
+  delivery_russian_post_mail_category: "ORDINARY",
+  delivery_russian_post_dimension_type: "PACK",
+  delivery_russian_post_package_length_cm: "30",
+  delivery_russian_post_package_height_cm: "20",
+  delivery_russian_post_package_width_cm: "10",
+  delivery_avito_enabled: "false",
+  delivery_avito_client_id: "",
+  delivery_avito_client_secret: "",
+  delivery_avito_scope: "items:info",
+  delivery_avito_warehouse_address: "",
+  delivery_avito_notes: "",
   database_backup_enabled: "true",
   database_backup_schedule_local: "03:00,15:00",
   database_backup_retention_days: "14",
@@ -8745,28 +8789,32 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   )}
 
                   {selectedSettingsGroup === "integrations" && (
-                    <div className="space-y-3 border p-3">
+                    <div className="min-w-0 space-y-3 overflow-hidden border p-3">
                       <h3 className="font-semibold">Интеграции</h3>
                       <p className="text-sm text-muted-foreground">Интеграции разнесены по вкладкам, чтобы каждый сервис было удобно настраивать отдельно.</p>
 
-                      <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="w-full">
-                        <TabsList className="w-full justify-start gap-2 overflow-x-auto rounded-none border-b bg-transparent p-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
-                          <TabsTrigger value="telegram" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Telegram</TabsTrigger>
-                          <TabsTrigger value="yoomoney" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooMoney</TabsTrigger>
-                          <TabsTrigger value="yookassa" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">YooKassa</TabsTrigger>
-                          <TabsTrigger value="dadata" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">DaData</TabsTrigger>
-                          <TabsTrigger value="yandex" className="rounded-none border-b-2 border-transparent px-3 data-[state=active]:border-black">Яндекс.Доставка</TabsTrigger>
+                      <Tabs value={selectedIntegrationCatalog} onValueChange={setSelectedIntegrationCatalog} className="min-w-0 w-full">
+                        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 sm:grid-cols-3 md:flex md:justify-start md:gap-2 md:overflow-x-auto md:border-b md:pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:min-w-0 [&>*]:shrink-0">
+                          <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Telegram</TabsTrigger>
+                          <TabsTrigger value="yoomoney" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">YooMoney</TabsTrigger>
+                          <TabsTrigger value="yookassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">YooKassa</TabsTrigger>
+                          <TabsTrigger value="robokassa" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">RoboKassa</TabsTrigger>
+                          <TabsTrigger value="dadata" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">DaData</TabsTrigger>
+                          <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Яндекс.Доставка</TabsTrigger>
+                          <TabsTrigger value="cdek" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">СДЭК</TabsTrigger>
+                          <TabsTrigger value="russian-post" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Почта России</TabsTrigger>
+                          <TabsTrigger value="avito" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none md:min-h-0 md:justify-center md:border-x-0 md:border-t-0 md:border-b-2 md:border-transparent md:bg-transparent md:px-3 md:py-1 md:text-sm md:whitespace-nowrap md:data-[state=active]:border-black md:data-[state=active]:bg-transparent md:data-[state=active]:text-foreground">Avito</TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="telegram" className="mt-3 space-y-3">
-                          <div className="space-y-3 border p-3">
-                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                          <div className="min-w-0 space-y-3 overflow-hidden border p-3">
+                            <div className="flex flex-wrap items-start justify-start gap-2 xl:justify-end">
                               <Checkbox
                                 id="telegram-login-enabled"
                                 checked={isSettingEnabled("telegram_login_enabled")}
                                 onCheckedChange={(checked) => updateSetting("telegram_login_enabled", checked ? "true" : "false")}
                               />
-                              <Label htmlFor="telegram-login-enabled">Включить авторизацию через Telegram</Label>
+                              <Label htmlFor="telegram-login-enabled" className="leading-snug">Включить авторизацию через Telegram</Label>
                             </div>
                             <div className="space-y-1">
                               <Label htmlFor="telegram-bot-username">Username бота для Telegram Login</Label>
@@ -8855,14 +8903,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </TabsContent>
 
                         <TabsContent value="yoomoney" className="mt-3">
-                          <div className="space-y-3 border p-3">
-                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                          <div className="min-w-0 space-y-3 overflow-hidden border p-3">
+                            <div className="flex flex-wrap items-start justify-start gap-2 xl:justify-end">
                               <Checkbox
                                 id="payments-yoomoney-enabled"
                                 checked={isSettingEnabled("payments_yoomoney_enabled")}
                                 onCheckedChange={(checked) => updateSetting("payments_yoomoney_enabled", checked ? "true" : "false")}
                               />
-                              <Label htmlFor="payments-yoomoney-enabled">Включить оплату через YooMoney</Label>
+                              <Label htmlFor="payments-yoomoney-enabled" className="leading-snug">Включить оплату через YooMoney</Label>
                             </div>
 
                             {renderPaymentIntegrationStatus(
@@ -9006,7 +9054,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <Button
                                     type="button"
                                     variant="outline"
-                                    className="h-9 rounded-none px-4"
+                                    className="h-9 w-full rounded-none px-4 md:w-auto"
                                     onClick={runYooMoneyIntegrationTest}
                                     disabled={yoomoneyTestRunning || !isSettingEnabled("payments_yoomoney_enabled") || yoomoneyTestMethodOptions.length === 0}
                                   >
@@ -9139,14 +9187,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </TabsContent>
 
                         <TabsContent value="yookassa" className="mt-3">
-                          <div className="space-y-3 border p-3">
-                            <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+                          <div className="min-w-0 space-y-3 overflow-hidden border p-3">
+                            <div className="flex flex-wrap items-start justify-start gap-2 xl:justify-end">
                               <Checkbox
                                 id="payments-yookassa-enabled"
                                 checked={isSettingEnabled("payments_yookassa_enabled")}
                                 onCheckedChange={(checked) => updateSetting("payments_yookassa_enabled", checked ? "true" : "false")}
                               />
-                              <Label htmlFor="payments-yookassa-enabled">Включить оплату через YooKassa</Label>
+                              <Label htmlFor="payments-yookassa-enabled" className="leading-snug">Включить оплату через YooKassa</Label>
                             </div>
 
                             {renderPaymentIntegrationStatus(
@@ -9303,7 +9351,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <Button
                                     type="button"
                                     variant="outline"
-                                    className="h-9 rounded-none px-4"
+                                    className="h-9 w-full rounded-none px-4 md:w-auto"
                                     onClick={runYooKassaIntegrationTest}
                                     disabled={yookassaTestRunning || !isSettingEnabled("payments_yookassa_enabled") || yookassaTestMethodOptions.length === 0}
                                   >
@@ -9406,7 +9454,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  className="rounded-none"
+                                  className="w-full rounded-none md:w-auto"
                                   onClick={async () => {
                                     try {
                                       await navigator.clipboard.writeText(yookassaNotificationUrl);
@@ -9427,30 +9475,30 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </TabsContent>
 
                         <TabsContent value="dadata" className="mt-3">
-                          <div className="space-y-1 border p-3">
+                          <div className="min-w-0 space-y-1 overflow-hidden border p-3">
                             <Label htmlFor="dadata-api-key">DaData API Key</Label>
                             <Input id="dadata-api-key" type="password" value={settings["dadata_api_key"] || ""} onChange={(e) => updateSetting("dadata_api_key", e.target.value)} />
                           </div>
                         </TabsContent>
 
                         <TabsContent value="yandex" className="mt-3">
-                          <div className="space-y-3 border p-3">
-                            <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-2 xl:justify-end">
-                              <div className="flex items-center gap-2">
+                          <div className="min-w-0 space-y-3 overflow-hidden border p-3">
+                            <div className="flex flex-wrap items-start justify-start gap-x-6 gap-y-2 xl:justify-end">
+                              <div className="flex items-start gap-2">
                                 <Checkbox
                                   id="yandex-delivery-enabled"
                                   checked={isYandexDeliveryEnabled}
                                   onCheckedChange={(checked) => updateSetting("yandex_delivery_enabled", checked ? "true" : "false")}
                                 />
-                                <Label htmlFor="yandex-delivery-enabled">Включить Яндекс.Доставку</Label>
+                                <Label htmlFor="yandex-delivery-enabled" className="leading-snug">Включить Яндекс.Доставку</Label>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-start gap-2">
                                 <Checkbox
                                   id="yandex-delivery-test-environment"
                                   checked={isSettingEnabled("yandex_delivery_use_test_environment")}
                                   onCheckedChange={(checked) => updateSetting("yandex_delivery_use_test_environment", checked ? "true" : "false")}
                                 />
-                                <Label htmlFor="yandex-delivery-test-environment">Использовать тестовый контур Яндекс.Доставки</Label>
+                                <Label htmlFor="yandex-delivery-test-environment" className="leading-snug">Использовать тестовый контур Яндекс.Доставки</Label>
                               </div>
                             </div>
 
@@ -9723,7 +9771,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                           <Button
                                             type="button"
                                             variant="outline"
-                                            className="rounded-none"
+                                            className="w-full rounded-none sm:w-auto"
                                             disabled={!point.id}
                                             onClick={async () => {
                                               if (!point.id) return;
@@ -9740,7 +9788,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                           </Button>
                                           <Button
                                             type="button"
-                                            className="rounded-none"
+                                            className="w-full rounded-none sm:w-auto"
                                             disabled={!point.id}
                                             onClick={() => applyYandexSourceStationId(point.id || "", point.name)}
                                           >
@@ -9783,7 +9831,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                   <Button
                                     type="button"
                                     variant="outline"
-                                    className="h-11 rounded-none px-4"
+                                    className="h-11 w-full rounded-none px-4 md:w-auto"
                                     onClick={() => updateSetting("yandex_delivery_source_station_id", "")}
                                   >
                                     Очистить ID
@@ -9857,6 +9905,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
                             </div>
                           </div>
+                        </TabsContent>
+                        <TabsContent value="robokassa" className="mt-3">
+                          <AdminRoboKassaIntegrationTab settings={settings} updateSetting={updateSetting} />
+                        </TabsContent>
+                        <TabsContent value="cdek" className="mt-3">
+                          <AdminCdekIntegrationTab settings={settings} updateSetting={updateSetting} />
+                        </TabsContent>
+                        <TabsContent value="russian-post" className="mt-3">
+                          <AdminRussianPostIntegrationTab settings={settings} updateSetting={updateSetting} />
+                        </TabsContent>
+                        <TabsContent value="avito" className="mt-3">
+                          <AdminAvitoIntegrationTab settings={settings} updateSetting={updateSetting} />
                         </TabsContent>
                       </Tabs>
                     </div>
