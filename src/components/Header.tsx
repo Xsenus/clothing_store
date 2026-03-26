@@ -186,7 +186,7 @@ export default function Header() {
         "text-foreground",
       )}
     >
-      <div className="container mx-auto flex h-16 items-center justify-between px-4 md:h-20">
+      <div className="container mx-auto flex h-16 items-center justify-between px-4 md:grid md:h-20 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
         <div className="md:hidden">
           {MobileMenuComponent ? (
             <MobileMenuComponent
@@ -222,12 +222,12 @@ export default function Header() {
 
         <Link
           to="/"
-          className="site-header-brand max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-none md:text-3xl"
+          className="site-header-brand max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-full md:justify-self-start md:text-3xl"
         >
           FASHION_DEMON
         </Link>
 
-        <nav className="hidden md:flex items-center gap-8">
+        <nav className="hidden items-center gap-8 md:flex md:justify-self-center">
           {navLinks.map((link) => (
             <Link
               key={link.path}
@@ -243,7 +243,7 @@ export default function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 md:gap-4">
+        <div className="flex items-center gap-2 md:justify-self-end md:gap-4">
           <div className="hidden md:block">
             {isAuthenticated && !shouldHideDesktopAccountTrigger ? (
               <>

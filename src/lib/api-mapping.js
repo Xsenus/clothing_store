@@ -102,6 +102,7 @@ const parseErrorPayload = (status, text) => {
 
 const shouldSkipRefresh = (path) => {
   return path.startsWith("/auth/login")
+    || path.startsWith("/auth/phone/")
     || path.startsWith("/auth/signup")
     || path.startsWith("/auth/verify")
     || path.startsWith("/auth/resend")
@@ -449,6 +450,22 @@ export const signIn = async ({ input }) => {
   return result;
 };
 
+export const startPhoneSignIn = async ({ input }) => request("/auth/phone/start", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(input),
+});
+
+export const confirmPhoneSignIn = async ({ input }) => {
+  const result = await request("/auth/phone/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  saveAuthTokens(result || {});
+  return result;
+};
+
 export const signUp = async ({ input }) => request("/auth/signup", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -610,6 +627,22 @@ export const FLOW = {
 
   clearCart,
 
+  startPhoneSignIn: async ({ input }) => request("/auth/phone/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
+  confirmPhoneSignIn: async ({ input }) => {
+    const result = await request("/auth/phone/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    saveAuthTokens(result || {});
+    return result;
+  },
+
 
   startEmailVerification: async ({ input }) => request("/profile/email/verify/start", {
     method: "POST",
@@ -629,7 +662,33 @@ export const FLOW = {
     body: JSON.stringify({ value: input.value }),
   }),
 
+  confirmPhoneVerification: async ({ input }) => request("/profile/phone/verify/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: input.value, code: input.code }),
+  }),
+
   getPhoneVerificationStatus: async ({ input }) => request(`/profile/phone/verify/status/${encodeURIComponent(input.state)}`),
+
+  startProfileDeletion: async ({ input } = {}) => request("/profile/delete/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel: input?.channel ?? null }),
+  }),
+
+  confirmProfileDeletionByEmail: async ({ input }) => request("/profile/delete/email/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: input.code }),
+  }),
+
+  confirmProfileDeletionByPhone: async ({ input }) => request("/profile/delete/phone/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: input.code }),
+  }),
+
+  getProfileDeletionPhoneStatus: async ({ input }) => request(`/profile/delete/phone/status/${encodeURIComponent(input.state)}`),
 
 
   createProfile: async ({ input }) => request("/profile", {
@@ -642,6 +701,12 @@ export const FLOW = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  }),
+
+  updateProfilePassword: async ({ input }) => request("/profile/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ newPassword: input.newPassword }),
   }),
 
   unlinkExternalIdentity: async ({ input }) => request(`/profile/external/${encodeURIComponent(input.provider)}`, {

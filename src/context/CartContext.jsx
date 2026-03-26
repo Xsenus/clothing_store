@@ -42,6 +42,11 @@ export function CartProvider({ children }) {
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
       refreshCart();
+      return;
+    }
+
+    if (!isAuthenticated && !authLoading) {
+      setCartItems([]);
     }
   }, [isAuthenticated, authLoading]);
 

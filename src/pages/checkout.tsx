@@ -370,6 +370,11 @@ export default function CheckoutPage() {
   const [pickupDeliveryLoading, setPickupDeliveryLoading] = useState(false);
 
   const [products, setProducts] = useState<Record<string, any>>({});
+  const [profileVerification, setProfileVerification] = useState(() => ({
+    emailVerified: false,
+    phoneVerified: false,
+    hasConfirmedContact: false,
+  }));
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -470,6 +475,11 @@ export default function CheckoutPage() {
         setEmail((prev) => prev || profile.email || '');
         setPhone((prev) => prev || profile.phone || '');
         setAddress((prev) => prev || profile.shippingAddress || '');
+        setProfileVerification({
+          emailVerified: !!profile.emailVerified,
+          phoneVerified: !!profile.phoneVerified,
+          hasConfirmedContact: !!profile.hasConfirmedContact || !!profile.emailVerified || !!profile.phoneVerified,
+        });
       } catch {
         // Keep checkout available even if profile prefill fails.
       }
@@ -495,6 +505,9 @@ export default function CheckoutPage() {
 
   const requestedWeightKg = Math.max(0.3, Number((totalItems * 0.3).toFixed(3)));
   const promoDiscount = Math.min(subtotal, Number(appliedPromoCode?.discountAmount ?? 0));
+  const hasConfirmedContact = profileVerification.hasConfirmedContact
+    || profileVerification.emailVerified
+    || profileVerification.phoneVerified;
   const yoomoneyBankCardsEnabled = isSettingEnabled(publicSettings?.yoomoney_allow_bank_cards);
   const yoomoneyWalletEnabled = isSettingEnabled(publicSettings?.yoomoney_allow_wallet);
   const yookassaBankCardsEnabled = isSettingEnabled(publicSettings?.yookassa_allow_bank_cards, true);
@@ -1080,6 +1093,7 @@ export default function CheckoutPage() {
       : false;
   const canSubmit = cartItems.length > 0
     && !hasUnavailableItems
+    && hasConfirmedContact
     && !loading
     && !promoCodeLoading
     && !isShippingLoading
@@ -1280,6 +1294,11 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (!hasConfirmedContact) {
+      toast.error('Подтвердите email или телефон в профиле перед оформлением заказа.');
+      return;
+    }
+
     if ((selectedDeliveryMethod === 'home' || selectedDeliveryMethod === 'pickup') && !address.trim()) {
       toast.error('Укажите адрес для расчета доставки.');
       return;
@@ -1356,6 +1375,20 @@ export default function CheckoutPage() {
               <form onSubmit={handleSubmit} className="space-y-8">
                 <div className="space-y-4">
                   <h2 className="border-b pb-2 text-xl font-bold uppercase tracking-wider">ИНФОРМАЦИЯ О ПОКУПАТЕЛЕ</h2>
+                  {!hasConfirmedContact ? (
+                    <div className="space-y-3 border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                      <div className="font-bold uppercase tracking-[0.18em]">Нужно подтверждение контакта</div>
+                      <p>Оформление заказа доступно только после подтверждения email или телефона в профиле.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-none border-red-300 bg-white text-red-900 hover:bg-red-100"
+                        onClick={() => navigate('/profile?tab=settings')}
+                      >
+                        Открыть профиль
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="name">Полное имя</Label>

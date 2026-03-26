@@ -1499,6 +1499,11 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_widget_enabled: "false",
   telegram_bot_username: "",
   telegram_bot_token: "",
+  telegram_gateway_enabled: "false",
+  telegram_gateway_api_token: "",
+  telegram_gateway_sender_username: "",
+  telegram_gateway_code_length: "6",
+  telegram_gateway_ttl_seconds: "300",
   google_login_enabled: "false",
   google_auth_client_id: "",
   google_auth_client_secret: "",
@@ -8973,9 +8978,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </p>
                         </div>
                         <Tabs defaultValue="telegram" className="space-y-4">
-                          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-5">
+                          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-6">
                             <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram</TabsTrigger>
                             <TabsTrigger value="telegram-widget" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram Widget</TabsTrigger>
+                            <TabsTrigger value="telegram-gateway" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram Gateway</TabsTrigger>
                             <TabsTrigger value="google" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Google</TabsTrigger>
                             <TabsTrigger value="vk" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">VK</TabsTrigger>
                             <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Яндекс</TabsTrigger>
@@ -9116,6 +9122,93 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                 </div>
                               ) : null}
                               {renderExternalAuthTestStatus("telegram_widget")}
+                            </div>
+                          </div>
+                          </TabsContent>
+
+                          <TabsContent value="telegram-gateway" className="mt-0">
+                          <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-gateway-enabled" className="text-sm font-semibold">Telegram Gateway</Label>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                  Как работает: сервис отправляет одноразовый код в системный чат Telegram `Verification Codes`. Мы используем его для подтверждения телефона и подтверждения удаления профиля.
+                                </p>
+                              </div>
+                              <Checkbox
+                                id="auth-telegram-gateway-enabled"
+                                checked={isSettingEnabled("telegram_gateway_enabled")}
+                                onCheckedChange={(checked) => updateSetting("telegram_gateway_enabled", checked ? "true" : "false")}
+                              />
+                            </div>
+                            <div className="space-y-3 border border-amber-200 bg-amber-50/70 p-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold">Как настроить Telegram Gateway</div>
+                                <ol className="list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                                  <li>Откройте кабинет Telegram Gateway и получите API token.</li>
+                                  <li>При необходимости пополните баланс Gateway для боевых отправок.</li>
+                                  <li>Вставьте token ниже, сохраните настройки и включите интеграцию.</li>
+                                  <li>После этого подтверждение телефона и удаление профиля по телефону на сайте автоматически перейдут на OTP-код из Telegram.</li>
+                                  <li>Если Gateway недоступен, система сможет использовать старый bot-flow как резервный сценарий.</li>
+                                </ol>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://gateway.telegram.org" target="_blank" rel="noreferrer">Открыть Gateway</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://core.telegram.org/gateway" target="_blank" rel="noreferrer">Обзор</a>
+                                <a className="inline-flex min-h-9 items-center justify-center border border-black px-3 py-2 font-medium hover:bg-black hover:text-white" href="https://core.telegram.org/gateway/api" target="_blank" rel="noreferrer">API</a>
+                              </div>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1 md:col-span-2">
+                                <Label htmlFor="auth-telegram-gateway-api-token">API token</Label>
+                                <Input
+                                  id="auth-telegram-gateway-api-token"
+                                  type="password"
+                                  autoComplete="new-password"
+                                  value={settings["telegram_gateway_api_token"] || ""}
+                                  onChange={(e) => updateSetting("telegram_gateway_api_token", e.target.value)}
+                                  placeholder="AAEFAAAA..."
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-gateway-sender-username">Sender username</Label>
+                                <Input
+                                  id="auth-telegram-gateway-sender-username"
+                                  value={settings["telegram_gateway_sender_username"] || ""}
+                                  onChange={(e) => updateSetting("telegram_gateway_sender_username", e.target.value)}
+                                  placeholder="@your_verified_channel"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Необязательно. Если укажете, код будет приходить от вашего верифицированного канала.
+                                </p>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-gateway-code-length">Длина кода</Label>
+                                <Input
+                                  id="auth-telegram-gateway-code-length"
+                                  type="number"
+                                  min={4}
+                                  max={8}
+                                  value={settings["telegram_gateway_code_length"] || "6"}
+                                  onChange={(e) => updateSetting("telegram_gateway_code_length", e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="auth-telegram-gateway-ttl">TTL кода, сек</Label>
+                                <Input
+                                  id="auth-telegram-gateway-ttl"
+                                  type="number"
+                                  min={30}
+                                  max={3600}
+                                  value={settings["telegram_gateway_ttl_seconds"] || "300"}
+                                  onChange={(e) => updateSetting("telegram_gateway_ttl_seconds", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div>Сейчас включено: {isSettingEnabled("telegram_gateway_enabled") ? "да" : "нет"}.</div>
+                              <div>API token: {hasConfiguredValue(settings["telegram_gateway_api_token"]) ? "задан" : "не задан"}.</div>
+                              <div>После сохранения сайт начнет использовать Gateway для подтверждения телефона автоматически.</div>
                             </div>
                           </div>
                           </TabsContent>

@@ -5,6 +5,7 @@ import Footer from "@/components/Footer";
 import ProductCard from "@/components/ProductCard";
 import "./profile.css";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +13,7 @@ import { FLOW } from "@/lib/api-mapping";
 import { Authenticated, useAuthActions } from "@/context/AuthContext";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { toast } from "sonner";
+import { ShieldCheck } from "lucide-react";
 import AdminPage from "./admin";
 import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
@@ -54,6 +56,19 @@ const getExternalAuthErrorMessage = (value, fallback) => {
 
   if (normalized.includes("user not found")) {
     return "Пользователь не найден.";
+  }
+
+  return message;
+};
+
+const getProfileActionErrorMessage = (error, fallback) => {
+  const message = String(error?.message || error?.detail || "").trim();
+  if (!message) {
+    return fallback;
+  }
+
+  if (message.toLowerCase().includes("password is too weak")) {
+    return "Пароль должен быть не короче 10 символов и содержать заглавные, строчные буквы и цифры.";
   }
 
   return message;
@@ -302,7 +317,7 @@ const hasOrderShippingDetails = (order) =>
 
 const formatRubles = (raw) => {
   const value = Number(raw || 0);
-  if (!Number.isFinite(value)) return "вЂ”";
+  if (!Number.isFinite(value)) return "—";
   return `${new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -328,7 +343,7 @@ const formatOrderDisplayNumber = (order) => {
     return String(Math.trunc(numericOrderNumber)).padStart(7, "0");
   }
 
-  return order?.id || "вЂ”";
+  return order?.id || "—";
 };
 
 const EXTERNAL_AUTH_PROVIDERS = [
@@ -342,7 +357,11 @@ const isPublicSettingEnabled = (value) => ["true", "1", "on", "yes"].includes(St
 
 const normalizeProfileTab = (value, allowAdmin = false) => {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "wishlist" || normalized === "settings" || normalized === "orders") {
+  if (normalized === "settings" || normalized === "profile") {
+    return "profile";
+  }
+
+  if (normalized === "wishlist" || normalized === "orders") {
     return normalized;
   }
 
@@ -386,13 +405,22 @@ export default function ProfilePage() {
   const [emailDraft, setEmailDraft] = useState("");
   const [phoneDraft, setPhoneDraft] = useState("");
   const [emailCode, setEmailCode] = useState("");
-  const [emailCodeRequested, setEmailCodeRequested] = useState(false);
-  const [phoneVerifyState, setPhoneVerifyState] = useState("");
+  const [emailVerificationSession, setEmailVerificationSession] = useState(null);
+  const [phoneVerificationSession, setPhoneVerificationSession] = useState(null);
+  const [phoneVerificationCode, setPhoneVerificationCode] = useState("");
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [passwordConfirmDraft, setPasswordConfirmDraft] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [profileDeletionSession, setProfileDeletionSession] = useState(null);
+  const [profileDeletionCode, setProfileDeletionCode] = useState("");
+  const [profileDeletionLoading, setProfileDeletionLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [paymentActionOrderId, setPaymentActionOrderId] = useState("");
   const [paymentRefreshOrderId, setPaymentRefreshOrderId] = useState("");
   const handledPaymentReturnRef = useRef("");
   const authPopupRef = useRef(null);
+  const lastEmailVerificationAutoSubmitRef = useRef("");
+  const lastPhoneVerificationAutoSubmitRef = useRef("");
 
   useEffect(() => {
     const nextTab = normalizeProfileTab(searchParams.get("tab"), isAdmin);
@@ -482,6 +510,9 @@ export default function ProfilePage() {
           const shippingAddresses = sanitizeProfileAddresses(profileRes.shippingAddresses, profileRes.shippingAddress);
           setProfile({
             ...profileRes,
+            phoneVerification: profileRes.phoneVerification || null,
+            accountDeletion: profileRes.accountDeletion || null,
+            hasConfirmedContact: !!profileRes.hasConfirmedContact || !!profileRes.emailVerified || !!profileRes.phoneVerified,
             externalIdentities: Array.isArray(profileRes.externalIdentities) ? profileRes.externalIdentities : [],
             shippingAddresses,
             shippingAddress: getDefaultProfileAddressValue(shippingAddresses, profileRes.shippingAddress),
@@ -592,6 +623,37 @@ export default function ProfilePage() {
     () => externalAuthMethods.filter((method) => method.available || !!method.identity),
     [externalAuthMethods]
   );
+  const hasLinkedTelegramIdentity = useMemo(
+    () => externalAuthMethods.some((method) => method.id === "telegram" && !!method.identity),
+    [externalAuthMethods]
+  );
+  const availableDeletionChannels = Array.isArray(profile?.accountDeletion?.availableChannels)
+    ? profile.accountDeletion.availableChannels
+    : [];
+  const canDeleteProfile = !!profile?.accountDeletion?.canDelete && availableDeletionChannels.length > 0;
+  const phoneVerificationMethod = phoneVerificationSession?.method || profile?.phoneVerification?.method || "";
+  const phoneVerificationAvailable = !!profile?.phoneVerification?.available || !!phoneVerificationMethod;
+  const phoneVerifyState = phoneVerificationSession?.method === "telegram_bot" ? (phoneVerificationSession?.state || "") : "";
+
+  const closePhoneVerificationDialog = (open) => {
+    if (open) {
+      return;
+    }
+
+    lastPhoneVerificationAutoSubmitRef.current = "";
+    setPhoneVerificationSession(null);
+    setPhoneVerificationCode("");
+  };
+
+  const closeEmailVerificationDialog = (open) => {
+    if (open) {
+      return;
+    }
+
+    lastEmailVerificationAutoSubmitRef.current = "";
+    setEmailVerificationSession(null);
+    setEmailCode("");
+  };
 
   const closeExternalAuthPopup = () => {
     if (authPopupRef.current && !authPopupRef.current.closed) {
@@ -603,64 +665,154 @@ export default function ProfilePage() {
   const refreshExternalIdentityState = async () => {
     const profileRes = await FLOW.getProfile({ input: {} });
     const nextIdentities = Array.isArray(profileRes?.externalIdentities) ? profileRes.externalIdentities : [];
+    const shippingAddresses = sanitizeProfileAddresses(profileRes?.shippingAddresses, profileRes?.shippingAddress);
+    const nextProfile = {
+      ...(profileRes || {}),
+      email: profileRes?.email || "",
+      phone: profileRes?.phone || "",
+      emailVerified: !!profileRes?.emailVerified,
+      phoneVerified: !!profileRes?.phoneVerified,
+      hasConfirmedContact: !!profileRes?.hasConfirmedContact || !!profileRes?.emailVerified || !!profileRes?.phoneVerified,
+      phoneVerification: profileRes?.phoneVerification || null,
+      accountDeletion: profileRes?.accountDeletion || null,
+      externalIdentities: nextIdentities,
+      shippingAddresses,
+      shippingAddress: getDefaultProfileAddressValue(shippingAddresses, profileRes?.shippingAddress),
+    };
 
     setProfile((prev) => (
       prev
         ? {
             ...prev,
-            email: profileRes?.email || "",
-            phone: profileRes?.phone || "",
-            emailVerified: !!profileRes?.emailVerified,
-            phoneVerified: !!profileRes?.phoneVerified,
-            externalIdentities: nextIdentities,
+            ...nextProfile,
           }
-        : profileRes
+        : nextProfile
     ));
 
     if (!emailChanged) {
-      setEmailDraft(profileRes?.email || "");
+      setEmailDraft(nextProfile.email || "");
     }
     if (!phoneChanged) {
-      setPhoneDraft(profileRes?.phone || "");
+      setPhoneDraft(nextProfile.phone || "");
     }
 
-    return profileRes;
+    return nextProfile;
   };
 
   const emailVerifiedForSave = !emailChanged || !!profile?.emailVerified;
   const phoneVerifiedForSave = !phoneChanged || !!profile?.phoneVerified;
 
   useEffect(() => {
-    if (!phoneVerifyState) return undefined;
+    if (!emailVerificationSession?.resendInSeconds || emailVerificationSession.resendInSeconds <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setEmailVerificationSession((prev) => {
+        if (!prev || prev.resendInSeconds <= 1) {
+          return prev ? { ...prev, resendInSeconds: 0 } : prev;
+        }
+
+        return { ...prev, resendInSeconds: prev.resendInSeconds - 1 };
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [emailVerificationSession?.resendInSeconds]);
+
+  useEffect(() => {
+    if (phoneVerificationSession?.method !== "telegram_gateway" || !phoneVerificationSession?.resendInSeconds || phoneVerificationSession.resendInSeconds <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setPhoneVerificationSession((prev) => {
+        if (!prev || prev.method !== "telegram_gateway" || prev.resendInSeconds <= 1) {
+          return prev ? { ...prev, resendInSeconds: 0 } : prev;
+        }
+
+        return { ...prev, resendInSeconds: prev.resendInSeconds - 1 };
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [phoneVerificationSession?.method, phoneVerificationSession?.resendInSeconds]);
+
+  useEffect(() => {
+    if (phoneVerificationSession?.method !== "telegram_bot" || !phoneVerificationSession?.state) return undefined;
 
     const timer = setInterval(async () => {
       try {
-        const status = await FLOW.getPhoneVerificationStatus({ input: { state: phoneVerifyState } });
+        const status = await FLOW.getPhoneVerificationStatus({ input: { state: phoneVerificationSession.state } });
         if (status?.completed && status?.phoneVerified) {
-          setPhoneVerifyState("");
-          setProfile((prev) => ({ ...(prev || {}), phone: status.phone, phoneVerified: true }));
-          setPhoneDraft(status.phone || "");
+          setPhoneVerificationSession(null);
+          setPhoneVerificationCode("");
+          const nextProfile = await refreshExternalIdentityState();
+          setPhoneDraft(nextProfile?.phone || status.phone || "");
           toast.success("Телефон подтвержден");
           clearInterval(timer);
           return;
         }
 
         if (["expired", "consumed"].includes(String(status?.status || ""))) {
-          setPhoneVerifyState("");
+          setPhoneVerificationSession(null);
+          setPhoneVerificationCode("");
           clearInterval(timer);
           if (status?.status === "expired") {
             toast.error("Сессия подтверждения телефона истекла");
           }
         }
       } catch {
-        setPhoneVerifyState("");
+        setPhoneVerificationSession(null);
+        setPhoneVerificationCode("");
         clearInterval(timer);
         toast.error("Не удалось проверить статус подтверждения телефона");
       }
     }, 2000);
 
     return () => clearInterval(timer);
-  }, [phoneVerifyState]);
+  }, [phoneVerificationSession]);
+
+  useEffect(() => {
+    if (profileDeletionSession?.channel !== "phone" || profileDeletionSession?.method !== "telegram_bot" || !profileDeletionSession?.state) return undefined;
+
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const status = await FLOW.getProfileDeletionPhoneStatus({ input: { state: profileDeletionSession.state } });
+        if (status?.deleted) {
+          clearInterval(timer);
+          setProfileDeletionSession(null);
+          setProfileDeletionCode("");
+          await signOut();
+          if (!cancelled) {
+            toast.success("Профиль пользователя удален.");
+            navigate("/", { replace: true });
+          }
+          return;
+        }
+
+        if (["expired", "consumed"].includes(String(status?.status || ""))) {
+          clearInterval(timer);
+          setProfileDeletionSession(null);
+          setProfileDeletionCode("");
+          if (status?.status === "expired") {
+            toast.error("Сессия подтверждения удаления истекла. Запустите удаление заново.");
+          }
+        }
+      } catch (error) {
+        clearInterval(timer);
+        setProfileDeletionSession(null);
+        setProfileDeletionCode("");
+        toast.error(error?.message || "Не удалось завершить подтверждение удаления профиля.");
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [navigate, profileDeletionSession, signOut]);
 
   useEffect(() => () => closeExternalAuthPopup(), []);
 
@@ -794,8 +946,14 @@ export default function ProfilePage() {
 
     setActionLoading(true);
     try {
-      await FLOW.startEmailVerification({ input: { value } });
-      setEmailCodeRequested(true);
+      const started = await FLOW.startEmailVerification({ input: { value } });
+      lastEmailVerificationAutoSubmitRef.current = "";
+      setEmailVerificationSession({
+        value,
+        resendInSeconds: Number(started?.resendInSeconds || 60),
+        ttlSeconds: Number(started?.ttlSeconds || 300),
+      });
+      setEmailCode("");
       toast.success("Код подтверждения отправлен на email");
     } catch (error) {
       toast.error(error?.message || "Не удалось отправить код");
@@ -814,9 +972,11 @@ export default function ProfilePage() {
     setActionLoading(true);
     try {
       await FLOW.confirmEmailVerification({ input: { value, code: emailCode.trim() } });
-      setProfile((prev) => ({ ...(prev || {}), email: value, emailVerified: true }));
+      const nextProfile = await refreshExternalIdentityState();
+      setEmailDraft(nextProfile?.email || value);
       setEmailCode("");
-      setEmailCodeRequested(false);
+      setEmailVerificationSession(null);
+      lastEmailVerificationAutoSubmitRef.current = "";
       toast.success("Email подтвержден");
     } catch (error) {
       toast.error(error?.message || "Неверный код подтверждения");
@@ -824,6 +984,34 @@ export default function ProfilePage() {
       setActionLoading(false);
     }
   };
+
+  const handleResendEmailVerification = async () => {
+    if (emailVerificationSession?.resendInSeconds > 0) {
+      return;
+    }
+
+    await handleStartEmailVerification();
+  };
+
+  useEffect(() => {
+    if (!emailVerificationSession || actionLoading) {
+      return;
+    }
+
+    const normalizedCode = String(emailCode || "").trim();
+    if (normalizedCode.length !== 6) {
+      lastEmailVerificationAutoSubmitRef.current = "";
+      return;
+    }
+
+    const autoSubmitKey = `${String(emailDraft || "").trim().toLowerCase()}:${normalizedCode}`;
+    if (lastEmailVerificationAutoSubmitRef.current === autoSubmitKey) {
+      return;
+    }
+
+    lastEmailVerificationAutoSubmitRef.current = autoSubmitKey;
+    void handleConfirmEmailVerification();
+  }, [actionLoading, emailCode, emailDraft, emailVerificationSession]);
 
   const handleStartPhoneVerification = async () => {
     const value = normalizePhone(phoneDraft);
@@ -835,15 +1023,227 @@ export default function ProfilePage() {
     setActionLoading(true);
     try {
       const started = await FLOW.startPhoneVerification({ input: { value } });
-      if (!started?.state || !started?.authUrl) throw new Error("Не удалось начать подтверждение");
+      if (started?.method === "telegram_gateway") {
+        lastPhoneVerificationAutoSubmitRef.current = "";
+        setPhoneVerificationSession({
+          method: "telegram_gateway",
+          state: started.state || "",
+          maskedDestination: started.maskedDestination || "",
+          codeLength: started.codeLength || 6,
+          ttlSeconds: started.ttlSeconds || 300,
+          resendInSeconds: started.resendInSeconds || 60,
+        });
+        setPhoneVerificationCode("");
+        toast.message("Код отправлен в чат Verification Codes в Telegram.");
+        return;
+      }
 
-      setPhoneVerifyState(started.state);
+      if (!started?.state || !started?.authUrl) {
+        throw new Error("Не удалось начать подтверждение.");
+      }
+
+      lastPhoneVerificationAutoSubmitRef.current = "";
+      setPhoneVerificationSession({
+        method: "telegram_bot",
+        state: started.state,
+        authUrl: started.authUrl,
+      });
+      setPhoneVerificationCode("");
       window.open(started.authUrl, "_blank", "noopener,noreferrer");
-      toast.message("Подтвердите номер в Telegram и вернитесь на сайт");
+      toast.message("Подтвердите номер в Telegram и вернитесь на сайт.");
     } catch (error) {
-      toast.error(error?.message || "Не удалось начать подтверждение телефона");
+      toast.error(error?.message || "Не удалось начать подтверждение телефона.");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleResendPhoneVerification = async () => {
+    if (phoneVerificationSession?.method === "telegram_gateway" && phoneVerificationSession?.resendInSeconds > 0) {
+      return;
+    }
+
+    await handleStartPhoneVerification();
+  };
+
+  useEffect(() => {
+    if (phoneVerificationSession?.method !== "telegram_gateway" || actionLoading) {
+      return;
+    }
+
+    const expectedLength = Math.max(4, Math.min(phoneVerificationSession?.codeLength || 6, 8));
+    const normalizedCode = String(phoneVerificationCode || "").trim();
+    if (normalizedCode.length !== expectedLength) {
+      lastPhoneVerificationAutoSubmitRef.current = "";
+      return;
+    }
+
+    const autoSubmitKey = `${normalizePhone(phoneDraft)}:${normalizedCode}`;
+    if (lastPhoneVerificationAutoSubmitRef.current === autoSubmitKey) {
+      return;
+    }
+
+    lastPhoneVerificationAutoSubmitRef.current = autoSubmitKey;
+    void handleConfirmPhoneVerification();
+  }, [actionLoading, phoneDraft, phoneVerificationCode, phoneVerificationSession]);
+
+  const handleConfirmPhoneVerification = async () => {
+    const value = normalizePhone(phoneDraft);
+    const code = String(phoneVerificationCode || "").trim();
+    if (!value || !code) {
+      toast.error("Введите номер и код подтверждения.");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await FLOW.confirmPhoneVerification({ input: { value, code } });
+      const nextProfile = await refreshExternalIdentityState();
+      setPhoneDraft(nextProfile?.phone || value);
+      setPhoneVerificationSession(null);
+      setPhoneVerificationCode("");
+      toast.success("Телефон подтвержден");
+    } catch (error) {
+      toast.error(error?.message || "Не удалось подтвердить телефон.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    const nextPassword = String(passwordDraft || "");
+    const repeatedPassword = String(passwordConfirmDraft || "");
+
+    if (!nextPassword.trim()) {
+      toast.error("Введите новый пароль.");
+      return;
+    }
+
+    if (nextPassword !== repeatedPassword) {
+      toast.error("Пароли не совпадают.");
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await FLOW.updateProfilePassword({ input: { newPassword: nextPassword } });
+      setProfile((prev) => (
+        prev
+          ? {
+              ...prev,
+              hasPassword: true,
+            }
+          : prev
+      ));
+      setPasswordDraft("");
+      setPasswordConfirmDraft("");
+      toast.success(profile?.hasPassword ? "Пароль обновлен." : "Пароль сохранен.");
+    } catch (error) {
+      toast.error(getProfileActionErrorMessage(error, "Не удалось сохранить пароль."));
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleStartProfileDeletion = async (channel) => {
+    if (!channel || profileDeletionLoading) return;
+
+    const confirmed = await confirmAction({
+      title: "Удалить профиль?",
+      description: "Профиль будет удален.",
+      confirmText: "Продолжить",
+    });
+    if (!confirmed) return;
+
+    setProfileDeletionLoading(true);
+    try {
+      const started = await FLOW.startProfileDeletion({ input: { channel } });
+      if (started?.channel === "email") {
+        setProfileDeletionSession({
+          channel: "email",
+          method: "email",
+          maskedDestination: profile?.accountDeletion?.email || started?.maskedDestination || "",
+        });
+        setProfileDeletionCode("");
+        toast.success("Код подтверждения отправлен на email.");
+        return;
+      }
+
+      if (started?.method === "telegram_gateway") {
+        setProfileDeletionSession({
+          channel: "phone",
+          method: "telegram_gateway",
+          state: started.state || "",
+          maskedDestination: profile?.accountDeletion?.phone || started?.maskedDestination || "",
+          codeLength: started?.codeLength || 6,
+          ttlSeconds: started?.ttlSeconds || 300,
+        });
+        setProfileDeletionCode("");
+        toast.message("Код для подтверждения удаления отправлен в чат Verification Codes в Telegram.");
+        return;
+      }
+
+      if (!started?.state || !started?.authUrl) {
+        throw new Error("Не удалось начать подтверждение удаления через Telegram.");
+      }
+
+      setProfileDeletionSession({
+        channel: "phone",
+        method: "telegram_bot",
+        state: started.state,
+        authUrl: started.authUrl,
+        maskedDestination: profile?.accountDeletion?.phone || started?.maskedDestination || "",
+      });
+      setProfileDeletionCode("");
+      window.open(started.authUrl, "_blank", "noopener,noreferrer");
+      toast.message("Подтвердите удаление профиля в Telegram и вернитесь на сайт.");
+    } catch (error) {
+      toast.error(error?.message || "Не удалось начать удаление профиля.");
+    } finally {
+      setProfileDeletionLoading(false);
+    }
+  };
+
+  const handleConfirmProfileDeletionByEmail = async () => {
+    if (!profileDeletionCode.trim()) {
+      toast.error("Введите код из письма.");
+      return;
+    }
+
+    setProfileDeletionLoading(true);
+    try {
+      await FLOW.confirmProfileDeletionByEmail({ input: { code: profileDeletionCode.trim() } });
+      setProfileDeletionSession(null);
+      setProfileDeletionCode("");
+      await signOut();
+      toast.success("Профиль пользователя удален.");
+      navigate("/", { replace: true });
+    } catch (error) {
+      toast.error(error?.message || "Не удалось подтвердить удаление профиля.");
+    } finally {
+      setProfileDeletionLoading(false);
+    }
+  };
+
+  const handleConfirmProfileDeletionByPhone = async () => {
+    const code = String(profileDeletionCode || "").trim();
+    if (!code) {
+      toast.error("Введите код из Telegram.");
+      return;
+    }
+
+    setProfileDeletionLoading(true);
+    try {
+      await FLOW.confirmProfileDeletionByPhone({ input: { code } });
+      setProfileDeletionSession(null);
+      setProfileDeletionCode("");
+      await signOut();
+      toast.success("Профиль пользователя удален.");
+      navigate("/", { replace: true });
+    } catch (error) {
+      toast.error(error?.message || "Не удалось подтвердить удаление профиля.");
+    } finally {
+      setProfileDeletionLoading(false);
     }
   };
 
@@ -853,7 +1253,7 @@ export default function ProfilePage() {
     setLinkingProvider(provider);
     try {
       if (provider === "telegram") {
-        const started = await FLOW.telegramStartAuth({ input: { returnUrl: "/profile?tab=settings", intent: "link" } });
+        const started = await FLOW.telegramStartAuth({ input: { returnUrl: "/profile?tab=profile", intent: "link" } });
         if (!started?.state || !started?.authUrl) {
           throw new Error("Не удалось начать привязку Telegram");
         }
@@ -867,7 +1267,7 @@ export default function ProfilePage() {
       const started = await FLOW.externalAuthStart({
         input: {
           provider,
-          returnUrl: "/profile?tab=settings",
+          returnUrl: "/profile?tab=profile",
           intent: "link",
         },
       });
@@ -1066,7 +1466,7 @@ export default function ProfilePage() {
             <TabsList className="mb-6 h-auto w-full justify-start gap-3 overflow-x-auto border-b border-gray-200 bg-transparent p-0 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mb-8 md:gap-8">
               <TabsTrigger value="orders" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">ЗАКАЗЫ</TabsTrigger>
               <TabsTrigger value="wishlist" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">ИЗБРАННОЕ</TabsTrigger>
-              <TabsTrigger value="settings" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">НАСТРОЙКИ</TabsTrigger>
+              <TabsTrigger value="profile" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">ПРОФИЛЬ</TabsTrigger>
               {isAdmin && <TabsTrigger value="admin" className="shrink-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-black rounded-none px-0 py-2 text-xs font-bold uppercase tracking-[0.22em] text-gray-400 data-[state=active]:text-black transition-all sm:text-sm">АДМИН</TabsTrigger>}
             </TabsList>
 
@@ -1132,6 +1532,11 @@ export default function ProfilePage() {
                                 ) : null}
                               </div>
                             ) : null}
+                            {false && !(!phoneChanged && profile?.phoneVerified) && (
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerificationSession || !phoneVerificationAvailable}>
+                                {phoneVerificationMethod === "telegram_gateway" ? "Отправить код в Telegram" : "Подтвердить в Telegram"}
+                              </Button>
+                            )}
                           </div>
 
                           <div className="min-w-0">
@@ -1297,7 +1702,7 @@ export default function ProfilePage() {
               )}
             </TabsContent>
 
-            <TabsContent value="settings" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <TabsContent value="profile" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="w-full max-w-none">
                 <form onSubmit={handleUpdateProfile} className="space-y-8">
                   <div className="profile-settings-layout">
@@ -1317,15 +1722,18 @@ export default function ProfilePage() {
                           <div className="flex items-center justify-between gap-2">
                             <Label htmlFor="profile-email">Email</Label>
                             {!(!emailChanged && profile?.emailVerified) && (
-                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartEmailVerification} disabled={actionLoading}>Подтвердить email</Button>
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartEmailVerification} disabled={actionLoading}>Подтвердить</Button>
                             )}
                           </div>
                           <Input id="profile-email" name="email" type="email" autoComplete="email" value={emailDraft} onChange={(e) => {
                             setEmailDraft(e.target.value);
+                            setEmailCode("");
+                            setEmailVerificationSession(null);
+                            lastEmailVerificationAutoSubmitRef.current = "";
                             setProfile((prev) => ({ ...(prev || {}), emailVerified: false }));
                           }} className="rounded-none border-black focus-visible:ring-black" placeholder="example@mail.com" />
                           {profile?.emailVerified && !emailChanged && <p className="text-xs text-emerald-600">Email подтвержден</p>}
-                          {emailCodeRequested && (
+                          {false && emailVerificationSession && (
                             <div className="flex gap-2">
                               <Label htmlFor="profile-email-code" className="sr-only">Код подтверждения email</Label>
                               <Input id="profile-email-code" name="email_verification_code" autoComplete="one-time-code" value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="Код из письма" className="rounded-none border-black" />
@@ -1338,87 +1746,424 @@ export default function ProfilePage() {
                           <div className="flex items-center justify-between gap-2">
                             <Label htmlFor="profile-phone">Телефон</Label>
                             {!(!phoneChanged && profile?.phoneVerified) && (
-                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerifyState}>Подтвердить в Telegram</Button>
+                              <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !phoneVerificationAvailable}>Подтвердить</Button>
                             )}
                           </div>
                           <Input id="profile-phone" name="tel" type="tel" autoComplete="tel" value={phoneDraft} onChange={(e) => {
                             setPhoneDraft(e.target.value);
+                            setPhoneVerificationCode("");
+                            setPhoneVerificationSession(null);
+                            lastPhoneVerificationAutoSubmitRef.current = "";
                             setProfile((prev) => ({ ...(prev || {}), phoneVerified: false }));
                           }} className="rounded-none border-black focus-visible:ring-black" />
                           {profile?.phoneVerified && !phoneChanged && <p className="text-xs text-emerald-600">Телефон подтвержден</p>}
                           {!!phoneVerifyState && <p className="text-xs text-muted-foreground">Ожидаем подтверждение номера в Telegram…</p>}
                         </div>
 
+                        {false && !(!phoneChanged && profile?.phoneVerified) ? (
+                          <div className="space-y-2 rounded-none border border-gray-200 p-3">
+                            <Button type="button" variant="outline" className="h-10 rounded-none" onClick={handleStartPhoneVerification} disabled={actionLoading || !!phoneVerificationSession || !phoneVerificationAvailable}>
+                              {phoneVerificationMethod === "telegram_gateway" ? "Отправить код в Telegram" : "Подтвердить в Telegram"}
+                            </Button>
+                            {!phoneVerificationAvailable && profile?.phoneVerification?.unavailableReason ? (
+                              <p className="text-xs text-muted-foreground">{profile.phoneVerification.unavailableReason}</p>
+                            ) : null}
+                            {phoneVerificationSession?.method === "telegram_bot" ? (
+                              <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground">Ожидаем подтверждение номера в Telegram…</p>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-10 rounded-none"
+                                  onClick={() => {
+                                    if (phoneVerificationSession?.authUrl) {
+                                      window.open(phoneVerificationSession.authUrl, "_blank", "noopener,noreferrer");
+                                    }
+                                  }}
+                                  disabled={!phoneVerificationSession?.authUrl}
+                                >
+                                  Открыть Telegram
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-4 rounded-none border border-gray-200 p-4">
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold uppercase tracking-widest">Пароль</div>
+                            <p className="text-xs text-muted-foreground">
+                              {profile?.hasPassword ? "Пароль уже задан. Здесь можно его заменить." : "Пароль еще не задан. Здесь можно его создать."}
+                            </p>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor="profile-password">Новый пароль</Label>
+                              <Input
+                                id="profile-password"
+                                name="new_password"
+                                type="password"
+                                autoComplete="new-password"
+                                value={passwordDraft}
+                                onChange={(e) => setPasswordDraft(e.target.value)}
+                                className="rounded-none border-black focus-visible:ring-black"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="profile-password-confirm">Повторите пароль</Label>
+                              <Input
+                                id="profile-password-confirm"
+                                name="new_password_confirm"
+                                type="password"
+                                autoComplete="new-password"
+                                value={passwordConfirmDraft}
+                                onChange={(e) => setPasswordConfirmDraft(e.target.value)}
+                                className="rounded-none border-black focus-visible:ring-black"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              className="h-10 rounded-none bg-black text-white hover:bg-gray-800"
+                              onClick={handleUpdatePassword}
+                              disabled={passwordLoading}
+                            >
+                              {passwordLoading
+                                ? "Сохраняем..."
+                                : profile?.hasPassword
+                                  ? "Обновить пароль"
+                                  : "Задать пароль"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <Dialog open={!!emailVerificationSession} onOpenChange={closeEmailVerificationDialog}>
+                          <DialogContent className="max-w-[440px] overflow-hidden rounded-[28px] border border-black/10 p-0 shadow-[0_28px_90px_rgba(15,23,42,0.28)]">
+                            <div className="border-b border-border/70 bg-[#f8fafc] px-6 py-5">
+                              <DialogHeader className="space-y-4 text-center">
+                                <div className="inline-flex w-fit items-center gap-2 self-center rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-black">
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                  Email
+                                </div>
+                                <div className="space-y-2">
+                                  <DialogTitle className="text-xl font-black uppercase tracking-wide">Подтверждение email</DialogTitle>
+                                  <DialogDescription className="mt-2 text-sm leading-6 text-muted-foreground">
+                                    Код отправлен на {String(emailDraft || "").trim() || "указанный email"}.
+                                  </DialogDescription>
+                                </div>
+                              </DialogHeader>
+                            </div>
+                            <div className="space-y-5 px-6 py-6">
+                              <div className="space-y-2">
+                                <Label htmlFor="profile-email-code">Код подтверждения</Label>
+                                <Input
+                                  id="profile-email-code"
+                                  name="email_verification_code"
+                                  autoComplete="one-time-code"
+                                  inputMode="numeric"
+                                  value={emailCode}
+                                  onChange={(e) => setEmailCode(e.target.value.replace(/\D+/g, "").slice(0, 6))}
+                                  placeholder={"•".repeat(6)}
+                                  className="h-14 rounded-2xl border-black/15 text-center text-lg font-semibold tracking-[0.36em] placeholder:tracking-[0.36em] focus-visible:ring-black/20"
+                                />
+                              </div>
+                              <DialogFooter className="grid gap-3 sm:grid-cols-2 sm:space-x-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-11 min-w-0 rounded-2xl border-black/15 px-4 text-sm"
+                                  onClick={handleResendEmailVerification}
+                                  disabled={actionLoading || emailVerificationSession?.resendInSeconds > 0}
+                                >
+                                  {emailVerificationSession?.resendInSeconds > 0
+                                    ? `Повторить ${emailVerificationSession.resendInSeconds}с`
+                                    : "Повторить"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  className="h-11 min-w-0 rounded-2xl px-4 text-sm"
+                                  onClick={handleConfirmEmailVerification}
+                                  disabled={actionLoading || !emailCode.trim()}
+                                >
+                                  {actionLoading ? "Проверяем..." : "Подтвердить"}
+                                </Button>
+                              </DialogFooter>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+
+                        <Dialog open={phoneVerificationSession?.method === "telegram_gateway"} onOpenChange={closePhoneVerificationDialog}>
+                          <DialogContent className="max-w-[440px] overflow-hidden rounded-[28px] border border-black/10 p-0 shadow-[0_28px_90px_rgba(15,23,42,0.28)]">
+                            <div className="border-b border-border/70 bg-[#f8fafc] px-6 py-5">
+                              <DialogHeader className="space-y-4 text-center">
+                                <div className="inline-flex w-fit items-center gap-2 self-center rounded-full border border-[#229ED9]/20 bg-[#229ED9]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#229ED9]">
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                  Telegram Gateway
+                                </div>
+                                <div className="space-y-2">
+                                  <DialogTitle className="text-xl font-black uppercase tracking-wide">Подтверждение телефона</DialogTitle>
+                                  <DialogDescription className="mt-2 text-sm leading-6 text-muted-foreground">
+                                    Код отправлен в чат Verification Codes в Telegram{phoneVerificationSession?.maskedDestination ? ` для ${phoneVerificationSession.maskedDestination}` : ""}.
+                                  </DialogDescription>
+                                </div>
+                              </DialogHeader>
+                            </div>
+                            <div className="space-y-5 px-6 py-6">
+                              <div className="space-y-2">
+                                <Label htmlFor="profile-phone-code">Код подтверждения</Label>
+                                <Input
+                                  id="profile-phone-code"
+                                  name="phone_verification_code"
+                                  autoComplete="one-time-code"
+                                  inputMode="numeric"
+                                  value={phoneVerificationCode}
+                                  onChange={(e) =>
+                                    setPhoneVerificationCode(
+                                      e.target.value
+                                        .replace(/\D+/g, "")
+                                        .slice(0, Math.max(4, Math.min(phoneVerificationSession?.codeLength || 6, 8)))
+                                    )
+                                  }
+                                  placeholder={"•".repeat(Math.max(4, Math.min(phoneVerificationSession?.codeLength || 6, 8)))}
+                                  className="h-14 rounded-2xl border-black/15 text-center text-lg font-semibold tracking-[0.36em] placeholder:tracking-[0.36em] focus-visible:ring-black/20"
+                                />
+                              </div>
+                              <DialogFooter className="grid gap-3 sm:grid-cols-2 sm:space-x-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-11 min-w-0 rounded-2xl border-black/15 px-4 text-sm"
+                                  onClick={handleResendPhoneVerification}
+                                  disabled={actionLoading || phoneVerificationSession?.resendInSeconds > 0}
+                                >
+                                  Отправить код еще раз
+                                </Button>
+                                <Button
+                                  type="button"
+                                  className="h-11 min-w-0 rounded-2xl px-4 text-sm"
+                                  onClick={handleConfirmPhoneVerification}
+                                  disabled={actionLoading || !phoneVerificationCode.trim()}
+                                >
+                                  {actionLoading ? "Проверяем..." : "Подтвердить"}
+                                </Button>
+                              </DialogFooter>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+
                         {visibleExternalAuthMethods.length > 0 ? (
                           <div className="space-y-4 rounded-none border border-gray-200 p-4">
                             <div className="text-sm font-semibold uppercase tracking-widest">Связанные способы входа</div>
 
-                          <div className="grid gap-3 md:grid-cols-3">
-                            {visibleExternalAuthMethods.map((method) => {
-                              const connected = !!method.identity;
-                              const isLinking = linkingProvider === method.id;
-                              const isUnlinking = unlinkingProvider === method.id;
-                              const cardClassName = connected
-                                ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-emerald-200 bg-emerald-50 p-3"
-                                : method.available
-                                  ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-gray-200 bg-white p-3"
-                                  : "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-amber-200 bg-amber-50 p-3";
-                              const statusLabel = connected
-                                ? "Подключен"
-                                : method.available
-                                  ? "Не подключен"
-                                  : "Отключен";
+                            <div className="grid gap-3 md:grid-cols-3">
+                              {visibleExternalAuthMethods.map((method) => {
+                                const connected = !!method.identity;
+                                const isLinking = linkingProvider === method.id;
+                                const isUnlinking = unlinkingProvider === method.id;
+                                const cardClassName = connected
+                                  ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-emerald-200 bg-emerald-50 p-3"
+                                  : method.available
+                                    ? "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-gray-200 bg-white p-3"
+                                    : "flex h-full min-h-[220px] flex-col gap-3 rounded-none border border-amber-200 bg-amber-50 p-3";
+                                const statusLabel = connected
+                                  ? "Подключен"
+                                  : method.available
+                                    ? "Не подключен"
+                                    : "Отключен";
 
-                              return (
-                                <div key={method.id} className={cardClassName}>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="font-semibold">{method.label}</div>
-                                    <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{statusLabel}</span>
+                                return (
+                                  <div key={method.id} className={cardClassName}>
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="font-semibold">{method.label}</div>
+                                      <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{statusLabel}</span>
+                                    </div>
+
+                                    {connected ? (
+                                      <div className="flex flex-1 flex-col gap-1 text-sm text-gray-700">
+                                        {method.identity.displayName && <div>{method.identity.displayName}</div>}
+                                        {method.identity.providerUsername && <div>@{method.identity.providerUsername}</div>}
+                                        {method.identity.providerEmail && <div className="break-all">{method.identity.providerEmail}</div>}
+                                        {method.identity.lastUsedAt ? (
+                                          <div className="text-xs text-muted-foreground">
+                                            Последний вход: {formatOrderDateTime(method.identity.lastUsedAt)}
+                                          </div>
+                                        ) : (
+                                          <div className="text-xs text-muted-foreground">Аккаунт уже связан с этим профилем.</div>
+                                        )}
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="mt-auto h-10 w-full rounded-none"
+                                          onClick={() => handleUnlinkExternal(method.id)}
+                                          disabled={isUnlinking || !!linkingProvider}
+                                        >
+                                          {isUnlinking ? "Отвязываем..." : "Отвязать"}
+                                        </Button>
+                                      </div>
+                                    ) : method.available ? (
+                                      <div className="flex flex-1 flex-col gap-3">
+                                        <p className="flex-1 text-sm text-muted-foreground">
+                                          Этот способ входа доступен, но пока не привязан к вашему аккаунту.
+                                        </p>
+                                        <Button
+                                          type="button"
+                                          className="mt-auto h-10 w-full rounded-none bg-black text-white hover:bg-gray-800"
+                                          onClick={() => handleLinkExternal(method.id)}
+                                          disabled={isLinking || !!unlinkingProvider}
+                                        >
+                                          {isLinking ? "Подключаем..." : "Привязать"}
+                                        </Button>
+                                      </div>
+                                    ) : null}
                                   </div>
-
-                                  {connected ? (
-                                    <div className="flex flex-1 flex-col gap-1 text-sm text-gray-700">
-                                      {method.identity.displayName && <div>{method.identity.displayName}</div>}
-                                      {method.identity.providerUsername && <div>@{method.identity.providerUsername}</div>}
-                                      {method.identity.providerEmail && <div className="break-all">{method.identity.providerEmail}</div>}
-                                      {method.identity.lastUsedAt ? (
-                                        <div className="text-xs text-muted-foreground">
-                                          Последний вход: {formatOrderDateTime(method.identity.lastUsedAt)}
-                                        </div>
-                                      ) : (
-                                        <div className="text-xs text-muted-foreground">Аккаунт уже связан с этим профилем.</div>
-                                      )}
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="mt-auto h-10 w-full rounded-none"
-                                        onClick={() => handleUnlinkExternal(method.id)}
-                                        disabled={isUnlinking || !!linkingProvider}
-                                      >
-                                        {isUnlinking ? "Отвязываем..." : "Отвязать"}
-                                      </Button>
-                                    </div>
-                                  ) : method.available ? (
-                                    <div className="flex flex-1 flex-col gap-3">
-                                      <p className="flex-1 text-sm text-muted-foreground">
-                                        Этот способ входа доступен, но пока не привязан к вашему аккаунту.
-                                      </p>
-                                      <Button
-                                        type="button"
-                                        className="mt-auto h-10 w-full rounded-none bg-black text-white hover:bg-gray-800"
-                                        onClick={() => handleLinkExternal(method.id)}
-                                        disabled={isLinking || !!unlinkingProvider}
-                                      >
-                                        {isLinking ? "Подключаем..." : "Привязать"}
-                                      </Button>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         ) : null}
+
+                        <div className="space-y-4 rounded-none border border-red-200 bg-red-50 p-4">
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold uppercase tracking-widest text-red-900">Удаление профиля</div>
+                          </div>
+
+                          {canDeleteProfile ? (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                {availableDeletionChannels.includes("email") ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 rounded-none border-red-400 text-red-900 hover:bg-red-100 hover:text-red-900"
+                                    onClick={() => handleStartProfileDeletion("email")}
+                                    disabled={profileDeletionLoading}
+                                  >
+                                    {profileDeletionLoading && profileDeletionSession?.channel === "email"
+                                      ? "Отправляем..."
+                                      : `Подтвердить по email${profile?.accountDeletion?.email ? ` (${profile.accountDeletion.email})` : ""}`}
+                                  </Button>
+                                ) : null}
+                                {availableDeletionChannels.includes("phone") ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 rounded-none border-red-400 text-red-900 hover:bg-red-100 hover:text-red-900"
+                                    onClick={() => handleStartProfileDeletion("phone")}
+                                    disabled={profileDeletionLoading}
+                                  >
+                                    {profileDeletionLoading && profileDeletionSession?.channel === "phone"
+                                      ? "Открываем Telegram..."
+                                      : `Подтвердить в Telegram${profile?.accountDeletion?.phone ? ` (${profile.accountDeletion.phone})` : ""}`}
+                                  </Button>
+                                ) : null}
+                              </div>
+
+                              {profileDeletionSession?.channel === "email" ? (
+                                <div className="space-y-3 border border-red-200 bg-white/80 p-4">
+                                  <p className="text-sm text-red-900">
+                                    Код подтверждения отправлен на {profileDeletionSession.maskedDestination || profile?.accountDeletion?.email || "подтвержденный email"}.
+                                  </p>
+                                  <div className="flex flex-col gap-2 sm:flex-row">
+                                    <Input
+                                      value={profileDeletionCode}
+                                      onChange={(event) => setProfileDeletionCode(event.target.value)}
+                                      placeholder="Код из письма"
+                                      autoComplete="one-time-code"
+                                      className="rounded-none border-red-300 focus-visible:ring-red-400"
+                                    />
+                                    <Button
+                                      type="button"
+                                      className="h-10 rounded-none bg-red-700 text-white hover:bg-red-800"
+                                      onClick={handleConfirmProfileDeletionByEmail}
+                                      disabled={profileDeletionLoading}
+                                    >
+                                      {profileDeletionLoading ? "Удаляем..." : "Удалить профиль"}
+                                    </Button>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 rounded-none border-red-300 text-red-900 hover:bg-red-100 hover:text-red-900"
+                                    onClick={() => handleStartProfileDeletion("email")}
+                                    disabled={profileDeletionLoading}
+                                  >
+                                    Отправить код еще раз
+                                  </Button>
+                                </div>
+                              ) : null}
+
+                              {profileDeletionSession?.channel === "phone" && profileDeletionSession?.method === "telegram_gateway" ? (
+                                <div className="space-y-3 border border-red-200 bg-white/80 p-4">
+                                  <p className="text-sm text-red-900">
+                                    Код для подтверждения удаления отправлен в чат Verification Codes в Telegram{profileDeletionSession.maskedDestination ? ` для ${profileDeletionSession.maskedDestination}` : ""}.
+                                  </p>
+                                  <div className="flex flex-col gap-2 sm:flex-row">
+                                    <Input
+                                      value={profileDeletionCode}
+                                      onChange={(event) => setProfileDeletionCode(event.target.value)}
+                                      placeholder="Код из Telegram"
+                                      autoComplete="one-time-code"
+                                      className="rounded-none border-red-300 focus-visible:ring-red-400"
+                                    />
+                                    <Button
+                                      type="button"
+                                      className="h-10 rounded-none bg-red-700 text-white hover:bg-red-800"
+                                      onClick={handleConfirmProfileDeletionByPhone}
+                                      disabled={profileDeletionLoading}
+                                    >
+                                      {profileDeletionLoading ? "Удаляем..." : "Удалить профиль"}
+                                    </Button>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 rounded-none border-red-300 text-red-900 hover:bg-red-100 hover:text-red-900"
+                                    onClick={() => handleStartProfileDeletion("phone")}
+                                    disabled={profileDeletionLoading}
+                                  >
+                                    Отправить код еще раз
+                                  </Button>
+                                </div>
+                              ) : null}
+
+                              {profileDeletionSession?.channel === "phone" && profileDeletionSession?.method !== "telegram_gateway" ? (
+                                <div className="space-y-3 border border-red-200 bg-white/80 p-4">
+                                  <p className="text-sm text-red-900">
+                                    Подтвердите удаление в Telegram{profileDeletionSession.maskedDestination ? ` для ${profileDeletionSession.maskedDestination}` : ""}. После подтверждения выйдем из аккаунта автоматически.
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      type="button"
+                                      className="h-10 rounded-none bg-red-700 text-white hover:bg-red-800"
+                                      onClick={() => {
+                                        if (profileDeletionSession?.authUrl) {
+                                          window.open(profileDeletionSession.authUrl, "_blank", "noopener,noreferrer");
+                                        }
+                                      }}
+                                      disabled={!profileDeletionSession?.authUrl}
+                                    >
+                                      Открыть Telegram
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="h-10 rounded-none border-red-300 text-red-900 hover:bg-red-100 hover:text-red-900"
+                                      onClick={() => handleStartProfileDeletion("phone")}
+                                      disabled={profileDeletionLoading}
+                                    >
+                                      Отправить ссылку еще раз
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <p className="text-sm leading-6 text-red-900/80">
+                              {profile?.accountDeletion?.unavailableReason || "Для удаления нужен подтвержденный email или телефон."}
+                            </p>
+                          )}
+                        </div>
 
                         <div className="flex flex-col gap-3 pt-2 md:flex-row">
                           <Button type="submit" className="bg-black text-white hover:bg-gray-800 rounded-none font-bold uppercase tracking-widest px-8 py-6 md:flex-1">СОХРАНИТЬ ИЗМЕНЕНИЯ</Button>
@@ -1506,3 +2251,4 @@ export default function ProfilePage() {
     </Authenticated>
   );
 }
+

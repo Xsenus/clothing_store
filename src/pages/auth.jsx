@@ -4,14 +4,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth, useAuthActions } from "@/context/AuthContext";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { ShieldCheck } from "lucide-react";
 import { FLOW } from "@/lib/api-mapping";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import PageSeo from "@/components/PageSeo";
+import { cn } from "@/lib/utils";
 
 
 function AuthMiniFooter() {
@@ -95,6 +98,73 @@ function TelegramBrandIcon() {
   );
 }
 
+const normalizeTelegramBotUsername = (value) =>
+  String(value || "").trim().replace(/^@+/, "");
+
+const PHONE_MODAL_INITIAL_STATE = {
+  open: false,
+  phone: "",
+  maskedDestination: "",
+  code: "",
+  codeLength: 6,
+  ttlSeconds: 300,
+  resendInSeconds: 0,
+};
+
+const PHONE_MASK_PLACEHOLDER = "+7 (999) 123-45-67";
+
+const getPhoneDigits = (value) => {
+  let digits = String(value || "").replace(/\D+/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  if (digits[0] === "8") {
+    digits = `7${digits.slice(1)}`;
+  } else if (digits[0] !== "7") {
+    digits = `7${digits}`;
+  }
+
+  return digits.slice(0, 11);
+};
+
+const formatPhoneInput = (value) => {
+  const digits = getPhoneDigits(value);
+  if (!digits) {
+    return "";
+  }
+
+  let result = "+7";
+  if (digits.length > 1) result += ` (${digits.slice(1, 4)}`;
+  if (digits.length >= 4) result += ")";
+  if (digits.length > 4) result += ` ${digits.slice(4, 7)}`;
+  if (digits.length > 7) result += `-${digits.slice(7, 9)}`;
+  if (digits.length > 9) result += `-${digits.slice(9, 11)}`;
+  return result;
+};
+
+const normalizePhoneInput = (value) => {
+  const digits = getPhoneDigits(value);
+  return digits ? `+${digits}` : "";
+};
+
+const getSignInIdentifierMode = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "idle";
+  }
+
+  if (trimmed.includes("@")) {
+    return "email";
+  }
+
+  if (/^[0-9+\s()\-]+$/.test(trimmed) && /\d/.test(trimmed)) {
+    return "phone";
+  }
+
+  return "idle";
+};
+
 export default function AuthPage() {
   const { signIn } = useAuthActions();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -113,6 +183,7 @@ export default function AuthPage() {
 
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
+  const [phoneLoginDialog, setPhoneLoginDialog] = useState(PHONE_MODAL_INITIAL_STATE);
 
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
@@ -124,12 +195,26 @@ export default function AuthPage() {
   const [vkEnabled, setVkEnabled] = useState(false);
   const [yandexEnabled, setYandexEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
+  const [telegramWidgetStatus, setTelegramWidgetStatus] = useState("idle");
   const [telegramAuthState, setTelegramAuthState] = useState("");
   const [telegramAuthExpiresAt, setTelegramAuthExpiresAt] = useState(0);
   const [externalAuthSession, setExternalAuthSession] = useState(null);
   const telegramWidgetRef = useRef(null);
   const authPopupRef = useRef(null);
+  const lastPhoneAutoSubmitRef = useRef("");
+  const signInIdentifierMode = getSignInIdentifierMode(signInEmail);
+  const signInWithPhone = signInIdentifierMode === "phone";
+  const signInPhoneReady = getPhoneDigits(signInEmail).length === 11;
+  const signInFieldPlaceholder = signInWithPhone ? PHONE_MASK_PLACEHOLDER : "name@example.com";
+  const signInSubmitLabel = signInWithPhone ? "Получить код" : "Войти";
+  const signInSubmitLoadingLabel = signInWithPhone ? "Отправляем код..." : "Вход...";
   const authSeoTitle = pendingEmail ? "Подтверждение email" : "Вход и регистрация";
+
+  const handleSignInIdentifierChange = (event) => {
+    const nextValue = event.target.value;
+    const mode = getSignInIdentifierMode(nextValue);
+    setSignInEmail(mode === "phone" ? formatPhoneInput(nextValue) : nextValue);
+  };
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -139,14 +224,19 @@ export default function AuthPage() {
 
   useEffect(() => {
     const loadAuthProviders = async () => {
-      const settings = await fetchPublicSettings();
+      const settings = await fetchPublicSettings({ force: true });
       const isEnabled = (value) => ["true", "1", "on", "yes"].includes(String(value || "").toLowerCase());
-      setTelegramEnabled(isEnabled(settings?.telegram_login_enabled));
-      setTelegramWidgetEnabled(isEnabled(settings?.telegram_widget_enabled));
+      const nextTelegramEnabled = isEnabled(settings?.telegram_login_enabled);
+      const nextTelegramWidgetEnabled = isEnabled(settings?.telegram_widget_enabled);
+      const nextTelegramBotUsername = normalizeTelegramBotUsername(settings?.telegram_bot_username || "");
+
+      setTelegramEnabled(nextTelegramEnabled);
+      setTelegramWidgetEnabled(nextTelegramWidgetEnabled);
       setGoogleEnabled(isEnabled(settings?.google_login_enabled));
       setVkEnabled(isEnabled(settings?.vk_login_enabled));
       setYandexEnabled(isEnabled(settings?.yandex_login_enabled));
-      setTelegramBotUsername(settings?.telegram_bot_username || "");
+      setTelegramBotUsername(nextTelegramBotUsername);
+      setTelegramWidgetStatus(nextTelegramWidgetEnabled && nextTelegramBotUsername ? "loading" : "idle");
     };
     loadAuthProviders();
   }, []);
@@ -257,10 +347,40 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!telegramWidgetEnabled || !telegramBotUsername || !telegramWidgetRef.current) {
+      setTelegramWidgetStatus("idle");
       return undefined;
     }
 
     const callbackName = "__fashionDemonTelegramAuth";
+    const container = telegramWidgetRef.current;
+    let cancelled = false;
+    let readinessTimer = 0;
+
+    const resolveWidgetState = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const normalizedText = String(container.textContent || "").trim().toLowerCase();
+      const hasKnownError = [
+        "bot domain invalid",
+        "bot username invalid",
+        "domain invalid",
+        "username invalid",
+      ].some((pattern) => normalizedText.includes(pattern));
+
+      if (hasKnownError) {
+        setTelegramWidgetStatus("unavailable");
+        container.innerHTML = "";
+        return;
+      }
+
+      if (container.querySelector("iframe")) {
+        setTelegramWidgetStatus("ready");
+      }
+    };
+
+    setTelegramWidgetStatus("loading");
     window[callbackName] = async (payload) => {
       setLoading(true);
       try {
@@ -280,8 +400,10 @@ export default function AuthPage() {
       }
     };
 
-    const container = telegramWidgetRef.current;
     container.innerHTML = "";
+    const observer = new MutationObserver(() => resolveWidgetState());
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
     script.async = true;
@@ -291,9 +413,32 @@ export default function AuthPage() {
     script.setAttribute("data-radius", "10");
     script.setAttribute("data-request-access", "write");
     script.setAttribute("data-onauth", `${callbackName}(user)`);
+    script.onload = () => {
+      readinessTimer = window.setTimeout(() => {
+        resolveWidgetState();
+
+        if (!cancelled && !container.querySelector("iframe")) {
+          setTelegramWidgetStatus("unavailable");
+          container.innerHTML = "";
+        }
+      }, 2500);
+    };
+    script.onerror = () => {
+      if (cancelled) {
+        return;
+      }
+
+      setTelegramWidgetStatus("unavailable");
+      container.innerHTML = "";
+    };
     container.appendChild(script);
 
     return () => {
+      cancelled = true;
+      if (readinessTimer) {
+        window.clearTimeout(readinessTimer);
+      }
+      observer.disconnect();
       delete window[callbackName];
       if (container) {
         container.innerHTML = "";
@@ -360,6 +505,15 @@ export default function AuthPage() {
     if (normalized.includes("password is too weak")) {
       return "Пароль слишком простой";
     }
+    if (normalized.includes("phone number invalid")) {
+      return "Введите корректный номер телефона";
+    }
+    if (normalized.includes("verification request not found")) {
+      return "Запрос подтверждения не найден";
+    }
+    if (normalized.includes("internal server error") || normalized.includes("request failed: 500")) {
+      return "Внутренняя ошибка сервера. Попробуйте еще раз.";
+    }
     return rawMessage;
   };
 
@@ -396,10 +550,149 @@ export default function AuthPage() {
     return () => clearInterval(interval);
   }, [pendingEmail, timer]);
 
+  useEffect(() => {
+    if (!phoneLoginDialog.open || phoneLoginDialog.resendInSeconds <= 0) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => {
+      setPhoneLoginDialog((prev) => {
+        if (!prev.open || prev.resendInSeconds <= 1) {
+          return { ...prev, resendInSeconds: 0 };
+        }
+
+        return { ...prev, resendInSeconds: prev.resendInSeconds - 1 };
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [phoneLoginDialog.open, phoneLoginDialog.resendInSeconds]);
+
+  const openPhoneLoginDialog = (started, phone) => {
+    lastPhoneAutoSubmitRef.current = "";
+    setPhoneLoginDialog({
+      open: true,
+      phone,
+      maskedDestination: String(started?.maskedDestination || phone),
+      code: "",
+      codeLength: Number(started?.codeLength || 6),
+      ttlSeconds: Number(started?.ttlSeconds || 300),
+      resendInSeconds: Number(started?.resendInSeconds || 60),
+    });
+  };
+
+  const closePhoneLoginDialog = (open) => {
+    if (open) {
+      return;
+    }
+
+    lastPhoneAutoSubmitRef.current = "";
+    setPhoneLoginDialog(PHONE_MODAL_INITIAL_STATE);
+  };
+
+  const startPhoneLogin = async (phone) => {
+    const started = await FLOW.startPhoneSignIn({ input: { phone } });
+    openPhoneLoginDialog(started, phone);
+    return started;
+  };
+
+  const submitPhoneLoginCode = async () => {
+    if (!phoneLoginDialog.phone || !phoneLoginDialog.code) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await FLOW.confirmPhoneSignIn({
+        input: {
+          phone: phoneLoginDialog.phone,
+          code: phoneLoginDialog.code,
+        },
+      });
+
+      const formData = new FormData();
+      formData.append("flow", "session");
+      formData.append("token", result?.token || "");
+      formData.append("refreshToken", result?.refreshToken || "");
+      formData.append("user", JSON.stringify(result?.user || null));
+      await signIn("phone", formData);
+
+      setPhoneLoginDialog(PHONE_MODAL_INITIAL_STATE);
+      setSignInPassword("");
+      toast.success(result?.created ? "Аккаунт создан, вход выполнен" : "Вход выполнен");
+      navigate("/");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось подтвердить код"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePhoneLoginConfirm = async (e) => {
+    e.preventDefault();
+    await submitPhoneLoginCode();
+  };
+
+  const handlePhoneLoginResend = async () => {
+    if (!phoneLoginDialog.phone || phoneLoginDialog.resendInSeconds > 0) {
+      return;
+    }
+
+    lastPhoneAutoSubmitRef.current = "";
+    setLoading(true);
+    try {
+      await startPhoneLogin(phoneLoginDialog.phone);
+      toast.success("Код отправлен повторно");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось отправить код"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!phoneLoginDialog.open || loading) {
+      return;
+    }
+
+    const expectedLength = Math.max(4, Math.min(phoneLoginDialog.codeLength || 6, 8));
+    const normalizedCode = String(phoneLoginDialog.code || "").trim();
+    if (normalizedCode.length !== expectedLength) {
+      lastPhoneAutoSubmitRef.current = "";
+      return;
+    }
+
+    const autoSubmitKey = `${phoneLoginDialog.phone}:${normalizedCode}`;
+    if (lastPhoneAutoSubmitRef.current === autoSubmitKey) {
+      return;
+    }
+
+    lastPhoneAutoSubmitRef.current = autoSubmitKey;
+    void submitPhoneLoginCode();
+  }, [
+    loading,
+    phoneLoginDialog.code,
+    phoneLoginDialog.codeLength,
+    phoneLoginDialog.open,
+    phoneLoginDialog.phone,
+  ]);
+
   const handleSignIn = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
+      if (signInWithPhone) {
+        if (!signInPhoneReady) {
+          toast.error("Введите номер телефона полностью.");
+          return;
+        }
+
+        const normalizedPhone = normalizePhoneInput(signInEmail);
+        await startPhoneLogin(normalizedPhone);
+        toast.message("Код отправлен в чат Verification Codes в Telegram.");
+        return;
+      }
+
       const formData = new FormData();
       formData.append("email", signInEmail);
       formData.append("password", signInPassword);
@@ -506,13 +799,48 @@ export default function AuthPage() {
     }
   };
 
-  const hasOAuthQuickAuth = googleEnabled || vkEnabled || yandexEnabled;
-  const hasTelegramBotQuickAuth = telegramEnabled && telegramBotUsername;
-  const hasTelegramWidgetQuickAuth = telegramWidgetEnabled && telegramBotUsername;
-  const hasQuickAuthSection = hasOAuthQuickAuth || hasTelegramBotQuickAuth || hasTelegramWidgetQuickAuth;
-  const oauthProviderCount = [googleEnabled, vkEnabled, yandexEnabled].filter(Boolean).length;
-  const oauthGridClassName =
-    oauthProviderCount >= 3 ? "grid-cols-3" : oauthProviderCount === 2 ? "grid-cols-2" : "grid-cols-1";
+  const quickAuthProviders = [];
+  if (googleEnabled) {
+    quickAuthProviders.push({
+      id: "google",
+      label: "Продолжить через Google",
+      active: externalAuthSession?.provider === "google",
+      onClick: () => handleExternalSignIn("google"),
+      icon: <GoogleBrandIcon />,
+    });
+  }
+  if (vkEnabled) {
+    quickAuthProviders.push({
+      id: "vk",
+      label: "Продолжить через VK",
+      active: externalAuthSession?.provider === "vk",
+      onClick: () => handleExternalSignIn("vk"),
+      icon: <VkBrandIcon />,
+    });
+  }
+  if (yandexEnabled) {
+    quickAuthProviders.push({
+      id: "yandex",
+      label: "Продолжить через Яндекс",
+      active: externalAuthSession?.provider === "yandex",
+      onClick: () => handleExternalSignIn("yandex"),
+      icon: <YandexBrandIcon />,
+    });
+  }
+  if (telegramEnabled && telegramBotUsername) {
+    quickAuthProviders.push({
+      id: "telegram",
+      label: "Войти через Telegram",
+      active: Boolean(telegramAuthState),
+      onClick: handleTelegramSignIn,
+      icon: <TelegramBrandIcon />,
+    });
+  }
+
+  const quickAuthGridColumns = Math.max(1, Math.min(quickAuthProviders.length, 4));
+  const shouldAttemptTelegramWidget = telegramWidgetEnabled && telegramBotUsername;
+  const hasQuickAuthSection = quickAuthProviders.length > 0
+    || (shouldAttemptTelegramWidget && telegramWidgetStatus !== "unavailable");
 
   if (showReset) {
     return (
@@ -697,44 +1025,54 @@ export default function AuthPage() {
                 <TabsContent value="signin" className="mt-0">
                   <form onSubmit={handleSignIn} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="signin-email">Email</Label>
+                      <Label htmlFor="signin-email">Email или телефон</Label>
                       <Input
                         id="signin-email"
                         name="email"
-                        type="email"
-                        autoComplete="email"
-                        placeholder="example@mail.com"
+                        type="text"
+                        autoComplete="username"
+                        inputMode={signInWithPhone ? "tel" : "email"}
+                        placeholder={signInFieldPlaceholder}
                         value={signInEmail}
-                        onChange={(e) => setSignInEmail(e.target.value)}
+                        onChange={handleSignInIdentifierChange}
                         required
-                        className="h-9"
+                        className={cn(
+                          "h-9",
+                          signInWithPhone && "text-center font-medium tracking-[0.14em] placeholder:tracking-normal sm:text-[15px]"
+                        )}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label htmlFor="signin-password">Пароль</Label>
-                        <Button
-                          variant="link"
-                          className="px-0 h-auto text-xs"
-                          type="button"
-                          onClick={() => setShowReset(true)}
-                        >
-                          Забыли пароль?
-                        </Button>
+                    {!signInWithPhone && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <Label htmlFor="signin-password">Пароль</Label>
+                          <Button
+                            variant="link"
+                            className="px-0 h-auto text-xs"
+                            type="button"
+                            onClick={() => setShowReset(true)}
+                          >
+                            Забыли пароль?
+                          </Button>
+                        </div>
+                        <Input
+                          id="signin-password"
+                          name="password"
+                          type="password"
+                          autoComplete="current-password"
+                          value={signInPassword}
+                          onChange={(e) => setSignInPassword(e.target.value)}
+                          required={!signInWithPhone}
+                          className="h-9"
+                        />
                       </div>
-                      <Input
-                        id="signin-password"
-                        name="password"
-                        type="password"
-                        autoComplete="current-password"
-                        value={signInPassword}
-                        onChange={(e) => setSignInPassword(e.target.value)}
-                        required
-                        className="h-9"
-                      />
-                    </div>
-                    <Button type="submit" className="w-full h-9" disabled={loading}>
-                      {loading ? "Вход..." : "Войти"}
+                    )}
+                    <Button
+                      type="submit"
+                      className="w-full h-9"
+                      disabled={loading || (signInWithPhone && !signInPhoneReady)}
+                    >
+                      {loading ? signInSubmitLoadingLabel : signInSubmitLabel}
                     </Button>
                   </form>
                 </TabsContent>
@@ -783,9 +1121,24 @@ export default function AuthPage() {
                       <div className="h-px flex-1 bg-border" />
                     </div>
 
-                    {hasOAuthQuickAuth && (
-                      <div className={`grid gap-3 ${oauthGridClassName}`}>
-                        {googleEnabled && (
+                    {quickAuthProviders.length > 0 && (
+                      <div
+                        className="grid gap-3"
+                        style={{ gridTemplateColumns: `repeat(${quickAuthGridColumns}, minmax(0, 1fr))` }}
+                      >
+                        {quickAuthProviders.map((provider) => (
+                          <QuickAuthTile
+                            key={provider.id}
+                            label={provider.label}
+                            title={provider.label}
+                            active={provider.active}
+                            disabled={loading}
+                            onClick={provider.onClick}
+                          >
+                            {provider.icon}
+                          </QuickAuthTile>
+                        ))}
+                        {false && (
                           <QuickAuthTile
                             label="Продолжить через Google"
                             active={externalAuthSession?.provider === "google"}
@@ -795,7 +1148,7 @@ export default function AuthPage() {
                             <GoogleBrandIcon />
                           </QuickAuthTile>
                         )}
-                        {vkEnabled && (
+                        {false && (
                           <QuickAuthTile
                             label="Продолжить через VK"
                             active={externalAuthSession?.provider === "vk"}
@@ -805,7 +1158,7 @@ export default function AuthPage() {
                             <VkBrandIcon />
                           </QuickAuthTile>
                         )}
-                        {yandexEnabled && (
+                        {false && (
                           <QuickAuthTile
                             label="Продолжить через Яндекс"
                             active={externalAuthSession?.provider === "yandex"}
@@ -818,7 +1171,18 @@ export default function AuthPage() {
                       </div>
                     )}
 
-                    {hasTelegramBotQuickAuth && (
+                    {shouldAttemptTelegramWidget && (
+                      <div
+                        className={telegramWidgetStatus === "ready"
+                          ? "rounded-2xl border border-dashed border-border/70 px-3 py-3"
+                          : "hidden"}
+                        aria-hidden={telegramWidgetStatus !== "ready"}
+                      >
+                        <div ref={telegramWidgetRef} className="flex min-h-[50px] justify-center" />
+                      </div>
+                    )}
+
+                    {false && (
                       <QuickAuthTile
                         label="Войти через Telegram"
                         title="Войти через Telegram"
@@ -830,7 +1194,7 @@ export default function AuthPage() {
                       </QuickAuthTile>
                     )}
 
-                    {hasTelegramWidgetQuickAuth && (
+                    {false && (
                       <div className="rounded-2xl border border-dashed border-border/70 px-3 py-3">
                         <p className="mb-3 text-center text-xs text-muted-foreground">
                           Мгновенный вход через Telegram widget
@@ -855,6 +1219,69 @@ export default function AuthPage() {
                     )}
                   </div>
                 )}
+                <Dialog open={phoneLoginDialog.open} onOpenChange={closePhoneLoginDialog}>
+                  <DialogContent className="max-w-[440px] overflow-hidden rounded-[28px] border border-black/10 p-0 shadow-[0_28px_90px_rgba(15,23,42,0.28)]">
+                    <div className="border-b border-border/70 bg-[#f8fafc] px-6 py-5">
+                      <DialogHeader className="space-y-4 text-center">
+                        <div className="inline-flex w-fit items-center gap-2 self-center rounded-full border border-[#229ED9]/20 bg-[#229ED9]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#229ED9]">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          Telegram Gateway
+                        </div>
+                        <div className="space-y-2">
+                          <DialogTitle className="text-xl font-black uppercase tracking-wide">Подтверждение входа</DialogTitle>
+                          <DialogDescription className="mt-2 text-sm leading-6 text-muted-foreground">
+                            {phoneLoginDialog.maskedDestination
+                              ? `Код отправлен в чат Verification Codes в Telegram для ${phoneLoginDialog.maskedDestination}.`
+                              : "Введите код из Telegram, чтобы продолжить вход."}
+                          </DialogDescription>
+                        </div>
+                      </DialogHeader>
+                    </div>
+                    <form onSubmit={handlePhoneLoginConfirm} className="space-y-5 px-6 py-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="phone-login-code">Код подтверждения</Label>
+                        <Input
+                          id="phone-login-code"
+                          name="phone_login_code"
+                          autoComplete="one-time-code"
+                          inputMode="numeric"
+                          placeholder={"•".repeat(Math.max(4, Math.min(phoneLoginDialog.codeLength || 6, 8)))}
+                          value={phoneLoginDialog.code}
+                          onChange={(e) =>
+                            setPhoneLoginDialog((prev) => ({
+                              ...prev,
+                              code: e.target.value
+                                .replace(/\D+/g, "")
+                                .slice(0, Math.max(4, Math.min(prev.codeLength || 6, 8))),
+                            }))
+                          }
+                          required
+                          className="h-14 rounded-2xl border-black/15 text-center text-lg font-semibold tracking-[0.36em] placeholder:tracking-[0.36em] focus-visible:ring-black/20"
+                        />
+                      </div>
+                      <DialogFooter className="grid gap-3 sm:grid-cols-2 sm:space-x-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 min-w-0 rounded-2xl border-black/15 px-4 text-sm"
+                          onClick={handlePhoneLoginResend}
+                          disabled={loading || phoneLoginDialog.resendInSeconds > 0}
+                        >
+                          {phoneLoginDialog.resendInSeconds > 0
+                            ? `Повторить ${phoneLoginDialog.resendInSeconds}с`
+                            : "Повторить"}
+                        </Button>
+                        <Button
+                          type="submit"
+                          className="h-11 min-w-0 rounded-2xl px-4 text-sm"
+                          disabled={loading || !phoneLoginDialog.code.trim()}
+                        >
+                          {loading ? "Проверяем..." : "Подтвердить"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
               </>
             )}
           </CardContent>
