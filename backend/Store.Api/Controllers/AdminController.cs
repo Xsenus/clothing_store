@@ -1768,7 +1768,7 @@ public class AdminController : ControllerBase
     {
         if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
 
-        var result = await _emailService.SendTestEmailAsync(payload);
+        var result = await _emailService.SendTestEmailAsync(payload, HttpContext.RequestAborted);
         if (!result.Success)
             return Results.BadRequest(new { detail = result.Detail });
 

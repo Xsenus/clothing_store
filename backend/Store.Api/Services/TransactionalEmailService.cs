@@ -563,6 +563,7 @@ public class TransactionalEmailService
             };
 
             using var mailClient = new MailKitSmtpClient();
+            mailClient.Timeout = 15_000;
             await mailClient.ConnectAsync(smtp.Host, smtp.Port, MapSecureSocketOptions(smtp.SecurityMode), cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(smtp.Username))
@@ -805,6 +806,15 @@ public class TransactionalEmailService
     {
         var baseMessage = exception.Message?.Trim();
         var selectedMode = DescribeSecurityMode(smtp.SecurityMode);
+
+        if (exception is TimeoutException
+            or OperationCanceledException
+            || (!string.IsNullOrWhiteSpace(baseMessage)
+                && baseMessage.Contains("timed out", StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"SMTP-сервер {smtp.Host}:{smtp.Port} не ответил вовремя. " +
+                   $"Проверьте, не блокирует ли текущая сеть, VPN, хостинг или фаервол исходящие SMTP-подключения.";
+        }
 
         if (exception is MailKit.Net.Smtp.SmtpCommandException
             or MailKit.ProtocolException
