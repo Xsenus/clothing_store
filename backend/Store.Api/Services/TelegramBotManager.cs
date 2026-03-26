@@ -3,7 +3,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 using Store.Api.Contracts;
 using Store.Api.Data;
@@ -49,6 +51,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private readonly IServiceProvider _serviceProvider;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<TelegramBotManager> _logger;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _botWorkers = new();
 
@@ -65,10 +69,17 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         public static BotSyncChanges All() => new(true, true, true, true, true, true, true, true);
     }
 
-    public TelegramBotManager(IServiceProvider serviceProvider, IHttpClientFactory httpClientFactory, ILogger<TelegramBotManager> logger)
+    public TelegramBotManager(
+        IServiceProvider serviceProvider,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        IHttpContextAccessor httpContextAccessor,
+        ILogger<TelegramBotManager> logger)
     {
         _serviceProvider = serviceProvider;
         _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -100,7 +111,19 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             throw new InvalidOperationException("Telegram bot token is required");
 
         var me = await FetchMeInfoAsync(normalizedToken, CancellationToken.None);
-        return JsonSerializer.Deserialize<object>(me.RawResult.GetRawText()) ?? new { };
+        var remoteName = await TryGetTelegramNameAsync(normalizedToken, CancellationToken.None);
+        var remoteDescription = await TryGetTelegramDescriptionAsync(normalizedToken, CancellationToken.None);
+        var remoteShortDescription = await TryGetTelegramShortDescriptionAsync(normalizedToken, CancellationToken.None);
+        var remoteCommands = await TryGetTelegramCommandsAsync(normalizedToken, CancellationToken.None);
+        var webhookInfo = await TryGetTelegramWebhookInfoAsync(normalizedToken, CancellationToken.None);
+
+        return CreateTelegramValidationInfo(
+            me,
+            remoteName,
+            remoteDescription,
+            remoteShortDescription,
+            remoteCommands,
+            webhookInfo);
     }
 
     public async Task SyncNowAsync() => await SyncWorkersAsync(CancellationToken.None);
@@ -301,6 +324,18 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         ValidateBotConfiguration(bot.Name, bot.Description, bot.ShortDescription, DeserializeCommands(bot.CommandsJson), DeserializeReplyTemplates(bot.ReplyTemplatesJson));
         await HydrateFromTelegramAsync(bot, CancellationToken.None);
+        if (bot.Enabled)
+        {
+            if (string.Equals(bot.UpdateMode, TelegramBot.UpdateModeWebhook, StringComparison.Ordinal))
+            {
+                bot.WebhookSecret = EnsureWebhookSecret(bot.WebhookSecret);
+                await SetWebhookAsync(bot, CancellationToken.None);
+            }
+            else
+            {
+                await DeleteWebhookAsync(bot.Token, CancellationToken.None);
+            }
+        }
         bot.LastCheckedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         bot.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await db.SaveChangesAsync();
@@ -919,24 +954,30 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
     private async Task HydrateFromTelegramAsync(TelegramBot bot, CancellationToken cancellationToken)
     {
         var meInfo = await FetchMeInfoAsync(bot.Token, cancellationToken);
-        bot.Username = meInfo.Username ?? bot.Username;
-        bot.LastBotInfoJson = JsonSerializer.Serialize(meInfo.RawResult);
-
         var remoteName = await TryGetTelegramNameAsync(bot.Token, cancellationToken);
+        var remoteDescription = await TryGetTelegramDescriptionAsync(bot.Token, cancellationToken);
+        var remoteShortDescription = await TryGetTelegramShortDescriptionAsync(bot.Token, cancellationToken);
+        var remoteCommands = await TryGetTelegramCommandsAsync(bot.Token, cancellationToken);
+        var webhookInfo = await TryGetTelegramWebhookInfoAsync(bot.Token, cancellationToken);
+
+        bot.Username = meInfo.Username ?? bot.Username;
+        bot.LastBotInfoJson = JsonSerializer.Serialize(
+            CreateTelegramValidationInfo(
+                meInfo,
+                remoteName,
+                remoteDescription,
+                remoteShortDescription,
+                remoteCommands,
+                webhookInfo));
+
         if (!string.IsNullOrWhiteSpace(remoteName))
             bot.Name = NormalizeRequiredName(remoteName);
-
-        var remoteDescription = await TryGetTelegramDescriptionAsync(bot.Token, cancellationToken);
         if (remoteDescription is not null)
             bot.Description = NormalizeDescription(remoteDescription);
-
-        var remoteShortDescription = await TryGetTelegramShortDescriptionAsync(bot.Token, cancellationToken);
         if (remoteShortDescription is not null)
             bot.ShortDescription = NormalizeShortDescription(remoteShortDescription);
 
-        var remoteCommands = await TryGetTelegramCommandsAsync(bot.Token, cancellationToken);
-        if (remoteCommands.Count > 0)
-            bot.CommandsJson = SerializeCommands(remoteCommands);
+        bot.CommandsJson = SerializeCommands(remoteCommands);
     }
 
     private async Task ApplyBotMetadataAsync(TelegramBot bot, BotSyncChanges changes, CancellationToken cancellationToken)
@@ -945,7 +986,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         var meInfo = await FetchMeInfoAsync(bot.Token, cancellationToken);
         bot.Username = meInfo.Username ?? bot.Username;
-        bot.LastBotInfoJson = JsonSerializer.Serialize(meInfo.RawResult);
+        object? webhookInfo = null;
 
         var commands = DeserializeCommands(bot.CommandsJson);
         if (changes.CommandsChanged || changes.TokenChanged)
@@ -993,9 +1034,19 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             }
         }
 
+        webhookInfo = await TryGetTelegramWebhookInfoAsync(bot.Token, cancellationToken);
+
         if (!string.IsNullOrWhiteSpace(bot.ImageUrl) && (changes.ImageChanged || changes.TokenChanged))
             await UpdateBotProfilePhotoAsync(bot, cancellationToken);
 
+        bot.LastBotInfoJson = JsonSerializer.Serialize(
+            CreateTelegramValidationInfo(
+                meInfo,
+                bot.Name,
+                bot.Description,
+                bot.ShortDescription,
+                commands,
+                webhookInfo));
         bot.LastCheckedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         bot.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
@@ -1078,11 +1129,9 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private async Task SetWebhookAsync(TelegramBot bot, CancellationToken cancellationToken)
     {
-        var baseUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
-            ?? "http://0.0.0.0:3001";
-
+        var baseUrl = ResolveExternalApiBaseUrl();
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsedBaseUrl))
-            throw new InvalidOperationException("Unable to resolve webhook base URL from ASPNETCORE_URLS");
+            throw new InvalidOperationException("Unable to resolve webhook base URL");
 
         if (parsedBaseUrl.Host is "0.0.0.0" or "localhost" or "127.0.0.1")
             throw new InvalidOperationException("Webhook mode requires a public HTTPS APP_URL/ASPNETCORE_URLS host");
@@ -1090,7 +1139,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         if (!string.Equals(parsedBaseUrl.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Webhook mode requires HTTPS URL");
 
-        var webhookUrl = new Uri(parsedBaseUrl, $"/integrations/telegram/webhook/{bot.Id}").ToString();
+        var webhookUrl = $"{baseUrl.TrimEnd('/')}/integrations/telegram/webhook/{bot.Id}";
         await CallTelegramMethodAsync(bot.Token, "setWebhook", new
         {
             url = webhookUrl,
@@ -1239,6 +1288,22 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         }
     }
 
+    private async Task<object?> TryGetTelegramWebhookInfoAsync(string token, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var doc = await CallTelegramMethodForJsonAsync(token, "getWebhookInfo", null, cancellationToken);
+            if (!doc.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object)
+                return null;
+
+            return JsonSerializer.Deserialize<object>(result.GetRawText());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static void ValidateBotConfiguration(
         string name,
         string description,
@@ -1298,17 +1363,42 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private static async Task SendMessageAsync(HttpClient client, string token, long chatId, string text, object? replyMarkup, CancellationToken cancellationToken)
     {
-        var payload = JsonSerializer.Serialize(new
-        {
-            chat_id = chatId,
-            text,
-            reply_markup = replyMarkup
-        });
+        var payload = replyMarkup is null
+            ? JsonSerializer.Serialize(new
+            {
+                chat_id = chatId,
+                text
+            })
+            : JsonSerializer.Serialize(new
+            {
+                chat_id = chatId,
+                text,
+                reply_markup = replyMarkup
+            });
         using var req = new HttpRequestMessage(HttpMethod.Post, $"https://api.telegram.org/bot{token}/sendMessage")
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
-        await client.SendAsync(req, cancellationToken);
+        using var res = await client.SendAsync(req, cancellationToken);
+        var content = await res.Content.ReadAsStringAsync(cancellationToken);
+        if (!res.IsSuccessStatusCode)
+        {
+            var description = ExtractTelegramErrorDescription(content);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(description)
+                    ? $"Telegram sendMessage failed with status {(int)res.StatusCode}"
+                    : $"Telegram sendMessage failed: {description}");
+        }
+
+        using var doc = JsonDocument.Parse(content);
+        if (!doc.RootElement.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
+        {
+            var description = ExtractTelegramErrorDescription(content);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(description)
+                    ? "Telegram sendMessage returned unsuccessful response"
+                    : $"Telegram sendMessage failed: {description}");
+        }
     }
 
     private static object ToDto(TelegramBot bot)
@@ -1518,6 +1608,73 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         return c.ToLowerInvariant();
     }
 
+    private string ResolveExternalApiBaseUrl()
+    {
+        var currentRequest = _httpContextAccessor.HttpContext?.Request;
+        if (currentRequest is not null)
+        {
+            var forwardedScheme = GetForwardedHeaderValue(currentRequest, "X-Forwarded-Proto");
+            var forwardedHost = GetForwardedHeaderValue(currentRequest, "X-Forwarded-Host");
+            var scheme = !string.IsNullOrWhiteSpace(forwardedScheme) ? forwardedScheme : currentRequest.Scheme;
+            var host = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : currentRequest.Host.Value;
+            var pathBase = ResolveExternalPathBase(currentRequest);
+
+            if (!string.IsNullOrWhiteSpace(scheme) && !string.IsNullOrWhiteSpace(host))
+                return $"{scheme}://{host}{pathBase}";
+        }
+
+        var configuredUrl =
+            _configuration["APP_URL"]
+            ?? Environment.GetEnvironmentVariable("APP_URL")
+            ?? _configuration["Kestrel:Endpoints:Http:Url"]
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+
+        foreach (var rawUrl in (configuredUrl ?? string.Empty).Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var parsedUrl))
+                continue;
+
+            var pathBase = NormalizePathBase(parsedUrl.AbsolutePath);
+            return $"{parsedUrl.GetLeftPart(UriPartial.Authority)}{pathBase}";
+        }
+
+        throw new InvalidOperationException("Unable to resolve webhook base URL from the current request or APP_URL.");
+    }
+
+    private static string? GetForwardedHeaderValue(HttpRequest request, string headerName)
+    {
+        if (!request.Headers.TryGetValue(headerName, out var headerValue))
+            return null;
+
+        return headerValue.ToString()
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+    }
+
+    private static string ResolveExternalPathBase(HttpRequest request)
+    {
+        var forwardedPrefix = GetForwardedHeaderValue(request, "X-Forwarded-Prefix");
+        if (!string.IsNullOrWhiteSpace(forwardedPrefix))
+            return NormalizePathBase(forwardedPrefix);
+
+        return NormalizePathBase(request.PathBase.Value);
+    }
+
+    private static string NormalizePathBase(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var normalized = value.Trim();
+        if (normalized == "/")
+            return string.Empty;
+
+        if (!normalized.StartsWith('/'))
+            normalized = "/" + normalized;
+
+        return normalized.TrimEnd('/');
+    }
+
     private static string? ExtractIncomingCommand(string? text)
     {
         if (string.IsNullOrWhiteSpace(text) || !text.StartsWith('/'))
@@ -1545,6 +1702,49 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             return 0;
         return valueElement.ValueKind == JsonValueKind.Number && valueElement.TryGetInt64(out var value) ? value : 0;
     }
+
+    private static TelegramBotValidationInfo CreateTelegramValidationInfo(
+        TelegramBotMeInfo meInfo,
+        string? remoteName,
+        string? remoteDescription,
+        string? remoteShortDescription,
+        List<TelegramBotCommandPayload> remoteCommands,
+        object? webhookInfo)
+    {
+        string? firstName = null;
+        if (meInfo.RawResult.TryGetProperty("first_name", out var firstNameEl) && firstNameEl.ValueKind == JsonValueKind.String)
+            firstName = firstNameEl.GetString();
+
+        string? lastName = null;
+        if (meInfo.RawResult.TryGetProperty("last_name", out var lastNameEl) && lastNameEl.ValueKind == JsonValueKind.String)
+            lastName = lastNameEl.GetString();
+
+        long? id = null;
+        if (meInfo.RawResult.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt64(out var parsedId))
+            id = parsedId;
+
+        return new TelegramBotValidationInfo(
+            id,
+            meInfo.Username,
+            firstName,
+            lastName,
+            !string.IsNullOrWhiteSpace(remoteName) ? remoteName : firstName,
+            remoteDescription ?? string.Empty,
+            remoteShortDescription,
+            remoteCommands,
+            webhookInfo);
+    }
+
+    private sealed record TelegramBotValidationInfo(
+        long? Id,
+        string? Username,
+        string? FirstName,
+        string? LastName,
+        string? Name,
+        string Description,
+        string? ShortDescription,
+        List<TelegramBotCommandPayload> Commands,
+        object? WebhookInfo);
 
     private sealed record TelegramBotMeInfo(string? Username, JsonElement RawResult);
 }

@@ -165,6 +165,22 @@ const getSignInIdentifierMode = (value) => {
   return "idle";
 };
 
+const buildTelegramWidgetErrorMessage = (normalizedText) => {
+  const currentHost = typeof window === "undefined" ? "" : window.location.hostname;
+
+  if (normalizedText.includes("bot domain invalid") || normalizedText.includes("domain invalid")) {
+    return currentHost
+      ? `Telegram Widget не настроен для домена ${currentHost}. Укажите этот домен у BotFather через /setdomain.`
+      : "Telegram Widget не настроен для текущего домена. Укажите домен сайта у BotFather через /setdomain.";
+  }
+
+  if (normalizedText.includes("bot username invalid") || normalizedText.includes("username invalid")) {
+    return "Telegram Widget не может загрузиться: проверьте username login-бота в настройках интеграции.";
+  }
+
+  return "Telegram Widget сейчас недоступен. Проверьте username бота и домен сайта, заданный у BotFather через /setdomain.";
+};
+
 export default function AuthPage() {
   const { signIn } = useAuthActions();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -196,8 +212,10 @@ export default function AuthPage() {
   const [yandexEnabled, setYandexEnabled] = useState(false);
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
   const [telegramWidgetStatus, setTelegramWidgetStatus] = useState("idle");
+  const [telegramWidgetError, setTelegramWidgetError] = useState("");
   const [telegramAuthState, setTelegramAuthState] = useState("");
   const [telegramAuthExpiresAt, setTelegramAuthExpiresAt] = useState(0);
+  const [telegramAuthUrl, setTelegramAuthUrl] = useState("");
   const [externalAuthSession, setExternalAuthSession] = useState(null);
   const telegramWidgetRef = useRef(null);
   const authPopupRef = useRef(null);
@@ -237,6 +255,7 @@ export default function AuthPage() {
       setYandexEnabled(isEnabled(settings?.yandex_login_enabled));
       setTelegramBotUsername(nextTelegramBotUsername);
       setTelegramWidgetStatus(nextTelegramWidgetEnabled && nextTelegramBotUsername ? "loading" : "idle");
+      setTelegramWidgetError("");
     };
     loadAuthProviders();
   }, []);
@@ -296,7 +315,11 @@ export default function AuthPage() {
 
       setTelegramAuthState(started.state);
       setTelegramAuthExpiresAt(Number(started.expiresAt || 0));
-      window.open(started.authUrl, "_blank", "noopener,noreferrer");
+      setTelegramAuthUrl(started.authUrl);
+      const popup = window.open(started.authUrl, "_blank");
+      if (!popup) {
+        window.location.assign(started.authUrl);
+      }
       toast.message("Открылся бот Telegram. Подтвердите вход, затем вернитесь на сайт.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Не удалось начать вход через Telegram"));
@@ -348,6 +371,7 @@ export default function AuthPage() {
   useEffect(() => {
     if (!telegramWidgetEnabled || !telegramBotUsername || !telegramWidgetRef.current) {
       setTelegramWidgetStatus("idle");
+      setTelegramWidgetError("");
       return undefined;
     }
 
@@ -371,16 +395,19 @@ export default function AuthPage() {
 
       if (hasKnownError) {
         setTelegramWidgetStatus("unavailable");
+        setTelegramWidgetError(buildTelegramWidgetErrorMessage(normalizedText));
         container.innerHTML = "";
         return;
       }
 
       if (container.querySelector("iframe")) {
         setTelegramWidgetStatus("ready");
+        setTelegramWidgetError("");
       }
     };
 
     setTelegramWidgetStatus("loading");
+    setTelegramWidgetError("");
     window[callbackName] = async (payload) => {
       setLoading(true);
       try {
@@ -419,6 +446,7 @@ export default function AuthPage() {
 
         if (!cancelled && !container.querySelector("iframe")) {
           setTelegramWidgetStatus("unavailable");
+          setTelegramWidgetError(buildTelegramWidgetErrorMessage(""));
           container.innerHTML = "";
         }
       }, 2500);
@@ -429,6 +457,7 @@ export default function AuthPage() {
       }
 
       setTelegramWidgetStatus("unavailable");
+      setTelegramWidgetError("Не удалось загрузить скрипт Telegram Widget. Попробуйте позже или войдите через Telegram-бота.");
       container.innerHTML = "";
     };
     container.appendChild(script);
@@ -1179,6 +1208,12 @@ export default function AuthPage() {
                         aria-hidden={telegramWidgetStatus !== "ready"}
                       >
                         <div ref={telegramWidgetRef} className="flex min-h-[50px] justify-center" />
+                      </div>
+                    )}
+
+                    {shouldAttemptTelegramWidget && telegramWidgetStatus === "unavailable" && telegramWidgetError && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                        {telegramWidgetError}
                       </div>
                     )}
 

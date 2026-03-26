@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Store.Api.Data;
 using Store.Api.Models;
 
@@ -131,7 +132,7 @@ public class UserIdentityService
             userProfile.Name = profile.DisplayName.Trim();
 
         if (!string.IsNullOrWhiteSpace(profile.Username) && string.IsNullOrWhiteSpace(userProfile.Nickname))
-            userProfile.Nickname = profile.Username.Trim();
+            await TryAssignAvailableNicknameAsync(userProfile, profile.Username, cancellationToken);
 
         ApplyExternalPhoneToProfile(userProfile, profile.Phone, profile.PhoneVerified);
 
@@ -159,7 +160,7 @@ public class UserIdentityService
         identity.LastUsedAt = now;
         identity.UpdatedAt = now;
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesHandlingNicknameConflictAsync(userProfile, cancellationToken);
         return user;
     }
 
@@ -657,7 +658,7 @@ public class UserIdentityService
             userProfile.Name = profile.DisplayName.Trim();
 
         if (!string.IsNullOrWhiteSpace(profile.Username) && string.IsNullOrWhiteSpace(userProfile.Nickname))
-            userProfile.Nickname = profile.Username.Trim();
+            await TryAssignAvailableNicknameAsync(userProfile, profile.Username, cancellationToken);
 
         ApplyExternalPhoneToProfile(userProfile, profile.Phone, profile.PhoneVerified);
 
@@ -679,7 +680,7 @@ public class UserIdentityService
         else if (!string.IsNullOrWhiteSpace(currentConfirmedEmail))
             await ConsolidateUsersByConfirmedEmailAsync(normalizedUserId, currentConfirmedEmail, cancellationToken);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesHandlingNicknameConflictAsync(userProfile, cancellationToken);
         return identity;
     }
 
@@ -1010,6 +1011,35 @@ public class UserIdentityService
 
         _db.Profiles.Add(profile);
         return profile;
+    }
+
+    private async Task TryAssignAvailableNicknameAsync(
+        Profile userProfile,
+        string? desiredNickname,
+        CancellationToken cancellationToken)
+    {
+        var normalizedNickname = NormalizeOptional(desiredNickname);
+        if (string.IsNullOrWhiteSpace(normalizedNickname) || !string.IsNullOrWhiteSpace(userProfile.Nickname))
+            return;
+
+        var nicknameTaken = await _db.Profiles.AnyAsync(
+            x => x.UserId != userProfile.UserId && x.Nickname == normalizedNickname,
+            cancellationToken);
+        if (!nicknameTaken)
+            userProfile.Nickname = normalizedNickname;
+    }
+
+    private async Task SaveChangesHandlingNicknameConflictAsync(Profile userProfile, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsNicknameUniqueViolation(ex) && !string.IsNullOrWhiteSpace(userProfile.Nickname))
+        {
+            userProfile.Nickname = null;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static void MergeUserCore(User targetUser, User sourceUser)
@@ -1414,6 +1444,7 @@ public class UserIdentityService
         await ReassignAuthEventsAsync(_db.AuthEvents.Where(x => x.UserId == sourceUserId), targetUserId, cancellationToken);
         await ReassignProductViewsAsync(_db.ProductViews.Where(x => x.UserId == sourceUserId), targetUserId, cancellationToken);
         await ReassignSiteVisitsAsync(_db.SiteVisits.Where(x => x.UserId == sourceUserId), targetUserId, cancellationToken);
+        await ReassignCookieConsentEventsAsync(_db.CookieConsentEvents.Where(x => x.UserId == sourceUserId), targetUserId, cancellationToken);
     }
 
     private static async Task ReassignSessionsAsync(
@@ -1515,6 +1546,15 @@ public class UserIdentityService
             entity.UserId = targetUserId;
     }
 
+    private static async Task ReassignCookieConsentEventsAsync(
+        IQueryable<CookieConsentEvent> query,
+        string targetUserId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entity in await query.ToListAsync(cancellationToken))
+            entity.UserId = targetUserId;
+    }
+
     private static string BuildCartKey(string productId, string size)
         => $"{productId}::{size}";
 
@@ -1549,6 +1589,11 @@ public class UserIdentityService
         var trimmed = value?.Trim();
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
+
+    private static bool IsNicknameUniqueViolation(DbUpdateException exception)
+        => exception.InnerException is PostgresException postgresException
+            && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(postgresException.ConstraintName, "IX_profiles_nickname", StringComparison.Ordinal);
 
     private static string? NormalizePhone(string? phone)
     {

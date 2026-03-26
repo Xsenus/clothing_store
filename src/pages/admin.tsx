@@ -89,6 +89,18 @@ interface TelegramBotReplyTemplate {
   text: string;
 }
 
+interface TelegramBotValidationInfo {
+  id?: string | number;
+  username?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  name?: string | null;
+  description?: string | null;
+  shortDescription?: string | null;
+  commands?: TelegramBotCommand[] | null;
+  webhookInfo?: unknown;
+}
+
 interface TelegramBot {
   id: string;
   name: string;
@@ -280,6 +292,7 @@ interface AdminExternalAuthTestSession {
 
 const TELEGRAM_BOT_LIMITS = {
   name: 64,
+  username: 32,
   description: 512,
   shortDescription: 120,
   maxCommands: 100,
@@ -353,6 +366,17 @@ const createEmptyTelegramBotCommand = (): TelegramBotCommand => ({
   description: ""
 });
 
+const getDefaultTelegramReplyTemplateKey = () => DEFAULT_TELEGRAM_BOT_REPLY_TEMPLATES[0]?.key || "welcome";
+
+const normalizeTelegramBotCommandsForForm = (commands?: TelegramBotCommand[] | null) => (
+  Array.isArray(commands) && commands.length > 0
+    ? commands.map((command) => ({
+        command: String(command?.command || ""),
+        description: String(command?.description || ""),
+      }))
+    : [createEmptyTelegramBotCommand()]
+);
+
 const cloneTelegramBotReplyTemplates = (templates?: TelegramBotReplyTemplate[]) => {
   const templateMap = new Map((templates || []).map((item) => [item.key, item]));
   return DEFAULT_TELEGRAM_BOT_REPLY_TEMPLATES.map((template) => {
@@ -380,6 +404,114 @@ const getInitialTelegramBotForm = () => ({
   commands: [createEmptyTelegramBotCommand()],
   replyTemplates: cloneTelegramBotReplyTemplates()
 });
+
+const createTelegramBotFormFromBot = (
+  bot: TelegramBot,
+  currentForm = getInitialTelegramBotForm()
+) => ({
+  ...currentForm,
+  name: bot.name || "",
+  description: bot.description || "",
+  shortDescription: bot.shortDescription || "",
+  imageUrl: bot.imageUrl || "",
+  username: bot.username || currentForm.username || "",
+  token: currentForm.token,
+  tokenMasked: bot.tokenMasked || currentForm.tokenMasked || "",
+  enabled: bot.enabled,
+  updateMode: bot.updateMode === "webhook" ? "webhook" : "polling",
+  useForLogin: !!bot.useForLogin,
+  autoRepliesEnabled: bot.autoRepliesEnabled ?? true,
+  commands: normalizeTelegramBotCommandsForForm(bot.commands),
+  replyTemplates: cloneTelegramBotReplyTemplates(bot.replyTemplates),
+});
+
+const createTelegramBotCheckInfoFromBot = (bot?: TelegramBot | null): TelegramBotValidationInfo | null => {
+  if (!bot) return null;
+
+  const info =
+    bot.botInfo && typeof bot.botInfo === "object"
+      ? (bot.botInfo as TelegramBotValidationInfo)
+      : null;
+
+  return {
+    ...info,
+    id: info?.id ?? bot.id,
+    username:
+      typeof info?.username === "string" && info.username.trim()
+        ? info.username.trim()
+        : bot.username || null,
+    name:
+      typeof info?.name === "string" && info.name.trim()
+        ? info.name
+        : bot.name || "",
+    description:
+      typeof info?.description === "string"
+        ? info.description
+        : bot.description || "",
+    shortDescription:
+      typeof info?.shortDescription === "string"
+        ? info.shortDescription
+        : bot.shortDescription || null,
+    commands: Array.isArray(info?.commands) ? info.commands : bot.commands || [],
+    webhookInfo: info?.webhookInfo,
+  };
+};
+
+const truncateTelegramPreviewText = (value?: string | null, limit = 96) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+};
+
+const getTelegramBotValidationDisplayName = (info?: TelegramBotValidationInfo | null) => {
+  if (!info) return "";
+
+  const directName = typeof info.name === "string" ? info.name.trim() : "";
+  if (directName) return directName;
+
+  const nameParts = [info.firstName, info.lastName]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+  if (nameParts.length > 0) {
+    return nameParts.join(" ");
+  }
+
+  const legacyInfo = info as TelegramBotValidationInfo & { first_name?: string | null; last_name?: string | null };
+  const legacyNameParts = [legacyInfo.first_name, legacyInfo.last_name]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+  return legacyNameParts.join(" ");
+};
+
+const getTelegramBotWebhookSummary = (info?: TelegramBotValidationInfo | null) => {
+  const webhookInfo =
+    info?.webhookInfo && typeof info.webhookInfo === "object"
+      ? (info.webhookInfo as Record<string, unknown>)
+      : null;
+  if (!webhookInfo) return "";
+
+  const parts: string[] = [];
+  const url = typeof webhookInfo.url === "string" ? webhookInfo.url.trim() : "";
+  const pending =
+    typeof webhookInfo.pending_update_count === "number"
+      ? webhookInfo.pending_update_count
+      : typeof webhookInfo.pendingUpdateCount === "number"
+        ? webhookInfo.pendingUpdateCount
+        : null;
+  const lastError =
+    typeof webhookInfo.last_error_message === "string"
+      ? webhookInfo.last_error_message.trim()
+      : typeof webhookInfo.lastErrorMessage === "string"
+        ? webhookInfo.lastErrorMessage.trim()
+        : "";
+
+  if (url) parts.push(`url: ${truncateTelegramPreviewText(url, 80)}`);
+  if (pending !== null) parts.push(`pending: ${pending}`);
+  if (lastError) parts.push(`error: ${truncateTelegramPreviewText(lastError, 80)}`);
+
+  return parts.join(" | ");
+};
 
 const normalizeTelegramCommandForValidation = (command: string) => command.trim().replace(/^\//, "");
 
@@ -1991,6 +2123,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [telegramBotCheckInfo, setTelegramBotCheckInfo] = useState<any | null>(null);
   const [telegramBotValidationError, setTelegramBotValidationError] = useState("");
   const [telegramBotTokenVisible, setTelegramBotTokenVisible] = useState(false);
+  const [activeTelegramReplyTemplateKey, setActiveTelegramReplyTemplateKey] = useState(getDefaultTelegramReplyTemplateKey);
   const telegramBotImageInputRef = useRef<HTMLInputElement | null>(null);
   const ordersRequestIdRef = useRef(0);
   const latestOrderTablePreferencesRef = useRef<OrderTablePreferences>(createDefaultOrderTablePreferences());
@@ -5176,6 +5309,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setTelegramBotCheckInfo(null);
     setTelegramBotValidationError("");
     setTelegramBotTokenVisible(false);
+    setActiveTelegramReplyTemplateKey(getDefaultTelegramReplyTemplateKey());
   };
 
   const addTelegramBotCommand = () => {
@@ -5231,28 +5365,60 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const openEditTelegramBotDialog = (bot: TelegramBot) => {
     setEditingTelegramBotId(bot.id);
-    setTelegramBotCheckInfo(bot.botInfo || null);
+    setTelegramBotCheckInfo(createTelegramBotCheckInfoFromBot(bot));
     setTelegramBotValidationError("");
     setTelegramBotTokenVisible(false);
-    setTelegramBotForm({
-      name: bot.name || "",
-      description: bot.description || "",
-      shortDescription: bot.shortDescription || "",
-      imageUrl: bot.imageUrl || "",
-      token: "",
-      username: bot.username || "",
-      tokenMasked: bot.tokenMasked || "",
-      enabled: bot.enabled,
-      updateMode: bot.updateMode === "webhook" ? "webhook" : "polling",
-      useForLogin: !!bot.useForLogin,
-      autoRepliesEnabled: bot.autoRepliesEnabled ?? true,
-      commands: Array.isArray(bot.commands) && bot.commands.length > 0 ? bot.commands : [createEmptyTelegramBotCommand()],
-      replyTemplates: cloneTelegramBotReplyTemplates(bot.replyTemplates)
-    });
+    setTelegramBotForm(createTelegramBotFormFromBot(bot));
+    setActiveTelegramReplyTemplateKey(getDefaultTelegramReplyTemplateKey());
     setIsTelegramBotDialogOpen(true);
   };
 
-  const validateTelegramToken = async (tokenInput?: string) => {
+  const applyTelegramBotValidationInfoToForm = (info?: TelegramBotValidationInfo | null) => {
+    if (!info) {
+      return;
+    }
+
+    setTelegramBotForm((prev) => ({
+      ...prev,
+      username: info.username ? String(info.username).trim() : prev.username,
+      name: info.name ? String(info.name) : prev.name,
+      description: typeof info.description === "string" ? info.description : prev.description,
+      shortDescription: typeof info.shortDescription === "string" ? info.shortDescription : prev.shortDescription,
+      commands: Array.isArray(info.commands)
+        ? normalizeTelegramBotCommandsForForm(info.commands)
+        : prev.commands,
+    }));
+  };
+
+  const syncExistingTelegramBotForm = async () => {
+    if (!editingTelegramBotId) {
+      return null;
+    }
+
+    setTelegramBotValidationError("");
+    setTelegramBotChecking(true);
+    try {
+      const bot = await FLOW.adminCheckTelegramBot({ input: { id: editingTelegramBotId } });
+      setTelegramBotCheckInfo(createTelegramBotCheckInfoFromBot(bot));
+      if (bot) {
+        setTelegramBotForm((prev) => createTelegramBotFormFromBot(bot, prev));
+      }
+      toast.success("Данные бота синхронизированы из Telegram");
+      return bot;
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось синхронизировать бота с Telegram");
+      setTelegramBotValidationError(message);
+      toast.error(message);
+      return null;
+    } finally {
+      setTelegramBotChecking(false);
+    }
+  };
+
+  const validateTelegramToken = async (
+    tokenInput?: string,
+    options?: { applyToForm?: boolean; successMessage?: string; errorMessage?: string; silent?: boolean }
+  ) => {
     const token = (tokenInput ?? telegramBotForm.token).trim();
     if (!token) {
       const message = "Токен бота обязателен";
@@ -5265,19 +5431,52 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setTelegramBotCheckInfo(null);
     setTelegramBotChecking(true);
     try {
-      const info = await FLOW.adminValidateTelegramBot({ input: { token } });
+      const info = await FLOW.adminValidateTelegramBot({ input: { token } }) as TelegramBotValidationInfo | null;
       setTelegramBotCheckInfo(info || null);
       setTelegramBotValidationError("");
-      if (info?.username) {
-        setTelegramBotForm((prev) => ({ ...prev, username: info.username }));
+      if (options?.applyToForm) {
+        applyTelegramBotValidationInfoToForm(info);
       }
-      if (!telegramBotForm.name && info?.first_name) {
-        setTelegramBotForm((prev) => ({ ...prev, name: info.first_name }));
+      if (!options?.silent) {
+        toast.success(options?.successMessage || "Токен подтвержден через Telegram");
       }
-      toast.success("Токен подтверждён через getMe");
       return info;
     } catch (error) {
-      const message = getErrorMessage(error, "Проверка getMe не прошла");
+      const message = getErrorMessage(error, options?.errorMessage || "Не удалось проверить токен Telegram");
+      setTelegramBotValidationError(message);
+      if (!options?.silent) {
+        toast.error(message);
+      }
+      return null;
+    } finally {
+      setTelegramBotChecking(false);
+    }
+  };
+
+  const syncTelegramBotFormWithTelegram = async () => {
+    if (editingTelegramBotId && !telegramBotForm.token.trim()) {
+      return syncExistingTelegramBotForm();
+    }
+
+    const token = telegramBotForm.token.trim();
+    if (!token) {
+      const message = "Токен бота обязателен";
+      setTelegramBotValidationError(message);
+      toast.error(message);
+      return null;
+    }
+
+    setTelegramBotValidationError("");
+    setTelegramBotCheckInfo(null);
+    setTelegramBotChecking(true);
+    try {
+      const info = await FLOW.adminValidateTelegramBot({ input: { token } }) as TelegramBotValidationInfo | null;
+      setTelegramBotCheckInfo(info || null);
+      applyTelegramBotValidationInfoToForm(info);
+      toast.success("Токен подтвержден, поля заполнены данными из Telegram");
+      return info;
+    } catch (error) {
+      const message = getErrorMessage(error, "Не удалось получить данные бота из Telegram");
       setTelegramBotValidationError(message);
       toast.error(message);
       return null;
@@ -5390,7 +5589,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setIsTelegramBotDialogOpen(false);
       resetTelegramBotForm();
       await fetchAdminData();
-      setTelegramBotCheckInfo(savedBot?.botInfo || null);
+      setTelegramBotCheckInfo(createTelegramBotCheckInfoFromBot(savedBot));
     } catch (error) {
       toast.error(getErrorMessage(error, "Не удалось сохранить Telegram-бота"));
     } finally {
@@ -6682,7 +6881,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
               ) : null}
             </DialogContent>
-          </Dialog>
+              </Dialog>
           </TabsContent>
 
           <TabsContent value="analytics" className="mt-0">
@@ -8554,7 +8753,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </DialogContent>
               </Dialog>
             </div>
-          </TabsContent>
+            </TabsContent>
 
 
           <TabsContent value="dictionaries" className="mt-0">
@@ -11745,11 +11944,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      void validateTelegramToken();
+                      void syncTelegramBotFormWithTelegram();
                     }}
                     disabled={telegramBotChecking}
                   >
-                    {telegramBotChecking ? "Проверка..." : "Проверить (getMe)"}
+                    {telegramBotChecking ? "Проверка..." : "Проверить и синхронизировать"}
                   </Button>
                   {telegramBotValidationError && (
                     <div className="border border-red-300 bg-red-50 p-2 text-xs text-red-700">
@@ -11760,7 +11959,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 {telegramBotCheckInfo && (
                   <div className="border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-800">
-                    ID: {telegramBotCheckInfo.id || "—"}, username: {telegramBotCheckInfo.username || "—"}, name: {telegramBotCheckInfo.first_name || telegramBotCheckInfo.last_name || "—"}
+                    <div>ID: {telegramBotCheckInfo.id || "—"}</div>
+                    <div>Username: {telegramBotCheckInfo.username || "—"}</div>
+                    <div>Имя: {getTelegramBotValidationDisplayName(telegramBotCheckInfo) || "—"}</div>
+                    <div>Описание: {truncateTelegramPreviewText(telegramBotCheckInfo.description) || "—"}</div>
+                    <div>Краткое описание: {truncateTelegramPreviewText(telegramBotCheckInfo.shortDescription, 64) || "—"}</div>
+                    <div>Команды: {Array.isArray(telegramBotCheckInfo.commands) ? telegramBotCheckInfo.commands.length : 0}</div>
+                    {getTelegramBotWebhookSummary(telegramBotCheckInfo) && (
+                      <div>Webhook: {getTelegramBotWebhookSummary(telegramBotCheckInfo)}</div>
+                    )}
                   </div>
                 )}
 
@@ -11936,9 +12143,24 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                   <p className="text-xs text-muted-foreground">
                     Если выключить автоответы, бот продолжит отвечать только на служебную проверку <span className="font-mono">/check</span>.
                   </p>
-                  <div className="space-y-3">
+                  <Tabs value={activeTelegramReplyTemplateKey} onValueChange={setActiveTelegramReplyTemplateKey} className="space-y-3">
+                    <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 md:grid-cols-3 xl:grid-cols-4">
+                      {telegramBotForm.replyTemplates.map((template) => (
+                        <TabsTrigger
+                          key={`telegram-template-tab-${template.key}`}
+                          value={template.key}
+                          className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none"
+                        >
+                          {template.label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    <div className="space-y-3">
                     {telegramBotForm.replyTemplates.map((template) => (
-                      <div key={template.key} className="space-y-2 rounded border p-3">
+                      <div
+                        key={template.key}
+                        className={template.key === activeTelegramReplyTemplateKey ? "space-y-2 rounded border p-3" : "hidden"}
+                      >
                         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                           <div className="space-y-1">
                             <div className="font-medium">{template.label}</div>
@@ -11969,6 +12191,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </div>
                     ))}
                   </div>
+                  </Tabs>
                 </div>
 
                 {telegramBotFormErrors.length > 0 && (

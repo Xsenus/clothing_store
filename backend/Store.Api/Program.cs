@@ -71,6 +71,7 @@ builder.Services.AddSingleton<OrderEmailQueue>();
 builder.Services.AddSingleton<IOrderEmailQueue>(sp => sp.GetRequiredService<OrderEmailQueue>());
 builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddSingleton<GalleryStorageService>();
 builder.Services.AddSingleton<TelegramBotManager>();
