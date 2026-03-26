@@ -65,6 +65,7 @@ public class StoreDbContext : DbContext
     public DbSet<AuthEvent> AuthEvents => Set<AuthEvent>();
     public DbSet<ProductView> ProductViews => Set<ProductView>();
     public DbSet<SiteVisit> SiteVisits => Set<SiteVisit>();
+    public DbSet<CookieConsentEvent> CookieConsentEvents => Set<CookieConsentEvent>();
     /// <summary>
     /// Возвращает набор заказов.
     /// </summary>
@@ -104,6 +105,10 @@ public class StoreDbContext : DbContext
         modelBuilder.Entity<SiteVisit>().HasIndex(x => new { x.ViewerKey, x.DayKey }).IsUnique();
         modelBuilder.Entity<SiteVisit>().HasIndex(x => x.LastVisitedAt);
         modelBuilder.Entity<SiteVisit>().HasIndex(x => x.DayKey);
+        modelBuilder.Entity<CookieConsentEvent>().HasIndex(x => x.CreatedAt);
+        modelBuilder.Entity<CookieConsentEvent>().HasIndex(x => new { x.Decision, x.CreatedAt });
+        modelBuilder.Entity<CookieConsentEvent>().HasIndex(x => new { x.ViewerKey, x.CreatedAt });
+        modelBuilder.Entity<CookieConsentEvent>().HasIndex(x => new { x.UserId, x.CreatedAt });
         modelBuilder.Entity<RefreshSession>().HasIndex(x => x.UserId);
         modelBuilder.Entity<Profile>().HasIndex(x => x.Nickname).IsUnique();
         modelBuilder.Entity<SizeDictionary>().HasIndex(x => x.Name).IsUnique();
@@ -252,6 +257,12 @@ public class StoreDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<SiteVisit>()
+            .HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<CookieConsentEvent>()
             .HasOne<User>()
             .WithMany()
             .HasForeignKey(x => x.UserId)

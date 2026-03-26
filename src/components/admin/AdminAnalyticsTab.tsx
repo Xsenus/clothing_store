@@ -79,6 +79,8 @@ export interface AdminAnalyticsSummary {
   favoritesRemovedCount?: number;
   favoriteUsersCount?: number;
   loginEventsCount?: number;
+  cookieAcceptedCount?: number;
+  cookieRejectedCount?: number;
   totalViewEvents?: number;
   totalUniqueViewers?: number;
   viewedProductsCount?: number;
@@ -119,6 +121,8 @@ export interface AdminAnalyticsResponse {
       favoritesRemovedCount?: number;
       favoriteUsersCount?: number;
       loginEventsCount?: number;
+      cookieAcceptedCount?: number;
+      cookieRejectedCount?: number;
       totalViewEvents?: number;
       totalUniqueViewers?: number;
       viewedProductsCount?: number;
@@ -166,6 +170,9 @@ export interface AdminAnalyticsResponse {
     externalActiveUsersByProvider?: AdminAnalyticsCountItem[];
     connectedExternalUsersByProvider?: AdminAnalyticsCountItem[];
     loginsByProvider?: AdminAnalyticsCountItem[];
+  };
+  consent?: {
+    decisions?: AdminAnalyticsCountItem[];
   };
   products?: {
     topPopular?: AdminAnalyticsProductItem[];
@@ -630,6 +637,7 @@ export default function AdminAnalyticsTab({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" className="h-9 rounded-none" onClick={() => onApplyPreset(1)}>1 день</Button>
               <Button type="button" variant="outline" className="h-9 rounded-none" onClick={() => onApplyPreset(7)}>7 дней</Button>
               <Button type="button" variant="outline" className="h-9 rounded-none" onClick={() => onApplyPreset(30)}>30 дней</Button>
               <Button type="button" variant="outline" className="h-9 rounded-none" onClick={() => onApplyPreset(90)}>90 дней</Button>
@@ -666,10 +674,6 @@ export default function AdminAnalyticsTab({
             Сравнение с периодом: <span className="font-medium text-black">{previousPeriod.dateFrom}</span> - <span className="font-medium text-black">{previousPeriod.dateTo}</span>
           </div>
         ) : null}
-
-        <div className="mt-4 border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          История по избранному и входам теперь считается по отдельным событиям. Данные для этих блоков начинают накапливаться с момента применения новой миграции, поэтому старые периоды могут быть неполными.
-        </div>
       </div>
 
       {loading && analytics ? (
@@ -834,6 +838,14 @@ export default function AdminAnalyticsTab({
           comparisonText={getComparisonMeta(periodSummary?.loginEventsCount, previousSummary?.loginEventsCount)?.text}
           comparisonTone={getComparisonMeta(periodSummary?.loginEventsCount, previousSummary?.loginEventsCount)?.tone}
         />
+        <MetricCard
+          icon={<BarChart3 className="h-5 w-5" />}
+          title="Cookie принято"
+          value={formatInteger(periodSummary?.cookieAcceptedCount)}
+          hint={`Отклонено ${formatInteger(periodSummary?.cookieRejectedCount)}`}
+          comparisonText={getComparisonMeta(periodSummary?.cookieAcceptedCount, previousSummary?.cookieAcceptedCount)?.text}
+          comparisonTone={getComparisonMeta(periodSummary?.cookieAcceptedCount, previousSummary?.cookieAcceptedCount)?.tone}
+        />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -965,7 +977,7 @@ export default function AdminAnalyticsTab({
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-3">
         <BreakdownList
           title="Регистрации"
           description="Как пользователи создавали аккаунты за выбранный период."
@@ -976,6 +988,12 @@ export default function AdminAnalyticsTab({
           title="Входы по способам"
           description="Успешные входы через email, Telegram, Google и Яндекс за выбранный период."
           items={analytics?.users?.loginsByProvider}
+          formatRubles={formatRubles}
+        />
+        <BreakdownList
+          title="Согласие на Cookie"
+          description="Сколько раз пользователи приняли или отклонили cookie-баннер за выбранный период."
+          items={analytics?.consent?.decisions}
           formatRubles={formatRubles}
         />
       </div>

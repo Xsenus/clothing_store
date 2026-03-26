@@ -212,6 +212,16 @@ internal static class AdminAnalyticsSupport
         };
     }
 
+    internal static string NormalizeCookieConsentDecision(string? decision)
+    {
+        var normalized = decision?.Trim().ToLowerInvariant() ?? string.Empty;
+        return normalized switch
+        {
+            "rejected" or "reject" or "declined" or "decline" => "rejected",
+            _ => "accepted"
+        };
+    }
+
     internal static string ResolvePaymentProviderKey(OrderPayment? payment, string normalizedPaymentMethod)
     {
         var provider = payment?.Provider?.Trim().ToLowerInvariant();
@@ -540,6 +550,108 @@ internal static class AdminAnalyticsSupport
         "vk" => "VK",
         "yandex" => "РЇРЅРґРµРєСЃ",
         _ => "Р”СЂСѓРіРѕРµ"
+    };
+
+    internal static string GetDisplayOrderStatusLabel(string key) => key switch
+    {
+        "processing" => "В обработке",
+        "pending_payment" => "Ожидает оплаты",
+        "created" => "Оформлен",
+        "paid" => "Оплачен",
+        "in_transit" => "В пути",
+        "delivered" => "Доставлен",
+        "completed" => "Завершен",
+        "canceled" or "cancelled" => "Отменен",
+        "returned" => "Возврат",
+        _ => key
+    };
+
+    internal static string GetDisplayPaymentMethodLabel(string key) => key switch
+    {
+        "cod" => "Оплата при получении",
+        "card" => "Банковская карта",
+        "sbp" => "СБП",
+        "cash" => "Наличные",
+        "yoomoney" => "ЮMoney",
+        "yoomoney_card" => "ЮMoney: банковская карта",
+        "yoomoney_wallet" => "ЮMoney: кошелек",
+        "yookassa" => "YooKassa",
+        "yookassa_card" => "YooKassa: банковская карта",
+        "yookassa_sbp" => "YooKassa: СБП",
+        "yookassa_yoomoney" => "YooKassa: ЮMoney",
+        _ => key
+    };
+
+    internal static string GetDisplayPaymentGroupLabel(string key) => key switch
+    {
+        "transfer" => "Переводом",
+        "upon_receipt" => "При получении",
+        "yoomoney" => "ЮMoney",
+        "yookassa" => "YooKassa",
+        "manual" => "Ручной платеж",
+        "other" => "Другое",
+        _ => key
+    };
+
+    internal static string GetDisplayPaymentProviderLabel(string key) => key switch
+    {
+        "manual" => "Без платежной системы",
+        "yoomoney" => "ЮMoney",
+        "yookassa" => "YooKassa",
+        "unknown" => "Не определено",
+        _ => key
+    };
+
+    internal static string GetDisplayShippingMethodLabel(string key) => key switch
+    {
+        "home" => "До двери",
+        "pickup" => "ПВЗ",
+        "self_pickup" => "Самовывоз",
+        _ => key
+    };
+
+    internal static string GetDisplayPurchaseChannelLabel(string key) => key switch
+    {
+        "web" => "Сайт",
+        "mobile" => "Мобильное приложение",
+        "admin" => "Администратор",
+        _ => key
+    };
+
+    internal static string GetDisplayRegistrationChannelLabel(string key) => key switch
+    {
+        "email" => "Email и пароль",
+        "telegram" => "Telegram",
+        "google" => "Google",
+        "vk" => "VK",
+        "yandex" => "Яндекс",
+        _ => "Другое"
+    };
+
+    internal static string GetDisplayExternalProviderLabel(string key) => key switch
+    {
+        "telegram" => "Telegram",
+        "google" => "Google",
+        "vk" => "VK",
+        "yandex" => "Яндекс",
+        _ => "Другое"
+    };
+
+    internal static string GetDisplayAuthProviderLabel(string key) => key switch
+    {
+        "email" => "Email и пароль",
+        "telegram" => "Telegram",
+        "google" => "Google",
+        "vk" => "VK",
+        "yandex" => "Яндекс",
+        _ => "Другое"
+    };
+
+    internal static string GetDisplayCookieConsentDecisionLabel(string key) => key switch
+    {
+        "accepted" => "Принято",
+        "rejected" => "Отклонено",
+        _ => "Неизвестно"
     };
 
     private static string? TryGetExternalProviderFromTechnicalEmail(string? email)

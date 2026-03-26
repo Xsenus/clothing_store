@@ -3,7 +3,8 @@ import { LegalModal } from "@/components/LegalModal";
 import { Button } from "@/components/ui/button";
 import {
   acceptCookieConsent,
-  hasCookieConsent,
+  hasCookieConsentDecision,
+  rejectCookieConsent,
 } from "@/lib/cookie-consent";
 import { COOKIE_CONSENT_TEXT } from "@/lib/legal-defaults/cookie-consent";
 import { fetchPublicLegalText } from "@/lib/site-settings";
@@ -33,7 +34,7 @@ export default function CookieBanner() {
   const summaryText = useMemo(() => buildCookieSummary(text), [text]);
 
   useEffect(() => {
-    if (!hasCookieConsent()) {
+    if (!hasCookieConsentDecision()) {
       setVisible(true);
     }
   }, []);
@@ -83,9 +84,12 @@ export default function CookieBanner() {
           <Button
             variant="outline"
             className="h-9 rounded-none border-white/35 bg-transparent px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white"
-            onClick={() => setVisible(false)}
+            onClick={() => {
+              rejectCookieConsent();
+              setVisible(false);
+            }}
           >
-            Позже
+            Отклонить
           </Button>
           <Button
             className="h-9 rounded-none bg-white px-3 text-xs font-semibold uppercase tracking-[0.14em] text-black hover:bg-gray-200"

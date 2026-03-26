@@ -53,6 +53,7 @@ public record CartUpdatePayload(int Quantity);
 public record LikeTogglePayload(string ProductId);
 public record ProductViewPayload(string? VisitorId);
 public record SiteVisitPayload(string? VisitorId, string? Path);
+public record CookieConsentPayload(string? VisitorId, string? Decision);
 public record PromoCodeValidationPayload(string Code, double Subtotal);
 
 /// <summary>

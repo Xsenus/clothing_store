@@ -608,6 +608,14 @@ public class AdminController : ControllerBase
             .AsNoTracking()
             .Where(x => x.LastVisitedAt >= previousFromTimestamp && x.LastVisitedAt <= previousToTimestamp)
             .ToListAsync();
+        var cookieConsentEventsInPeriod = await _db.CookieConsentEvents
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= fromTimestamp && x.CreatedAt <= toTimestamp)
+            .ToListAsync();
+        var previousCookieConsentEventsInPeriod = await _db.CookieConsentEvents
+            .AsNoTracking()
+            .Where(x => x.CreatedAt >= previousFromTimestamp && x.CreatedAt <= previousToTimestamp)
+            .ToListAsync();
 
         var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
         var todayDate = utcToday.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -971,6 +979,9 @@ public class AdminController : ControllerBase
         var loginCounts = authEventsInPeriod
             .GroupBy(x => AdminAnalyticsSupport.NormalizeAuthProviderKey(x.Provider), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var cookieConsentDecisionCounts = cookieConsentEventsInPeriod
+            .GroupBy(x => AdminAnalyticsSupport.NormalizeCookieConsentDecision(x.Decision), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 
         var totalProducts = products.Count;
         var visibleProducts = products.Count(x => !x.IsHidden);
@@ -993,6 +1004,8 @@ public class AdminController : ControllerBase
             .Distinct(StringComparer.Ordinal)
             .Count();
         var loginEventsCount = authEventsInPeriod.Count;
+        var cookieAcceptedCount = cookieConsentDecisionCounts.GetValueOrDefault("accepted");
+        var cookieRejectedCount = cookieConsentDecisionCounts.GetValueOrDefault("rejected");
         var totalViewEvents = productViewRows.Sum(x => Math.Max(0, x.ViewCount));
         var totalUniqueViewers = productViewRows
             .Select(x => x.ViewerKey)
@@ -1090,6 +1103,10 @@ public class AdminController : ControllerBase
             .Distinct(StringComparer.Ordinal)
             .Count();
         var previousLoginEventsCount = previousAuthEventsInPeriod.Count;
+        var previousCookieAcceptedCount = previousCookieConsentEventsInPeriod.Count(
+            x => AdminAnalyticsSupport.NormalizeCookieConsentDecision(x.Decision) == "accepted");
+        var previousCookieRejectedCount = previousCookieConsentEventsInPeriod.Count(
+            x => AdminAnalyticsSupport.NormalizeCookieConsentDecision(x.Decision) == "rejected");
         var previousTotalViewEvents = previousProductViewRows.Sum(x => Math.Max(0, x.ViewCount));
         var previousTotalUniqueViewers = previousProductViewRows
             .Select(x => x.ViewerKey)
@@ -1152,6 +1169,8 @@ public class AdminController : ControllerBase
                     favoritesRemovedCount = previousFavoritesRemovedCount,
                     favoriteUsersCount = previousFavoriteUsersCount,
                     loginEventsCount = previousLoginEventsCount,
+                    cookieAcceptedCount = previousCookieAcceptedCount,
+                    cookieRejectedCount = previousCookieRejectedCount,
                     totalViewEvents = previousTotalViewEvents,
                     totalUniqueViewers = previousTotalUniqueViewers,
                     viewedProductsCount = previousViewedProductsCount,
@@ -1225,6 +1244,8 @@ public class AdminController : ControllerBase
                 favoritesRemovedCount,
                 favoriteUsersCount,
                 loginEventsCount,
+                cookieAcceptedCount,
+                cookieRejectedCount,
                 totalViewEvents,
                 totalUniqueViewers,
                 viewedProductsCount,
@@ -1237,50 +1258,57 @@ public class AdminController : ControllerBase
             {
                 byStatus = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByStatus,
-                    AdminAnalyticsSupport.GetOrderStatusLabel,
+                    AdminAnalyticsSupport.GetDisplayOrderStatusLabel,
                     "status"),
                 byPurchaseChannel = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByPurchaseChannel,
-                    AdminAnalyticsSupport.GetPurchaseChannelLabel,
+                    AdminAnalyticsSupport.GetDisplayPurchaseChannelLabel,
                     "purchaseChannel"),
                 byShippingMethod = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByShippingMethod,
-                    AdminAnalyticsSupport.GetShippingMethodLabel,
+                    AdminAnalyticsSupport.GetDisplayShippingMethodLabel,
                     "shippingMethod")
             },
             payments = new
             {
                 byMethod = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByPaymentMethod,
-                    AdminAnalyticsSupport.GetPaymentMethodLabel,
+                    AdminAnalyticsSupport.GetDisplayPaymentMethodLabel,
                     "paymentMethod"),
                 byGroup = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByPaymentGroup,
-                    AdminAnalyticsSupport.GetPaymentGroupLabel,
+                    AdminAnalyticsSupport.GetDisplayPaymentGroupLabel,
                     "paymentGroup"),
                 byProvider = AdminAnalyticsSupport.BuildBucketPayload(
                     ordersByPaymentProvider,
-                    AdminAnalyticsSupport.GetPaymentProviderLabel,
+                    AdminAnalyticsSupport.GetDisplayPaymentProviderLabel,
                     "paymentProvider")
             },
             users = new
             {
                 registrationsByChannel = AdminAnalyticsSupport.BuildCountPayload(
                     registrationChannels,
-                    AdminAnalyticsSupport.GetRegistrationChannelLabel,
+                    AdminAnalyticsSupport.GetDisplayRegistrationChannelLabel,
                     "registrationChannel"),
                 externalActiveUsersByProvider = AdminAnalyticsSupport.BuildCountPayload(
                     activeExternalUsersByProvider,
-                    AdminAnalyticsSupport.GetExternalProviderLabel,
+                    AdminAnalyticsSupport.GetDisplayExternalProviderLabel,
                     "externalProvider"),
                 connectedExternalUsersByProvider = AdminAnalyticsSupport.BuildCountPayload(
                     connectedExternalUsersByProvider,
-                    AdminAnalyticsSupport.GetExternalProviderLabel,
+                    AdminAnalyticsSupport.GetDisplayExternalProviderLabel,
                     "externalProvider"),
                 loginsByProvider = AdminAnalyticsSupport.BuildCountPayload(
                     loginCounts,
-                    AdminAnalyticsSupport.GetAuthProviderLabel,
+                    AdminAnalyticsSupport.GetDisplayAuthProviderLabel,
                     "authProvider")
+            },
+            consent = new
+            {
+                decisions = AdminAnalyticsSupport.BuildCountPayload(
+                    cookieConsentDecisionCounts,
+                    AdminAnalyticsSupport.GetDisplayCookieConsentDecisionLabel,
+                    "cookieConsentDecision")
             },
             products = new
             {

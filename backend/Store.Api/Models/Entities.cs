@@ -1125,6 +1125,29 @@ public class SiteVisit
     public string? LastPath { get; set; }
 }
 
+[Table("cookie_consent_events")]
+public class CookieConsentEvent
+{
+    [Key]
+    [Column("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
+    [Column("visitor_id")]
+    public string? VisitorId { get; set; }
+
+    [Column("viewer_key")]
+    public string ViewerKey { get; set; } = string.Empty;
+
+    [Column("decision")]
+    public string Decision { get; set; } = "accepted";
+
+    [Column("created_at")]
+    public long CreatedAt { get; set; }
+}
+
 [Table("orders")]
 public class Order
 {

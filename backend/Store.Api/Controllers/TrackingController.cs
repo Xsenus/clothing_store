@@ -70,4 +70,41 @@ public class TrackingController : ControllerBase
         await _db.SaveChangesAsync();
         return Results.Ok(new { tracked = true });
     }
+
+    [HttpPost("cookie-consent")]
+    public async Task<IResult> TrackCookieConsent([FromBody] CookieConsentPayload? payload)
+    {
+        var decision = NormalizeCookieConsentDecision(payload?.Decision);
+        if (decision is null)
+            return Results.BadRequest(new { detail = "Unsupported cookie consent decision" });
+
+        var user = await _auth.RequireUserAsync(Request);
+        var visitorId = VisitorTrackingSupport.NormalizeVisitorId(payload?.VisitorId);
+        var viewerKey = VisitorTrackingSupport.ResolveViewerKey(user, visitorId);
+        if (string.IsNullOrWhiteSpace(viewerKey))
+            return Results.Ok(new { tracked = false });
+
+        _db.CookieConsentEvents.Add(new CookieConsentEvent
+        {
+            UserId = user?.Id,
+            VisitorId = visitorId,
+            ViewerKey = viewerKey,
+            Decision = decision,
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        });
+
+        await _db.SaveChangesAsync();
+        return Results.Ok(new { tracked = true });
+    }
+
+    private static string? NormalizeCookieConsentDecision(string? decision)
+    {
+        var normalized = decision?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "accepted" or "accept" => "accepted",
+            "rejected" or "reject" or "declined" or "decline" => "rejected",
+            _ => null
+        };
+    }
 }
