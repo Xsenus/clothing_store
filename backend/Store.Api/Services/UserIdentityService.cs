@@ -45,13 +45,19 @@ public class UserIdentityService
 
         User? user = null;
         if (identity is not null)
+        {
             user = await _db.Users.FirstOrDefaultAsync(x => x.Id == identity.UserId, cancellationToken);
+            if (user?.IsDeleted == true)
+                user = null;
+        }
 
         User? legacyUser = null;
         if (string.Equals(provider, "telegram", StringComparison.Ordinal))
         {
             var legacyTelegramEmail = TechnicalEmailHelper.BuildTechnicalEmail(provider, providerUserId);
             legacyUser = await _db.Users.FirstOrDefaultAsync(x => x.Email == legacyTelegramEmail, cancellationToken);
+            if (legacyUser?.IsDeleted == true)
+                legacyUser = null;
             user ??= legacyUser;
         }
 
@@ -178,6 +184,7 @@ public class UserIdentityService
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
             if (user is not null
+                && !user.IsDeleted
                 && user.Verified
                 && TechnicalEmailHelper.IsValidRealEmail(user.Email))
             {
@@ -188,6 +195,41 @@ public class UserIdentityService
         return TechnicalEmailHelper.IsValidRealEmail(fallbackEmail)
             ? TechnicalEmailHelper.NormalizeRealEmail(fallbackEmail)
             : null;
+    }
+
+    public async Task<string?> GetConfirmedPhoneAsync(
+        string? userId,
+        string? fallbackPhone = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            var profile = await _db.Profiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            if (profile is not null
+                && profile.PhoneVerified
+                && !string.IsNullOrWhiteSpace(profile.Phone))
+            {
+                return NormalizePhone(profile.Phone);
+            }
+        }
+
+        return NormalizePhone(fallbackPhone);
+    }
+
+    public async Task<bool> HasConfirmedContactAsync(
+        string? userId,
+        string? fallbackEmail = null,
+        string? fallbackPhone = null,
+        CancellationToken cancellationToken = default)
+    {
+        var confirmedEmail = await GetConfirmedEmailAsync(userId, fallbackEmail, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(confirmedEmail))
+            return true;
+
+        var confirmedPhone = await GetConfirmedPhoneAsync(userId, fallbackPhone, cancellationToken);
+        return !string.IsNullOrWhiteSpace(confirmedPhone);
     }
 
     public async Task<User?> FindUserByConfirmedEmailAsync(
@@ -208,6 +250,19 @@ public class UserIdentityService
         CancellationToken cancellationToken = default)
         => FindUserByConfirmedEmailAsync(email, preferredUserId: null, cancellationToken);
 
+    public async Task<User?> FindUserByConfirmedPhoneAsync(
+        string? phone,
+        string? preferredUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPhone = NormalizePhone(phone);
+        if (string.IsNullOrWhiteSpace(normalizedPhone))
+            return null;
+
+        var candidates = await LoadPhoneCandidatesAsync(normalizedPhone, cancellationToken);
+        return SelectPreferredPhoneCandidate(candidates, preferredUserId)?.User;
+    }
+
     public async Task<bool> HasOtherUserWithConfirmedEmailAsync(
         string? email,
         string? excludedUserId = null,
@@ -221,6 +276,7 @@ public class UserIdentityService
         return await _db.Users.AnyAsync(
             user =>
                 user.Id != normalizedExcludedUserId
+                && !user.IsDeleted
                 && ((user.Verified && user.Email == normalizedEmail)
                     || _db.Profiles.Any(profile =>
                         profile.UserId == user.Id
@@ -515,6 +571,9 @@ public class UserIdentityService
         if (user is null)
             throw new InvalidOperationException("Пользователь не найден.");
 
+        if (user.IsDeleted)
+            throw new InvalidOperationException("Deleted user cannot link external accounts.");
+
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var confirmedEmail = NormalizeConfirmedEmail(profile.Email, profile.EmailVerified);
         var currentConfirmedEmail = await GetConfirmedEmailAsync(normalizedUserId, user.Email, cancellationToken);
@@ -640,6 +699,9 @@ public class UserIdentityService
         if (user is null)
             throw new InvalidOperationException("Пользователь не найден.");
 
+        if (user.IsDeleted)
+            throw new InvalidOperationException("Deleted user cannot unlink external accounts.");
+
         var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == normalizedUserId, cancellationToken);
         var explicitLinkedProviders = await _db.UserExternalIdentities
             .Where(x => x.UserId == normalizedUserId)
@@ -710,12 +772,47 @@ public class UserIdentityService
             let matchesProfileEmail = profile != null
                                       && profile.EmailVerified
                                       && profile.Email == normalizedEmail
-            where matchesUserEmail || matchesProfileEmail
+            where !user.IsDeleted
+                  && (matchesUserEmail || matchesProfileEmail)
             select new UserEmailCandidate(
                 user,
                 profile,
                 matchesUserEmail,
                 matchesProfileEmail))
+            .ToListAsync(cancellationToken);
+    }
+
+    private async Task<List<UserPhoneCandidate>> LoadPhoneCandidatesAsync(
+        string normalizedPhone,
+        CancellationToken cancellationToken)
+    {
+        return await (
+            from user in _db.Users
+            join profile in _db.Profiles on user.Id equals profile.UserId into profileGroup
+            from profile in profileGroup.DefaultIfEmpty()
+            let matchesProfilePhone = profile != null
+                                      && profile.PhoneVerified
+                                      && profile.Phone == normalizedPhone
+            let matchesVerifiedRequest = _db.ContactChangeRequests.Any(request =>
+                request.UserId == user.Id
+                && request.Kind == "phone"
+                && request.VerifiedAt.HasValue
+                && request.TargetValue == normalizedPhone)
+            let matchesTelegramPhone = _db.TelegramAuthRequests.Any(request =>
+                request.UserId == user.Id
+                && request.PhoneNumber == normalizedPhone
+                && (request.CompletedAt.HasValue
+                    || request.ConsumedAt.HasValue
+                    || request.Status == "completed"
+                    || request.Status == "consumed"))
+            where !user.IsDeleted
+                  && (matchesProfilePhone || matchesVerifiedRequest || matchesTelegramPhone)
+            select new UserPhoneCandidate(
+                user,
+                profile,
+                matchesProfilePhone,
+                matchesVerifiedRequest,
+                matchesTelegramPhone))
             .ToListAsync(cancellationToken);
     }
 
@@ -725,6 +822,16 @@ public class UserIdentityService
     {
         return candidates
             .OrderByDescending(candidate => GetEmailCandidateScore(candidate, preferredUserId))
+            .ThenBy(candidate => candidate.User.CreatedAt)
+            .FirstOrDefault();
+    }
+
+    private static UserPhoneCandidate? SelectPreferredPhoneCandidate(
+        IEnumerable<UserPhoneCandidate> candidates,
+        string? preferredUserId)
+    {
+        return candidates
+            .OrderByDescending(candidate => GetPhoneCandidateScore(candidate, preferredUserId))
             .ThenBy(candidate => candidate.User.CreatedAt)
             .FirstOrDefault();
     }
@@ -748,6 +855,38 @@ public class UserIdentityService
             score += 4;
         if (candidate.Profile?.EmailVerified == true)
             score += 2;
+        if (!string.IsNullOrWhiteSpace(preferredUserId)
+            && string.Equals(candidate.User.Id, preferredUserId, StringComparison.Ordinal))
+        {
+            score += 1;
+        }
+
+        return score;
+    }
+
+    private static int GetPhoneCandidateScore(UserPhoneCandidate candidate, string? preferredUserId)
+    {
+        var score = 0;
+
+        if (!candidate.User.IsBlocked)
+            score += 128;
+        if (candidate.MatchesProfilePhone)
+            score += 64;
+        if (candidate.MatchesVerifiedRequest)
+            score += 32;
+        if (candidate.MatchesTelegramPhone)
+            score += 16;
+        if (candidate.Profile?.PhoneVerified == true)
+            score += 8;
+        if (!TechnicalEmailHelper.IsTechnicalEmail(candidate.User.Email)
+            && TechnicalEmailHelper.IsValidRealEmail(candidate.User.Email))
+        {
+            score += 4;
+        }
+        if (HasPassword(candidate.User))
+            score += 2;
+        if (candidate.User.Verified)
+            score += 1;
         if (!string.IsNullOrWhiteSpace(preferredUserId)
             && string.Equals(candidate.User.Id, preferredUserId, StringComparison.Ordinal))
         {
@@ -1411,6 +1550,23 @@ public class UserIdentityService
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
+    private static string? NormalizePhone(string? phone)
+    {
+        var trimmed = (phone ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return null;
+
+        var chars = trimmed.Where(c => char.IsDigit(c) || c == '+').ToArray();
+        var normalized = new string(chars);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (!normalized.StartsWith('+') && normalized.All(char.IsDigit))
+            normalized = $"+{normalized}";
+
+        return normalized;
+    }
+
     private static void ApplyExternalPhoneToProfile(Profile userProfile, string? phone, bool phoneVerified)
     {
         var normalizedPhone = NormalizeOptional(phone);
@@ -1597,4 +1753,11 @@ public class UserIdentityService
         Profile? Profile,
         bool MatchesUserEmail,
         bool MatchesProfileEmail);
+
+    private sealed record UserPhoneCandidate(
+        User User,
+        Profile? Profile,
+        bool MatchesProfilePhone,
+        bool MatchesVerifiedRequest,
+        bool MatchesTelegramPhone);
 }

@@ -159,6 +159,13 @@ public class OrdersController : ControllerBase
         var user = await _auth.RequireUserAsync(Request);
         if (user is null) return Results.Unauthorized();
 
+        var confirmedUserEmail = await _userIdentityService.GetConfirmedEmailAsync(user.Id, null, HttpContext.RequestAborted);
+        var confirmedUserPhone = await _userIdentityService.GetConfirmedPhoneAsync(user.Id, null, HttpContext.RequestAborted);
+        if (string.IsNullOrWhiteSpace(confirmedUserEmail) && string.IsNullOrWhiteSpace(confirmedUserPhone))
+        {
+            return Results.BadRequest(new { detail = "Подтвердите email или телефон в профиле перед оформлением заказа." });
+        }
+
         var normalizedItems = NormalizeOrderItems(payload.Items);
         if (normalizedItems.Count == 0)
             return Results.BadRequest(new { detail = "Корзина пуста" });
@@ -301,11 +308,20 @@ public class OrdersController : ControllerBase
                 ? null
                 : NormalizeOptionalText(payload.ShippingTariff);
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
-            var confirmedUserEmail = await _userIdentityService.GetConfirmedEmailAsync(user.Id, null, HttpContext.RequestAborted);
             var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
                 ? confirmedUserEmail ?? string.Empty
                 : payload.CustomerEmail.Trim();
-            var resolvedCustomerPhone = payload.CustomerPhone?.Trim() ?? string.Empty;
+            var resolvedCustomerPhone = string.IsNullOrWhiteSpace(payload.CustomerPhone)
+                ? confirmedUserPhone ?? string.Empty
+                : NormalizePhone(payload.CustomerPhone);
+            var usesConfirmedOrderEmail = !string.IsNullOrWhiteSpace(confirmedUserEmail)
+                && string.Equals(resolvedCustomerEmail, confirmedUserEmail, StringComparison.OrdinalIgnoreCase);
+            var usesConfirmedOrderPhone = !string.IsNullOrWhiteSpace(confirmedUserPhone)
+                && string.Equals(NormalizePhone(resolvedCustomerPhone), confirmedUserPhone, StringComparison.Ordinal);
+            if (!usesConfirmedOrderEmail && !usesConfirmedOrderPhone)
+            {
+                return Results.BadRequest(new { detail = "Для оформления заказа укажите подтвержденный email или телефон из профиля." });
+            }
             var resolvedShippingAddress = resolvedShippingMethod == "self_pickup"
                 ? (string.IsNullOrWhiteSpace(payload.ShippingAddress) ? "Самовывоз" : payload.ShippingAddress.Trim())
                 : payload.ShippingAddress?.Trim() ?? string.Empty;
@@ -528,6 +544,23 @@ public class OrdersController : ControllerBase
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string NormalizePhone(string? phone)
+    {
+        var trimmed = (phone ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return string.Empty;
+
+        var chars = trimmed.Where(c => char.IsDigit(c) || c == '+').ToArray();
+        var normalized = new string(chars);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
+        if (!normalized.StartsWith('+') && normalized.All(char.IsDigit))
+            normalized = $"+{normalized}";
+
+        return normalized;
     }
 
 }

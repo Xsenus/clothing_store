@@ -516,12 +516,19 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         var text = messageEl.TryGetProperty("text", out var textEl) ? textEl.GetString()?.Trim() : null;
         if (!string.IsNullOrWhiteSpace(text) && text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
         {
+            var requestKind = "phone";
             var state = ExtractStateFromStartCommand(text, "verify_phone_");
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                state = ExtractStateFromStartCommand(text, "delete_account_");
+                requestKind = "account_delete_phone";
+            }
+
             if (string.IsNullOrWhiteSpace(state))
                 return false;
 
             var request = await db.ContactChangeRequests
-                .Where(x => x.Kind == "phone" && x.State == state)
+                .Where(x => x.Kind == requestKind && x.State == state)
                 .OrderByDescending(x => x.CreatedAt)
                 .FirstOrDefaultAsync(token);
             if (request is null)
@@ -585,7 +592,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
         var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var requestByChat = await db.ContactChangeRequests
-            .Where(x => x.Kind == "phone"
+            .Where(x => (x.Kind == "phone" || x.Kind == "account_delete_phone")
                 && x.ChatId == chatId
                 && x.Status == "awaiting_phone"
                 && x.ExpiresAt > nowUnixMs)

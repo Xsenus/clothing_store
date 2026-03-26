@@ -135,9 +135,21 @@ public record TelegramStartAuthPayload(string? ReturnUrl, string? Intent = null)
 
 public record ExternalAuthStartPayload(string Provider, string? ReturnUrl, string? Intent = null);
 
+public record PhoneAuthStartPayload(string Phone);
+
+public record PhoneAuthConfirmPayload(string Phone, string Code);
+
 public record ContactChangeStartPayload(string Value);
 
 public record ContactChangeConfirmPayload(string Value, string Code);
+
+public record ProfileDeleteStartPayload(string? Channel);
+
+public record ProfileDeleteEmailConfirmPayload(string Code);
+
+public record ProfileDeletePhoneConfirmPayload(string Code);
+
+public record ProfilePasswordPayload(string NewPassword);
 
 public record SmtpTestEmailPayload(
     string ToEmail,

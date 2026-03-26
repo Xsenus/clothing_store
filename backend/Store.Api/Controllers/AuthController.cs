@@ -21,11 +21,15 @@ namespace Store.Api.Controllers;
 [Route("auth")]
 public class AuthController : ControllerBase
 {
+    private const int PhoneLoginResendCooldownSeconds = 60;
+    private const int PhoneLoginMaxResendsPerHour = 3;
+
     private readonly StoreDbContext _db;
     private readonly AuthService _authService;
     private readonly IConfiguration _configuration;
     private readonly TransactionalEmailService _emailService;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TelegramGatewayService _telegramGatewayService;
     private readonly UserIdentityService _userIdentityService;
 
     /// <summary>
@@ -37,6 +41,7 @@ public class AuthController : ControllerBase
         IConfiguration configuration,
         TransactionalEmailService emailService,
         IHttpClientFactory httpClientFactory,
+        TelegramGatewayService telegramGatewayService,
         UserIdentityService userIdentityService)
     {
         _db = db;
@@ -44,6 +49,7 @@ public class AuthController : ControllerBase
         _configuration = configuration;
         _emailService = emailService;
         _httpClientFactory = httpClientFactory;
+        _telegramGatewayService = telegramGatewayService;
         _userIdentityService = userIdentityService;
     }
 
@@ -149,12 +155,219 @@ public class AuthController : ControllerBase
         var email = payload.Email.Trim().ToLowerInvariant();
         var user = await _userIdentityService.FindUserForEmailAuthAsync(email, HttpContext.RequestAborted);
         var iterations = _configuration.GetValue<int?>("Security:PasswordHashIterations") ?? 100_000;
-        if (user is null || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
+        if (user is null || user.IsDeleted || !AuthService.VerifyPassword(payload.Password, user.PasswordHash, user.Salt, iterations)) return Results.BadRequest(new { detail = "Invalid credentials" });
         if (user.IsBlocked) return Results.BadRequest(new { detail = "User is blocked" });
         if (!user.Verified) return Results.BadRequest(new { detail = "Email is not verified" });
         user = await _userIdentityService.ConsolidateUsersByConfirmedEmailAsync(user.Id, email, HttpContext.RequestAborted);
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "email");
         return Results.Ok(new { token, refreshToken, user = await BuildAuthUserPayloadAsync(user) });
+    }
+
+    [HttpPost("phone/start")]
+    public async Task<IResult> StartPhoneLogin([FromBody] PhoneAuthStartPayload payload)
+    {
+        var normalizedPhone = NormalizePhone(payload.Phone);
+        if (string.IsNullOrWhiteSpace(normalizedPhone))
+            return Results.BadRequest(new { detail = "Введите корректный номер телефона." });
+
+        var cancellationToken = HttpContext.RequestAborted;
+        var availability = await _telegramGatewayService.GetAvailabilityAsync(cancellationToken);
+        if (!availability.Available)
+            return Results.BadRequest(new { detail = availability.Reason ?? "Вход по телефону сейчас недоступен." });
+
+        var configuration = availability.Configuration;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var activeRequest = await _db.ContactChangeRequests
+            .Where(x => x.UserId == string.Empty && x.Kind == "auth_phone" && x.TargetValue == normalizedPhone && x.Status == "pending")
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var request = activeRequest ?? new ContactChangeRequest
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            UserId = string.Empty,
+            Kind = "auth_phone",
+            TargetValue = normalizedPhone,
+            CreatedAt = now,
+            ResendWindowStartedAt = now,
+            ResendCount = 0,
+            Status = "pending"
+        };
+
+        var resendWindowStart = request.ResendWindowStartedAt ?? now;
+        if (now - resendWindowStart >= TimeSpan.FromHours(1).TotalMilliseconds)
+        {
+            resendWindowStart = now;
+            request.ResendCount = 0;
+        }
+
+        var allowCooldownBypass = string.IsNullOrWhiteSpace(request.GatewayRequestId);
+        if (!allowCooldownBypass
+            && request.LastSentAt.HasValue
+            && now - request.LastSentAt.Value < TimeSpan.FromSeconds(PhoneLoginResendCooldownSeconds).TotalMilliseconds)
+        {
+            return Results.BadRequest(new { detail = "Повторно отправить код можно через минуту." });
+        }
+
+        if (request.ResendCount >= PhoneLoginMaxResendsPerHour)
+            return Results.BadRequest(new { detail = "Слишком много попыток. Попробуйте снова через час." });
+
+        request.TargetValue = normalizedPhone;
+        request.State ??= AuthService.GenerateToken()[..24].ToLowerInvariant();
+        request.Status = "pending";
+        request.Code = null;
+        request.ChatId = null;
+        request.TelegramUserId = null;
+        request.VerifiedAt = null;
+        request.ConsumedAt = null;
+        request.LastSentAt = now;
+        request.ResendCount += 1;
+        request.ResendWindowStartedAt = resendWindowStart;
+        request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(configuration.TtlSeconds).ToUnixTimeMilliseconds();
+        request.GatewayRequestId = null;
+        request.GatewayDeliveryStatus = null;
+        request.GatewayDeliveryUpdatedAt = null;
+        request.GatewayVerificationStatus = null;
+        request.GatewayVerificationUpdatedAt = null;
+        request.GatewayIsRefunded = null;
+
+        TelegramGatewayRequestStatus status;
+        try
+        {
+            status = await _telegramGatewayService.SendVerificationMessageAsync(
+                normalizedPhone,
+                payload: $"auth_phone:{normalizedPhone}",
+                cancellationToken);
+        }
+        catch (TelegramGatewayException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+
+        ApplyGatewayStatus(request, status);
+        if (string.IsNullOrWhiteSpace(request.GatewayRequestId))
+            return Results.BadRequest(new { detail = "Не удалось создать сессию подтверждения. Попробуйте еще раз." });
+
+        if (activeRequest is null)
+            _db.ContactChangeRequests.Add(request);
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Results.Ok(new
+        {
+            ok = true,
+            method = "telegram_gateway",
+            maskedDestination = MaskPhone(normalizedPhone),
+            codeLength = configuration.CodeLength,
+            ttlSeconds = configuration.TtlSeconds,
+            resendInSeconds = PhoneLoginResendCooldownSeconds
+        });
+    }
+
+    [HttpPost("phone/confirm")]
+    public async Task<IResult> ConfirmPhoneLogin([FromBody] PhoneAuthConfirmPayload payload)
+    {
+        var normalizedPhone = NormalizePhone(payload.Phone);
+        var code = (payload.Code ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPhone) || string.IsNullOrWhiteSpace(code))
+            return Results.BadRequest(new { detail = "Проверьте номер телефона и код подтверждения." });
+
+        var cancellationToken = HttpContext.RequestAborted;
+        var request = await _db.ContactChangeRequests
+            .Where(x => x.UserId == string.Empty && x.Kind == "auth_phone" && x.TargetValue == normalizedPhone)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (request is null || request.Status != "pending")
+            return Results.BadRequest(new { detail = "Запрос подтверждения не найден." });
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (request.ExpiresAt < now)
+        {
+            request.Status = "expired";
+            await _db.SaveChangesAsync(cancellationToken);
+            return Results.BadRequest(new { detail = "Срок действия кода истек. Запросите новый код." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.GatewayRequestId))
+            return Results.BadRequest(new { detail = "Сессия подтверждения устарела. Запросите новый код." });
+
+        TelegramGatewayRequestStatus status;
+        try
+        {
+            status = await _telegramGatewayService.CheckVerificationStatusAsync(request.GatewayRequestId, code, cancellationToken);
+        }
+        catch (TelegramGatewayException ex)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+
+        ApplyGatewayStatus(request, status);
+        var verificationResult = NormalizeGatewayVerificationStatus(status.VerificationStatus?.Status);
+        switch (verificationResult)
+        {
+            case "success":
+                break;
+            case "invalid_code":
+                await _db.SaveChangesAsync(cancellationToken);
+                return Results.BadRequest(new { detail = "Неверный код подтверждения." });
+            case "expired":
+                request.Status = "expired";
+                await _db.SaveChangesAsync(cancellationToken);
+                return Results.BadRequest(new { detail = "Срок действия кода истек. Запросите новый код." });
+            case "too_many_attempts":
+                await _db.SaveChangesAsync(cancellationToken);
+                return Results.BadRequest(new { detail = "Превышено количество попыток. Запросите новый код." });
+            default:
+                await _db.SaveChangesAsync(cancellationToken);
+                return Results.BadRequest(new { detail = "Не удалось подтвердить код. Запросите новый код и попробуйте еще раз." });
+        }
+
+        var user = await _userIdentityService.FindUserByConfirmedPhoneAsync(normalizedPhone, cancellationToken: cancellationToken);
+        var created = false;
+        if (user is null)
+        {
+            user = await EnsurePhoneLoginUserAsync(normalizedPhone, cancellationToken);
+            created = true;
+        }
+
+        request.UserId = user.Id;
+        request.VerifiedAt = now;
+        request.ConsumedAt = now;
+        request.Status = "consumed";
+
+        if (user.IsBlocked)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return Results.BadRequest(new { detail = "Аккаунт заблокирован." });
+        }
+
+        user.Verified = true;
+
+        var profile = await _db.Profiles.FirstOrDefaultAsync(x => x.UserId == user.Id, cancellationToken);
+        if (profile is null)
+        {
+            profile = new Profile
+            {
+                UserId = user.Id,
+                Email = TechnicalEmailHelper.IsTechnicalEmail(user.Email) ? string.Empty : user.Email,
+                EmailVerified = user.Verified && TechnicalEmailHelper.IsValidRealEmail(user.Email)
+            };
+            _db.Profiles.Add(profile);
+        }
+
+        profile.Phone = normalizedPhone;
+        profile.PhoneVerified = true;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var (token, refreshToken) = await CreateSessionPairAsync(user.Id, "phone");
+        return Results.Ok(new
+        {
+            token,
+            refreshToken,
+            created,
+            user = await BuildAuthUserPayloadAsync(user, profile)
+        });
     }
 
 
@@ -298,7 +511,7 @@ public class AuthController : ControllerBase
         }
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId);
-        if (user is null || user.IsBlocked)
+        if (user is null || user.IsDeleted || user.IsBlocked)
             return Results.BadRequest(new { detail = "User is not available for login" });
 
         user.Verified = true;
@@ -438,7 +651,7 @@ public class AuthController : ControllerBase
         }
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == request.UserId);
-        if (user is null || user.IsBlocked)
+        if (user is null || user.IsDeleted || user.IsBlocked)
             return Results.BadRequest(new { detail = "User is not available for login" });
 
         var (token, refreshToken) = await CreateSessionPairAsync(user.Id, request.Provider);
@@ -605,7 +818,7 @@ public class AuthController : ControllerBase
         }
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == refreshSession.UserId);
-        if (user is null || user.IsBlocked || !user.Verified)
+        if (user is null || user.IsDeleted || user.IsBlocked || !user.Verified)
         {
             _db.RefreshSessions.Remove(refreshSession);
             await _db.SaveChangesAsync();
@@ -724,6 +937,33 @@ public class AuthController : ControllerBase
             id = user.Id,
             email = visibleEmail
         };
+    }
+
+    private async Task<User> EnsurePhoneLoginUserAsync(string normalizedPhone, CancellationToken cancellationToken)
+    {
+        var technicalEmail = TechnicalEmailHelper.BuildPhoneTechnicalEmail(normalizedPhone);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var user = await _db.Users.FirstOrDefaultAsync(
+            x => x.Email == technicalEmail && !x.IsDeleted,
+            cancellationToken);
+        if (user is null)
+        {
+            user = new User
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Email = technicalEmail,
+                PasswordHash = string.Empty,
+                Salt = string.Empty,
+                CreatedAt = now,
+                Verified = true
+            };
+            _db.Users.Add(user);
+        }
+
+        user.Verified = true;
+
+        return user;
     }
 
     private async Task<ExternalProviderConfiguration?> ResolveExternalProviderConfigurationAsync(string provider)
@@ -1410,11 +1650,73 @@ public class AuthController : ControllerBase
         return normalized switch
         {
             "email" or "password" => "email",
+            "phone" => "phone",
             "telegram" => "telegram",
             "google" => "google",
             "vk" or "vkontakte" => "vk",
             "yandex" => "yandex",
             _ => "other"
+        };
+    }
+
+    private static string NormalizePhone(string? phone)
+    {
+        var trimmed = (phone ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return string.Empty;
+
+        var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(digits))
+            return string.Empty;
+
+        return $"+{digits}";
+    }
+
+    private static string? MaskPhone(string? phone)
+    {
+        var normalized = NormalizePhone(phone);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var digits = new string(normalized.Where(char.IsDigit).ToArray());
+        if (digits.Length <= 4)
+            return $"***{digits}";
+
+        return $"+*** *** **{digits[^4]} {digits[^3..]}";
+    }
+
+    private static void ApplyGatewayStatus(ContactChangeRequest request, TelegramGatewayRequestStatus status)
+    {
+        request.GatewayRequestId = status.RequestId;
+        request.GatewayDeliveryStatus = status.DeliveryStatus?.Status;
+        request.GatewayDeliveryUpdatedAt = NormalizeGatewayTimestamp(status.DeliveryStatus?.UpdatedAt);
+        request.GatewayVerificationStatus = status.VerificationStatus?.Status;
+        request.GatewayVerificationUpdatedAt = NormalizeGatewayTimestamp(status.VerificationStatus?.UpdatedAt);
+        request.GatewayIsRefunded = status.IsRefunded;
+    }
+
+    private static long? NormalizeGatewayTimestamp(long? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value < 10_000_000_000 ? value.Value * 1000 : value.Value;
+    }
+
+    private static string NormalizeGatewayVerificationStatus(string? status)
+    {
+        return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "verified" => "success",
+            "code_valid" => "success",
+            "success" => "success",
+            "invalid" => "invalid_code",
+            "code_invalid" => "invalid_code",
+            "expired" => "expired",
+            "code_expired" => "expired",
+            "max_attempts" => "too_many_attempts",
+            "code_max_attempts_exceeded" => "too_many_attempts",
+            _ => string.Empty
         };
     }
 

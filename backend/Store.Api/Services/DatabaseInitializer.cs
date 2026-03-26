@@ -693,6 +693,11 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_description", "");
         await EnsureAppSettingExistsAsync(db, "telegram_login_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "telegram_widget_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "telegram_gateway_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "telegram_gateway_api_token", "");
+        await EnsureAppSettingExistsAsync(db, "telegram_gateway_sender_username", "");
+        await EnsureAppSettingExistsAsync(db, "telegram_gateway_code_length", "6");
+        await EnsureAppSettingExistsAsync(db, "telegram_gateway_ttl_seconds", "300");
         await EnsureAppSettingExistsAsync(db, "google_login_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "google_auth_client_id", "");
         await EnsureAppSettingExistsAsync(db, "google_auth_client_secret", "");

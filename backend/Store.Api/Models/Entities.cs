@@ -54,6 +54,18 @@ public class User
 
     [Column("is_system")]
     public bool IsSystem { get; set; }
+
+    [Column("is_deleted")]
+    public bool IsDeleted { get; set; }
+
+    [Column("deleted_at")]
+    public long? DeletedAt { get; set; }
+
+    [Column("deleted_by_user_id")]
+    public string? DeletedByUserId { get; set; }
+
+    [Column("deleted_by_role")]
+    public string? DeletedByRole { get; set; }
 }
 
 /// <summary>
@@ -454,6 +466,24 @@ public class ContactChangeRequest
 
     [Column("resend_window_started_at")]
     public long? ResendWindowStartedAt { get; set; }
+
+    [Column("gateway_request_id")]
+    public string? GatewayRequestId { get; set; }
+
+    [Column("gateway_delivery_status")]
+    public string? GatewayDeliveryStatus { get; set; }
+
+    [Column("gateway_delivery_updated_at")]
+    public long? GatewayDeliveryUpdatedAt { get; set; }
+
+    [Column("gateway_verification_status")]
+    public string? GatewayVerificationStatus { get; set; }
+
+    [Column("gateway_verification_updated_at")]
+    public long? GatewayVerificationUpdatedAt { get; set; }
+
+    [Column("gateway_is_refunded")]
+    public bool? GatewayIsRefunded { get; set; }
 }
 
 [Table("user_external_identities")]

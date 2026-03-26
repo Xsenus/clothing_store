@@ -38,6 +38,24 @@ public static class TechnicalEmailHelper
         };
     }
 
+    public static string BuildDeletedEmail(string userId)
+    {
+        var normalizedUserId = (userId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUserId))
+            throw new InvalidOperationException("User id is required for a deleted technical email.");
+
+        return $"deleted_{normalizedUserId}@auth.local";
+    }
+
+    public static string BuildPhoneTechnicalEmail(string? phone)
+    {
+        var digits = ExtractPhoneDigits(phone);
+        if (string.IsNullOrWhiteSpace(digits))
+            throw new InvalidOperationException("Phone is required for a phone technical email.");
+
+        return $"phone_{digits}@auth.local";
+    }
+
     public static string NormalizeRealEmail(string? email)
         => (email ?? string.Empty).Trim().ToLowerInvariant();
 
@@ -56,7 +74,9 @@ public static class TechnicalEmailHelper
         return localPart.StartsWith("telegram_", StringComparison.OrdinalIgnoreCase)
                || localPart.StartsWith("google_", StringComparison.OrdinalIgnoreCase)
                || localPart.StartsWith("yandex_", StringComparison.OrdinalIgnoreCase)
-               || localPart.StartsWith("vk_", StringComparison.OrdinalIgnoreCase);
+               || localPart.StartsWith("vk_", StringComparison.OrdinalIgnoreCase)
+               || localPart.StartsWith("phone_", StringComparison.OrdinalIgnoreCase)
+               || localPart.StartsWith("deleted_", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsValidRealEmail(string? email)
@@ -92,4 +112,7 @@ public static class TechnicalEmailHelper
         domain = parts[1];
         return !string.IsNullOrWhiteSpace(localPart) && !string.IsNullOrWhiteSpace(domain);
     }
+
+    private static string ExtractPhoneDigits(string? phone)
+        => new((phone ?? string.Empty).Where(char.IsDigit).ToArray());
 }

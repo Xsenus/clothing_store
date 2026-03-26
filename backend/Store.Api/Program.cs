@@ -49,6 +49,8 @@ builder.Services.AddSingleton(storeRuntimePaths);
 
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserIdentityService>();
+builder.Services.AddScoped<UserAccountLifecycleService>();
+builder.Services.AddScoped<TelegramGatewayService>();
 builder.Services.AddScoped<IOrderInventoryService, OrderInventoryService>();
 builder.Services.AddScoped<IDaDataAddressSuggestService, DaDataAddressSuggestService>();
 builder.Services.AddScoped<IOrderPaymentService, OrderPaymentService>();

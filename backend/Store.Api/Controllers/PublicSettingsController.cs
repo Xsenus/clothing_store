@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 using Store.Api.Data;
 
 namespace Store.Api.Controllers;
@@ -503,7 +504,11 @@ public class PublicSettingsController : ControllerBase
 
         var username = await _db.TelegramBots
             .AsNoTracking()
-            .Where(x => x.Enabled && x.UseForLogin && !string.IsNullOrWhiteSpace(x.Username))
+            .Where(x =>
+                x.Enabled
+                && x.UseForLogin
+                && !string.IsNullOrWhiteSpace(x.Username)
+                && !string.IsNullOrWhiteSpace(x.Token))
             .OrderByDescending(x => x.UpdatedAt)
             .Select(x => x.Username)
             .FirstOrDefaultAsync();
@@ -518,7 +523,32 @@ public class PublicSettingsController : ControllerBase
             "Auth:Telegram:WidgetEnabled",
             fallback: false);
 
-        return enabled && await IsTelegramLoginReadyAsync();
+        return enabled
+            && IsTelegramWidgetHostSupported()
+            && await IsTelegramLoginReadyAsync();
+    }
+
+    private bool IsTelegramWidgetHostSupported()
+    {
+        var host = Request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHosts)
+            ? forwardedHosts.ToString().Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
+            : null;
+        host = string.IsNullOrWhiteSpace(host) ? Request.Host.Host : host;
+
+        if (string.IsNullOrWhiteSpace(host))
+            return false;
+
+        var normalizedHost = host.Trim().ToLowerInvariant();
+        if (normalizedHost == "localhost"
+            || normalizedHost.EndsWith(".localhost", StringComparison.Ordinal)
+            || normalizedHost.EndsWith(".local", StringComparison.Ordinal)
+            || normalizedHost.EndsWith(".test", StringComparison.Ordinal)
+            || normalizedHost.EndsWith(".invalid", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !IPAddress.TryParse(normalizedHost, out _);
     }
 
     private async Task<bool> IsExternalProviderReadyAsync(

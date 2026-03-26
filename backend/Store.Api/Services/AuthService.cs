@@ -43,7 +43,7 @@ public class AuthService
             return null;
 
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == session.UserId);
-        if (user is null)
+        if (user is null || user.IsDeleted)
             return null;
 
         await TouchSessionIfNeededAsync(session);
@@ -65,7 +65,7 @@ public class AuthService
             if (session is not null && session.CreatedAt >= minCreatedAt && !string.IsNullOrWhiteSpace(session.UserId))
             {
                 var sessionUser = await _db.Users.FirstOrDefaultAsync(x => x.Id == session.UserId);
-                if (sessionUser is not null && sessionUser.IsAdmin && !sessionUser.IsBlocked)
+                if (sessionUser is not null && !sessionUser.IsDeleted && sessionUser.IsAdmin && !sessionUser.IsBlocked)
                     return sessionUser;
             }
         }
@@ -80,7 +80,7 @@ public class AuthService
             return null;
 
         var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userSession.UserId);
-        if (user is null || !user.IsAdmin || user.IsBlocked)
+        if (user is null || user.IsDeleted || !user.IsAdmin || user.IsBlocked)
             return null;
 
         await TouchSessionIfNeededAsync(userSession);
