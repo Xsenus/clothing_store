@@ -1,6 +1,12 @@
 import { Link } from "react-router";
 
+import SocialLinksList from "@/components/social/SocialLinksList";
+import useSiteSocialLinks from "@/hooks/useSiteSocialLinks";
+
 export default function Footer() {
+  const { footerLinks, pageLinks } = useSiteSocialLinks();
+  const socialsPageEnabled = pageLinks.length > 0;
+
   return (
     <footer className="bg-black py-12 text-white md:py-16">
       <div className="container mx-auto px-4">
@@ -10,7 +16,7 @@ export default function Footer() {
               FASHION_DEMON
             </h2>
             <p className="mb-6 max-w-sm text-gray-300">
-              Переосмысляем уличную моду с смелой эстетикой и премиальным
+              Переосмысляем уличную моду со смелой эстетикой и премиальным
               качеством. Создано для тех, кто не боится выделяться.
             </p>
           </div>
@@ -73,9 +79,44 @@ export default function Footer() {
                   Условия возврата
                 </Link>
               </li>
+              {socialsPageEnabled ? (
+                <li>
+                  <Link
+                    to="/socials"
+                    className="transition-colors hover:text-white"
+                  >
+                    Соцсети
+                  </Link>
+                </li>
+              ) : null}
             </ul>
           </div>
         </div>
+
+        {footerLinks.length > 0 ? (
+          <div className="mt-10 border-t border-gray-800 pt-8">
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-widest">
+                  Мы в соцсетях
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm text-gray-400">
+                  Подписывайтесь на обновления, анонсы новых коллекций и акции.
+                </p>
+              </div>
+              {socialsPageEnabled ? (
+                <Link
+                  to="/socials"
+                  className="text-sm uppercase tracking-[0.16em] text-gray-400 transition-colors hover:text-white"
+                >
+                  Все соцсети
+                </Link>
+              ) : null}
+            </div>
+
+            <SocialLinksList items={footerLinks} variant="footer" />
+          </div>
+        ) : null}
 
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-gray-800 pt-8 text-xs uppercase tracking-wider text-gray-400 md:flex-row">
           <p className="text-center md:text-left">

@@ -14,6 +14,7 @@ const PrivacyPage = lazy(() => import("./pages/privacy"));
 const TermsPage = lazy(() => import("./pages/terms"));
 const OfferPage = lazy(() => import("./pages/offer"));
 const ReturnsPage = lazy(() => import("./pages/returns"));
+const SocialsPage = lazy(() => import("./pages/socials"));
 const NotFound = lazy(() => import("./pages/not-found"));
 const AdminPage = lazy(() => import("./pages/admin"));
 
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/offer" element={<OfferPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
+        <Route path="/socials" element={<SocialsPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

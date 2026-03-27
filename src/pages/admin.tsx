@@ -3,6 +3,7 @@ import Footer from '@/components/Footer';
 import "./admin.css";
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
 import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
+import AdminSocialLinksSettings from '@/components/admin/AdminSocialLinksSettings';
 import {
   AdminAvitoIntegrationTab,
   AdminCdekIntegrationTab,
@@ -63,6 +64,7 @@ import {
   optimizeFilesForUpload,
 } from '@/lib/image-upload-optimization';
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
+import { DEFAULT_SITE_SOCIAL_LINKS_CONFIG_JSON } from '@/lib/social-links';
 import {
   getYooKassaConfigurationIssues,
   getYooMoneyConfigurationIssues,
@@ -1340,7 +1342,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
-const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "upload-media"] as const;
+const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
 
@@ -1594,6 +1596,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   site_title: "fashiondemon",
   site_favicon_url: "",
   site_loading_animation_enabled: "true",
+  social_links_config_json: DEFAULT_SITE_SOCIAL_LINKS_CONFIG_JSON,
   product_card_background_mode: "standard",
   product_card_background_color: "#e9e3da",
   product_card_image_fit_mode: "contain",
@@ -3999,6 +4002,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       name: "",
       slug: "",
       color: getDictionaryDotColor(kind),
+      imageUrl: "",
+      previewMode: "gallery",
       description: "",
       showColorInCatalog: true,
       sortOrder: String(getNextDictionarySortOrder(kind))
@@ -4008,6 +4013,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const submitCreateDictionaryItem = async () => {
     const name = dictionaryCreateDialog.name.trim();
     const slug = dictionaryCreateDialog.slug.trim().toLowerCase();
+    const color = String(dictionaryCreateDialog.color ?? "").trim();
+    const imageUrl = String(dictionaryCreateDialog.imageUrl ?? "").trim();
+    const description = String(dictionaryCreateDialog.description ?? "").trim();
+    const previewMode =
+      dictionaryCreateDialog.previewMode === "products" ? "products" : "gallery";
     const sortOrder = parseDictionarySortOrder(
       dictionaryCreateDialog.sortOrder,
       getNextDictionarySortOrder(dictionaryCreateDialog.kind)
@@ -4035,10 +4045,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           kind: dictionaryCreateDialog.kind,
           name,
           slug: slug || undefined,
-          color: dictionaryCreateDialog.color.trim() || undefined,
-          imageUrl: dictionaryCreateDialog.imageUrl.trim() || undefined,
-          previewMode: dictionaryCreateDialog.previewMode,
-          description: dictionaryCreateDialog.description.trim() || undefined,
+          color: color || undefined,
+          imageUrl: imageUrl || undefined,
+          previewMode,
+          description: description || undefined,
           isActive: true,
           showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
           showColorInCatalog: dictionaryCreateDialog.showColorInCatalog,
@@ -11349,7 +11359,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         подкаталогами и не пролистывать весь раздел целиком.
                       </p>
                       <Tabs value={selectedGeneralSettingsCatalog} onValueChange={setSelectedGeneralSettingsCatalog} className="space-y-4">
-                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-5">
+                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-6">
                           <TabsTrigger value="branding" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Брендинг
                           </TabsTrigger>
@@ -11361,6 +11371,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </TabsTrigger>
                           <TabsTrigger value="product-page" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Страница товара
+                          </TabsTrigger>
+                          <TabsTrigger value="social-links" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Соцсети
                           </TabsTrigger>
                           <TabsTrigger value="upload-media" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Загрузка медиа
@@ -11717,6 +11730,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           карточке` или свой фон.
                         </p>
                       </div>
+                        </TabsContent>
+                        <TabsContent value="social-links" className="mt-0">
+                          <AdminSocialLinksSettings
+                            value={settings.social_links_config_json || DEFAULT_APP_SETTINGS.social_links_config_json}
+                            onChange={(nextValue) => updateSetting("social_links_config_json", nextValue)}
+                          />
                         </TabsContent>
                         <TabsContent value="upload-media" className="mt-0">
                           <div className="space-y-4 border border-gray-200 p-3">

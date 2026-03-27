@@ -2,10 +2,13 @@ import { useEffect, useState, type ComponentType } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Menu, ShoppingBag, User } from "lucide-react";
 
+import SocialLinksList from "@/components/social/SocialLinksList";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/context/CartContext";
 import { useAuth, useAuthActions } from "@/context/AuthContext";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
+import useSiteSocialLinks from "@/hooks/useSiteSocialLinks";
+import type { SiteSocialLinkItem } from "@/lib/social-links";
 import { cn } from "@/lib/utils";
 
 interface HeaderNavLink {
@@ -21,6 +24,8 @@ interface HeaderMobileMenuProps {
   isAuthenticated: boolean;
   userPrimaryLabel: string;
   userSecondaryLabel: string;
+  socialLinks: SiteSocialLinkItem[];
+  socialsPageEnabled: boolean;
   onSignOut: () => Promise<void>;
 }
 
@@ -102,6 +107,7 @@ export default function Header() {
   const { user, isAuthenticated } = useAuth();
   const { signOut } = useAuthActions();
   const confirmAction = useConfirmDialog();
+  const { headerLinks, pageLinks } = useSiteSocialLinks();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -124,6 +130,8 @@ export default function Header() {
     { name: "ГЛАВНАЯ", path: "/" },
     { name: "КАТАЛОГ", path: "/catalog" },
   ];
+  const headerSocialLinks = headerLinks.slice(0, 4);
+  const socialsPageEnabled = pageLinks.length > 0;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -181,9 +189,8 @@ export default function Header() {
     <header
       data-hero-header={isHeroHeader ? "true" : "false"}
       className={cn(
-        "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
+        "fixed left-0 right-0 top-0 z-50 text-foreground transition-all duration-300",
         isScrolled ? "border-b bg-background/80 backdrop-blur-md" : "bg-transparent",
-        "text-foreground",
       )}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:grid md:h-20 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
@@ -197,6 +204,8 @@ export default function Header() {
               isAuthenticated={isAuthenticated}
               userPrimaryLabel={userPrimaryLabel}
               userSecondaryLabel={userSecondaryLabel}
+              socialLinks={headerLinks}
+              socialsPageEnabled={socialsPageEnabled}
               onSignOut={handleSignOut}
             />
           ) : null}
@@ -232,7 +241,7 @@ export default function Header() {
             <Link
               key={link.path}
               to={link.path}
-              className={`site-header-nav-link text-sm font-bold tracking-widest hover:text-muted-foreground transition-colors ${
+              className={`site-header-nav-link text-sm font-bold tracking-widest transition-colors hover:text-muted-foreground ${
                 location.pathname === link.path
                   ? "underline decoration-2 underline-offset-4"
                   : ""
@@ -244,6 +253,12 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-2 md:justify-self-end md:gap-4">
+          {headerSocialLinks.length > 0 ? (
+            <div className="hidden sm:flex">
+              <SocialLinksList items={headerSocialLinks} variant="header" />
+            </div>
+          ) : null}
+
           <div className="hidden md:block">
             {isAuthenticated && !shouldHideDesktopAccountTrigger ? (
               <>
@@ -306,7 +321,7 @@ export default function Header() {
               {totalItems > 0 && (
                 <span
                   key={totalItems}
-                  className="site-cart-badge-pop site-header-cart-badge absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
+                  className="site-cart-badge-pop site-header-cart-badge absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
                   aria-hidden="true"
                 >
                   {totalItems}
