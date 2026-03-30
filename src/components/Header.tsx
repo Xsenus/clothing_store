@@ -123,6 +123,7 @@ export default function Header() {
   const userCompactLabel = getUserCompactLabel(user);
   const userSecondaryLabel = getUserSecondaryLabel(user, userPrimaryLabel);
   const isHeroHeader = location.pathname === "/" && !isScrolled;
+  const shouldHideHeroActions = isHeroHeader;
   const shouldHideDesktopAccountTrigger = isHeroHeader;
   const cartLabel =
     totalItems > 0 ? `Корзина, товаров: ${totalItems}` : "Корзина";
@@ -145,8 +146,7 @@ export default function Header() {
   const handleSignOut = async () => {
     const confirmed = await confirmAction({
       title: "Выйти из аккаунта?",
-      description:
-        "Текущая сессия будет завершена на этом устройстве.",
+      description: "Текущая сессия будет завершена на этом устройстве.",
       confirmText: "Выйти",
     });
     if (!confirmed) return;
@@ -190,12 +190,14 @@ export default function Header() {
       data-hero-header={isHeroHeader ? "true" : "false"}
       className={cn(
         "fixed left-0 right-0 top-0 z-50 text-foreground transition-all duration-300",
-        isScrolled ? "border-b bg-background/80 backdrop-blur-md" : "bg-transparent",
+        isScrolled
+          ? "border-b bg-background/80 backdrop-blur-md"
+          : "bg-transparent",
       )}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:grid md:h-20 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
         <div className="md:hidden">
-          {MobileMenuComponent ? (
+          {!shouldHideHeroActions && MobileMenuComponent ? (
             <MobileMenuComponent
               open={isMobileMenuOpen}
               onOpenChange={setIsMobileMenuOpen}
@@ -209,24 +211,26 @@ export default function Header() {
               onSignOut={handleSignOut}
             />
           ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="site-header-menu-button"
-            aria-label="Открыть меню"
-            title="Открыть меню"
-            onMouseEnter={() => {
-              void ensureMobileMenuLoaded();
-            }}
-            onFocus={() => {
-              void ensureMobileMenuLoaded();
-            }}
-            onClick={() => {
-              void openMobileMenu();
-            }}
-          >
-            <Menu className="h-6 w-6" />
-          </Button>
+          {!shouldHideHeroActions ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="site-header-menu-button"
+              aria-label="Открыть меню"
+              title="Открыть меню"
+              onMouseEnter={() => {
+                void ensureMobileMenuLoaded();
+              }}
+              onFocus={() => {
+                void ensureMobileMenuLoaded();
+              }}
+              onClick={() => {
+                void openMobileMenu();
+              }}
+            >
+              <Menu className="h-6 w-6" />
+            </Button>
+          ) : null}
         </div>
 
         <Link
@@ -253,14 +257,16 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-2 md:justify-self-end md:gap-4">
-          {headerSocialLinks.length > 0 ? (
+          {!shouldHideHeroActions && headerSocialLinks.length > 0 ? (
             <div className="hidden sm:flex">
               <SocialLinksList items={headerSocialLinks} variant="header" />
             </div>
           ) : null}
 
           <div className="hidden md:block">
-            {isAuthenticated && !shouldHideDesktopAccountTrigger ? (
+            {!shouldHideHeroActions &&
+            isAuthenticated &&
+            !shouldHideDesktopAccountTrigger ? (
               <>
                 {AccountMenuComponent ? (
                   <AccountMenuComponent
@@ -301,8 +307,13 @@ export default function Header() {
                   </Button>
                 )}
               </>
-            ) : !isAuthenticated ? (
-              <Button asChild variant="ghost" size="sm" className="site-header-auth-button font-bold">
+            ) : !shouldHideHeroActions && !isAuthenticated ? (
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="site-header-auth-button font-bold"
+              >
                 <Link to="/auth" aria-label="Войти в аккаунт">
                   Войти
                 </Link>
@@ -310,25 +321,32 @@ export default function Header() {
             ) : null}
           </div>
 
-          <Button asChild variant="ghost" size="icon" className="site-header-cart-button relative">
-            <Link
-              to="/cart"
-              id="cart-icon-target"
-              aria-label={cartLabel}
-              title={cartLabel}
+          {!shouldHideHeroActions ? (
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="site-header-cart-button relative"
             >
-              <ShoppingBag className="h-5 w-5" />
-              {totalItems > 0 && (
-                <span
-                  key={totalItems}
-                  className="site-cart-badge-pop site-header-cart-badge absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
-                  aria-hidden="true"
-                >
-                  {totalItems}
-                </span>
-              )}
-            </Link>
-          </Button>
+              <Link
+                to="/cart"
+                id="cart-icon-target"
+                aria-label={cartLabel}
+                title={cartLabel}
+              >
+                <ShoppingBag className="h-5 w-5" />
+                {totalItems > 0 && (
+                  <span
+                    key={totalItems}
+                    className="site-cart-badge-pop site-header-cart-badge absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
+                    aria-hidden="true"
+                  >
+                    {totalItems}
+                  </span>
+                )}
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
     </header>
