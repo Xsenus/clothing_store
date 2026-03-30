@@ -8,10 +8,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth, useAuthActions } from "@/context/AuthContext";
 import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import { FLOW } from "@/lib/api-mapping";
+import { closeDeferredPopup, navigateDeferredPopup, openDeferredPopup } from "@/lib/deferred-popup";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import PageSeo from "@/components/PageSeo";
 import { cn } from "@/lib/utils";
@@ -185,6 +186,7 @@ export default function AuthPage() {
   const { signIn } = useAuthActions();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState(null);
   const [otp, setOtp] = useState("");
@@ -260,10 +262,32 @@ export default function AuthPage() {
     loadAuthProviders();
   }, []);
 
-  const closeAuthPopup = () => {
-    if (authPopupRef.current && !authPopupRef.current.closed) {
-      authPopupRef.current.close();
+  useEffect(() => {
+    const restoredState = String(searchParams.get("externalAuthState") || "").trim();
+    if (!restoredState) {
+      return;
     }
+
+    setExternalAuthSession((current) => {
+      if (current?.state === restoredState) {
+        return current;
+      }
+
+      return {
+        provider: String(searchParams.get("externalAuthProvider") || "").trim(),
+        state: restoredState,
+        expiresAt: 0,
+      };
+    });
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("externalAuthState");
+    nextParams.delete("externalAuthProvider");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const closeAuthPopup = () => {
+    closeDeferredPopup(authPopupRef.current);
     authPopupRef.current = null;
   };
 
@@ -275,6 +299,8 @@ export default function AuthPage() {
   };
 
   const handleExternalSignIn = async (provider) => {
+    const popup = openDeferredPopup(`${provider}-auth`);
+    authPopupRef.current = popup;
     setLoading(true);
     try {
       const started = await FLOW.externalAuthStart({ input: { provider, returnUrl: "/profile" } });
@@ -288,15 +314,15 @@ export default function AuthPage() {
         expiresAt: Number(started.expiresAt || 0),
       });
 
-      const popup = window.open(started.authUrl, `${provider}-auth`, "width=540,height=720");
-      authPopupRef.current = popup;
-      if (!popup) {
+      if (!navigateDeferredPopup(popup, started.authUrl)) {
         window.location.assign(started.authUrl);
         return;
       }
 
       toast.message(`Открылось окно входа через ${getProviderLabel(provider)}.`);
     } catch (error) {
+      closeAuthPopup();
+      setExternalAuthSession(null);
       toast.error(getErrorMessage(error, `Не удалось начать вход через ${getProviderLabel(provider)}`));
     } finally {
       setLoading(false);

@@ -18,6 +18,7 @@ import AdminPage from "./admin";
 import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
+import { closeDeferredPopup, navigateDeferredPopup, openDeferredPopup } from "@/lib/deferred-popup";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import {
   ROBO_KASSA_PAYMENT_METHOD_LABELS,
@@ -656,9 +657,7 @@ export default function ProfilePage() {
   };
 
   const closeExternalAuthPopup = () => {
-    if (authPopupRef.current && !authPopupRef.current.closed) {
-      authPopupRef.current.close();
-    }
+    closeDeferredPopup(authPopupRef.current);
     authPopupRef.current = null;
   };
 
@@ -1281,9 +1280,9 @@ export default function ProfilePage() {
         expiresAt: Number(started.expiresAt || 0),
       });
 
-      const popup = window.open(started.authUrl, `${provider}-link`, "width=540,height=720");
+      const popup = openDeferredPopup(`${provider}-link`);
       authPopupRef.current = popup;
-      if (!popup) {
+      if (!navigateDeferredPopup(popup, started.authUrl)) {
         window.location.assign(started.authUrl);
         return;
       }
@@ -2251,4 +2250,3 @@ export default function ProfilePage() {
     </Authenticated>
   );
 }
-

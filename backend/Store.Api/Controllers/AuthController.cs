@@ -695,6 +695,17 @@ public class AuthController : ControllerBase
         var request = await _db.ExternalAuthRequests
             .OrderByDescending(x => x.CreatedAt)
             .FirstOrDefaultAsync(x => x.Provider == normalizedProvider && x.State == normalizedState);
+        var authRedirectPath = request is null
+            ? null
+            : string.Equals(request.Intent, "signin", StringComparison.Ordinal)
+                ? QueryHelpers.AddQueryString(
+                    "/auth",
+                    new Dictionary<string, string?>
+                    {
+                        ["externalAuthState"] = request.State,
+                        ["externalAuthProvider"] = request.Provider
+                    })
+                : null;
         if (request is null)
             return Results.Content(BuildExternalAuthPopupHtml(false, "Запрос внешней авторизации не найден."), "text/html", Encoding.UTF8);
 
@@ -704,7 +715,7 @@ public class AuthController : ControllerBase
             request.Status = "expired";
             request.Error = "Срок действия запроса внешней авторизации истёк.";
             await _db.SaveChangesAsync();
-            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error, authRedirectPath), "text/html", Encoding.UTF8);
         }
 
         if (!string.IsNullOrWhiteSpace(error))
@@ -713,7 +724,7 @@ public class AuthController : ControllerBase
             request.Error = string.IsNullOrWhiteSpace(errorDescription) ? error.Trim() : errorDescription.Trim();
             request.CompletedAt = now;
             await _db.SaveChangesAsync();
-            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error, authRedirectPath), "text/html", Encoding.UTF8);
         }
 
         if (string.IsNullOrWhiteSpace(code))
@@ -722,7 +733,7 @@ public class AuthController : ControllerBase
             request.Error = "Провайдер не вернул код авторизации.";
             request.CompletedAt = now;
             await _db.SaveChangesAsync();
-            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error), "text/html", Encoding.UTF8);
+            return Results.Content(BuildExternalAuthPopupHtml(false, request.Error, authRedirectPath), "text/html", Encoding.UTF8);
         }
 
         try
@@ -1499,11 +1510,13 @@ public class AuthController : ControllerBase
             : "signin";
     }
 
-    private static string BuildExternalAuthPopupHtml(bool success, string? message)
+    private static string BuildExternalAuthPopupHtml(bool success, string? message, string? redirectPath = null)
     {
         var title = success ? "Авторизация завершена" : "Ошибка авторизации";
         var safeTitle = WebUtility.HtmlEncode(title);
         var safeMessage = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(message) ? "Вернитесь на сайт." : message.Trim());
+
+        var redirectPathJson = JsonSerializer.Serialize(redirectPath ?? string.Empty);
 
         return $$"""
 <!doctype html>
@@ -1524,9 +1537,39 @@ public class AuthController : ControllerBase
     <p>{{safeMessage}}</p>
   </div>
   <script>
+    var redirectPath = {{redirectPathJson}};
+    var deriveRedirectPath = function () {
+      if (redirectPath) {
+        return redirectPath;
+      }
+
+      try {
+        var currentUrl = new URL(window.location.href);
+        var state = currentUrl.searchParams.get("state");
+        var providerMatch = currentUrl.pathname.match(/\/auth\/external\/callback\/([^/?#]+)/i);
+        var provider = providerMatch ? providerMatch[1] : "";
+        if (!state || !provider) {
+          return "";
+        }
+
+        var nextUrl = new URL("/auth", currentUrl.origin);
+        nextUrl.searchParams.set("externalAuthState", state);
+        nextUrl.searchParams.set("externalAuthProvider", provider.toLowerCase());
+        return nextUrl.pathname + nextUrl.search;
+      } catch (error) {
+        return redirectPath;
+      }
+    };
+
     setTimeout(function () {
       if (window.opener && !window.opener.closed) {
         window.close();
+        return;
+      }
+
+      var nextPath = deriveRedirectPath();
+      if (nextPath) {
+        window.location.replace(nextPath);
       }
     }, 1200);
   </script>

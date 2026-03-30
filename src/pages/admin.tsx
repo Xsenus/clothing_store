@@ -38,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FLOW } from '@/lib/api-mapping';
+import { closeDeferredPopup, navigateDeferredPopup, openDeferredPopup } from '@/lib/deferred-popup';
 import { COOKIE_CONSENT_TEXT, PRIVACY_POLICY, PUBLIC_OFFER, RETURN_POLICY, USER_AGREEMENT } from '@/lib/legal-texts';
 import { type ChangeEvent, type ComponentProps, type DragEvent, type PointerEvent as ReactPointerEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -3428,9 +3429,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const closeExternalAuthTestPopup = () => {
-    if (externalAuthTestPopupRef.current && !externalAuthTestPopupRef.current.closed) {
-      externalAuthTestPopupRef.current.close();
-    }
+    closeDeferredPopup(externalAuthTestPopupRef.current);
     externalAuthTestPopupRef.current = null;
   };
 
@@ -3530,9 +3529,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         expiresAt: Number(started.expiresAt || 0),
       });
 
-      const popup = window.open(started.authUrl, `${provider}-oauth-test`, "width=540,height=720");
+      const popup = openDeferredPopup(`${provider}-oauth-test`);
       externalAuthTestPopupRef.current = popup;
-      if (!popup) {
+      if (!navigateDeferredPopup(popup, started.authUrl)) {
         window.location.assign(started.authUrl);
         return;
       }
