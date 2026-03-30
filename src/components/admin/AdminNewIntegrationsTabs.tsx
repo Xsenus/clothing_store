@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FLOW } from "@/lib/api-mapping";
 import { getRoboKassaConfigurationIssues, isSettingEnabled } from "@/lib/yoomoney";
@@ -134,7 +135,14 @@ const getCdekIssues = (settings: SettingsMap) => {
   const issues = [];
   if (!hasValue(settings.delivery_cdek_account)) issues.push("Укажите Account / client_id СДЭК.");
   if (!hasValue(settings.delivery_cdek_password)) issues.push("Укажите Password / client_secret СДЭК.");
-  if (!hasValue(settings.delivery_cdek_from_postal_code)) issues.push("Укажите индекс отправителя СДЭК.");
+  const hasOriginPostalCode = hasValue(settings.delivery_cdek_from_postal_code);
+  const hasOriginAddress = hasValue(settings.delivery_cdek_from_address);
+  const canResolveOriginAddress = hasOriginAddress && hasValue(settings.dadata_api_key);
+  if (!hasOriginPostalCode && !hasOriginAddress) issues.push("Укажите индекс или адрес точки отправления СДЭК.");
+  if (!hasOriginPostalCode && hasOriginAddress && !canResolveOriginAddress) issues.push("Для автоопределения индекса по адресу точки отправления нужен ключ DaData.");
+  if (String(settings.delivery_cdek_from_location_type || "").trim().toLowerCase() === "pickup_point" && !hasValue(settings.delivery_cdek_from_pickup_point_code)) {
+    issues.push("Для отправки через ПВЗ СДЭК укажите код пункта отправления.");
+  }
   return issues;
 };
 
@@ -258,7 +266,7 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
     setRunning(true);
     setError("");
     try {
-      setResult(await FLOW.adminTestCdekDelivery({ input: { enabled: isSettingEnabled(settings.delivery_cdek_enabled), useTestEnvironment: isSettingEnabled(settings.delivery_cdek_use_test_environment, true), account: settings.delivery_cdek_account || "", password: settings.delivery_cdek_password || "", fromPostalCode: settings.delivery_cdek_from_postal_code || "", toAddress: address, weightKg: Number(weightKg.replace(",", ".")), declaredCost: Number(declaredCost.replace(",", ".")), packageLengthCm: Number(settings.delivery_cdek_package_length_cm || "30"), packageHeightCm: Number(settings.delivery_cdek_package_height_cm || "20"), packageWidthCm: Number(settings.delivery_cdek_package_width_cm || "10") } }));
+      setResult(await FLOW.adminTestCdekDelivery({ input: { enabled: isSettingEnabled(settings.delivery_cdek_enabled), useTestEnvironment: isSettingEnabled(settings.delivery_cdek_use_test_environment, true), account: settings.delivery_cdek_account || "", password: settings.delivery_cdek_password || "", fromPostalCode: settings.delivery_cdek_from_postal_code || "", fromLocationType: settings.delivery_cdek_from_location_type || "warehouse", fromAddress: settings.delivery_cdek_from_address || "", fromPickupPointCode: settings.delivery_cdek_from_pickup_point_code || "", toAddress: address, weightKg: Number(weightKg.replace(",", ".")), declaredCost: Number(declaredCost.replace(",", ".")), packageLengthCm: Number(settings.delivery_cdek_package_length_cm || "30"), packageHeightCm: Number(settings.delivery_cdek_package_height_cm || "20"), packageWidthCm: Number(settings.delivery_cdek_package_width_cm || "10") } }));
     } catch (nextError) {
       setResult(null);
       setError(getErrorMessage(nextError, "Не удалось проверить СДЭК."));
@@ -271,7 +279,9 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
     updateSetting("delivery_cdek_use_test_environment", "true");
     updateSetting("delivery_cdek_account", CDEK_TEST_ACCOUNT);
     updateSetting("delivery_cdek_password", CDEK_TEST_PASSWORD);
+    updateSetting("delivery_cdek_from_location_type", settings.delivery_cdek_from_location_type || "warehouse");
     updateSetting("delivery_cdek_from_postal_code", settings.delivery_cdek_from_postal_code || "630099");
+    updateSetting("delivery_cdek_from_address", settings.delivery_cdek_from_address || "630099, Новосибирск, Красный проспект, 25");
     setAddress("630099, Новосибирск, Красный проспект, 25");
     setWeightKg("0.300");
     setDeclaredCost("1000");
@@ -286,12 +296,15 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
         <ol className="list-decimal space-y-1 pl-5">
           <li>Для боевого использования нужен договор со СДЭК.</li>
           <li>Для разработки используйте учебный контур <a className="underline underline-offset-2" href="https://api.edu.cdek.ru" target="_blank" rel="noreferrer">api.edu.cdek.ru</a> и официальный интеграторский раздел <a className="underline underline-offset-2" href="https://www.cdek.ru/clients/integrator.html" target="_blank" rel="noreferrer">cdek.ru/clients/integrator.html</a>.</li>
-          <li>Заполните `Account`, `Secure password`, включите учебный контур и укажите индекс отправителя.</li>
+          <li>Заполните `Account`, `Secure password`, включите учебный контур и укажите точку отправления: индекс, адрес и при необходимости код ПВЗ/офиса.</li>
           <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите тест интеграции.</li>
           <li>Чтобы checkout увидел СДЭК, после сохранения в `public-shell` должно появиться `delivery_cdek_enabled=true`.</li>
           <li>Успешный тест должен вернуть `tokenReceived=true`, `cityCode`, тарифы и список ПВЗ.</li>
           <li>Если учебный калькулятор СДЭК ответит `v2_internal_error`, система покажет резервные demo-тарифы учебного контура вместо падения теста.</li>
         </ol>
+        <div className="rounded-none border border-black/10 bg-white p-3 text-xs text-muted-foreground">
+          Для расчета тарифа storefront использует индекс отправителя. Если индекс не заполнен, сервер попробует определить его по адресу точки отправления через DaData. Код ПВЗ нужен, если вы реально сдаете отправления через пункт СДЭК, а не со своего склада.
+        </div>
         <div className="grid grid-cols-1 gap-2 border border-black/10 bg-slate-50 p-3 font-mono text-xs md:grid-cols-[180px_minmax(0,1fr)]">
           <div className="font-semibold text-black">Account</div>
           <div className="break-all text-black">{CDEK_TEST_ACCOUNT}</div>
@@ -311,11 +324,46 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
         <div className="space-y-1"><Label htmlFor="delivery-cdek-account">Account / client_id</Label><NoAutofillInput id="delivery-cdek-account" name="integration-cdek-client-key" autoComplete="new-password" value={settings.delivery_cdek_account || ""} onChange={(event) => updateSetting("delivery_cdek_account", event.target.value)} placeholder={CDEK_TEST_ACCOUNT} /></div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-password">Password / client_secret</Label><NoAutofillInput id="delivery-cdek-password" name="integration-cdek-api-secret" type="password" autoComplete="new-password" value={settings.delivery_cdek_password || ""} onChange={(event) => updateSetting("delivery_cdek_password", event.target.value)} placeholder={CDEK_TEST_PASSWORD} /></div>
       </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="space-y-1">
+          <Label htmlFor="delivery-cdek-origin-type">Точка отправления</Label>
+          <Select value={settings.delivery_cdek_from_location_type || "warehouse"} onValueChange={(value) => updateSetting("delivery_cdek_from_location_type", value)}>
+            <SelectTrigger id="delivery-cdek-origin-type" className="rounded-none">
+              <SelectValue placeholder="Выберите тип точки отправления" />
+            </SelectTrigger>
+            <SelectContent className="rounded-none">
+              <SelectItem value="warehouse">Свой склад / шоурум</SelectItem>
+              <SelectItem value="pickup_point">ПВЗ / офис СДЭК</SelectItem>
+              <SelectItem value="other">Другая точка</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 md:col-span-2">
+          <Label htmlFor="delivery-cdek-origin-address">Адрес точки отправления</Label>
+          <AddressAutocompleteInput
+            id="delivery-cdek-origin-address"
+            name="delivery_cdek_from_address"
+            value={settings.delivery_cdek_from_address || ""}
+            onValueChange={(nextValue) => updateSetting("delivery_cdek_from_address", nextValue)}
+            placeholder="Новосибирск, Красный проспект, 25"
+            inputClassName="rounded-none"
+            suggestionsClassName="rounded-none"
+          />
+        </div>
+      </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <div className="space-y-1"><Label htmlFor="delivery-cdek-postal">Индекс отправителя</Label><Input id="delivery-cdek-postal" value={settings.delivery_cdek_from_postal_code || "630099"} onChange={(event) => updateSetting("delivery_cdek_from_postal_code", event.target.value)} placeholder="630099" /></div>
+        <div className="space-y-1"><Label htmlFor="delivery-cdek-origin-point-code">Код ПВЗ / офиса</Label><Input id="delivery-cdek-origin-point-code" value={settings.delivery_cdek_from_pickup_point_code || ""} onChange={(event) => updateSetting("delivery_cdek_from_pickup_point_code", event.target.value)} placeholder="Например, NSK12" /></div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-length">Длина, см</Label><Input id="delivery-cdek-length" value={settings.delivery_cdek_package_length_cm || "30"} onChange={(event) => updateSetting("delivery_cdek_package_length_cm", event.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-height">Высота, см</Label><Input id="delivery-cdek-height" value={settings.delivery_cdek_package_height_cm || "20"} onChange={(event) => updateSetting("delivery_cdek_package_height_cm", event.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="space-y-1"><Label htmlFor="delivery-cdek-width">Ширина, см</Label><Input id="delivery-cdek-width" value={settings.delivery_cdek_package_width_cm || "10"} onChange={(event) => updateSetting("delivery_cdek_package_width_cm", event.target.value)} /></div>
+        <div className="space-y-1 md:col-span-2">
+          <div className="rounded-none border border-black/10 bg-white p-3 text-xs text-muted-foreground">
+            Индекс остается главным параметром для тарифа. Адрес нужен для автоподстановки индекса и понятной фиксации, откуда именно вы отправляете заказы. Если вы сдаете отправления через ПВЗ СДЭК, дополнительно укажите код офиса.
+          </div>
+        </div>
       </div>
       <div className="flex items-center gap-2"><Checkbox id="delivery-cdek-test-environment" checked={isSettingEnabled(settings.delivery_cdek_use_test_environment, true)} onCheckedChange={(checked) => updateSetting("delivery_cdek_use_test_environment", checked ? "true" : "false")} /><Label htmlFor="delivery-cdek-test-environment">Учебный контур api.edu.cdek.ru</Label></div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

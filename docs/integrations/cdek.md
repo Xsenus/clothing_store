@@ -36,6 +36,9 @@
 - `delivery_cdek_account`
 - `delivery_cdek_password`
 - `delivery_cdek_from_postal_code`
+- `delivery_cdek_from_location_type`
+- `delivery_cdek_from_address`
+- `delivery_cdek_from_pickup_point_code`
 - `delivery_cdek_package_length_cm`
 - `delivery_cdek_package_height_cm`
 - `delivery_cdek_package_width_cm`
@@ -50,7 +53,8 @@
   - получение OAuth token;
   - определение города получателя;
   - запрос тарифов через `tarifflist`;
-  - запрос списка ПВЗ через `deliverypoints`.
+  - запрос списка ПВЗ через `deliverypoints`;
+  - сортировка ПВЗ по расстоянию от координат адреса клиента через DaData, чтобы в checkout показывались ближайшие точки, а не произвольный список по городу.
 - В checkout выбирается лучший доступный вариант для доставки до двери и для ПВЗ.
 
 ## Тестовый контур
@@ -58,8 +62,9 @@
 1. Включить `delivery_cdek_enabled=true`.
 2. Включить `delivery_cdek_use_test_environment=true`.
 3. Указать учебные `account/password`.
-4. Заполнить индекс отправителя.
-5. В админке открыть вкладку `СДЭК` и выполнить тест.
+4. Заполнить индекс отправителя или адрес точки отправления.
+5. Если отправка идет через офис/ПВЗ СДЭК, сохранить его код в `delivery_cdek_from_pickup_point_code`.
+6. В админке открыть вкладку `СДЭК` и выполнить тест.
 
 Актуальные учебные данные, которые проходят OAuth на `api.edu.cdek.ru`:
 

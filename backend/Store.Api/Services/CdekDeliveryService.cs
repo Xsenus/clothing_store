@@ -30,6 +30,9 @@ public sealed record CdekDeliveryIntegrationOverrides(
     string? Account,
     string? Password,
     string? FromPostalCode,
+    string? FromLocationType,
+    string? FromAddress,
+    string? FromPickupPointCode,
     int? PackageLengthCm,
     int? PackageHeightCm,
     int? PackageWidthCm);
@@ -100,6 +103,8 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             new DeliveryCalculatePayload(payload.ToAddress, payload.WeightKg, payload.DeclaredCost, payload.PaymentMethod),
             settings,
             cancellationToken);
+        var requestedLimit = Math.Clamp(payload.Limit ?? 12, 1, 30);
+        var requestLimit = Math.Clamp(Math.Max(requestedLimit * 5, 24), requestedLimit, 60);
 
         var requestUri = BuildUri(
             settings,
@@ -108,7 +113,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             {
                 ["city_code"] = cityCode,
                 ["type"] = "PVZ",
-                ["size"] = Math.Clamp(payload.Limit ?? 12, 1, 30).ToString(CultureInfo.InvariantCulture)
+                ["size"] = requestLimit.ToString(CultureInfo.InvariantCulture)
             });
 
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
@@ -129,15 +134,17 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             var address = GetString(location, "address") ?? GetString(location, "address_full") ?? string.Empty;
             if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(address))
                 continue;
+            var latitude = GetDouble(location, "latitude");
+            var longitude = GetDouble(location, "longitude");
 
             points.Add(new DeliveryPickupPointSummary(
                 Id: code,
                 Name: name,
                 Address: address,
                 Instruction: GetString(item, "work_time"),
-                Latitude: GetDouble(location, "latitude"),
-                Longitude: GetDouble(location, "longitude"),
-                DistanceKm: null,
+                Latitude: latitude,
+                Longitude: longitude,
+                DistanceKm: CalculateDistanceKm(latitude, longitude, resolvedAddress),
                 PaymentMethods: ["cod", "card"],
                 Available: true,
                 EstimatedCost: pickupQuote?.PickupPointDelivery?.EstimatedCost,
@@ -145,22 +152,31 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
                 Error: null));
         }
 
-        return points;
+        return points
+            .DistinctBy(static point => point.Id, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static point => point.DistanceKm.HasValue ? 0 : 1)
+            .ThenBy(static point => point.DistanceKm ?? double.MaxValue)
+            .ThenBy(static point => point.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(requestedLimit)
+            .ToList();
     }
 
     public async Task<CdekAdminTestResult> TestIntegrationAsync(
         CdekDeliveryAdminTestPayload payload,
         CancellationToken cancellationToken = default)
     {
-        var settings = new CdekDeliveryIntegrationOverrides(
+        var settings = await ResolveSettingsAsync(new CdekDeliveryIntegrationOverrides(
             payload.Enabled,
             payload.UseTestEnvironment,
             payload.Account,
             payload.Password,
             payload.FromPostalCode,
+            payload.FromLocationType,
+            payload.FromAddress,
+            payload.FromPickupPointCode,
             payload.PackageLengthCm,
             payload.PackageHeightCm,
-            payload.PackageWidthCm);
+            payload.PackageWidthCm), cancellationToken);
 
         var client = _httpClientFactory.CreateClient();
         var token = await GetAccessTokenAsync(client, settings, cancellationToken);
@@ -262,6 +278,18 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             .OrderBy(static item => item.Price ?? decimal.MaxValue)
             .FirstOrDefault();
 
+        var details = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["environment"] = settings.UseTestEnvironment ? "test" : "production",
+            ["cityCode"] = cityCode,
+            ["fromPostalCode"] = settings.FromPostalCode ?? string.Empty,
+            ["fromLocationType"] = settings.FromLocationType ?? "warehouse"
+        };
+        if (!string.IsNullOrWhiteSpace(settings.FromAddress))
+            details["fromAddress"] = settings.FromAddress!;
+        if (!string.IsNullOrWhiteSpace(settings.FromPickupPointCode))
+            details["fromPickupPointCode"] = settings.FromPickupPointCode!;
+
         return new DeliveryProviderQuoteResult(
             Provider: ProviderCode,
             Label: "СДЭК",
@@ -272,11 +300,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             PickupPointDelivery: pickup is null
                 ? new DeliveryPickupQuoteSummary(false, null, null, "cdek_pickup", null, "СДЭК не вернул доступный тариф до ПВЗ.")
                 : new DeliveryPickupQuoteSummary(true, pickup.Price, pickup.DeliveryDays, pickup.TariffCode, null, null),
-            Details: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["environment"] = settings.UseTestEnvironment ? "test" : "production",
-                ["cityCode"] = cityCode
-            });
+            Details: details);
     }
 
     private static string BuildTestNote(CdekDeliveryIntegrationOverrides settings, DeliveryProviderQuoteResult quote)
@@ -368,29 +392,37 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         CancellationToken cancellationToken)
     {
         if (overrides is not null)
-            return NormalizeOverrides(overrides);
+            return await NormalizeOverridesAsync(overrides, cancellationToken);
 
         var enabled = await GetBooleanSettingAsync("delivery_cdek_enabled", "Integrations:Cdek:Enabled", false, cancellationToken);
         var useTestEnvironment = await GetBooleanSettingAsync("delivery_cdek_use_test_environment", "Integrations:Cdek:UseTestEnvironment", true, cancellationToken);
         var account = await GetSettingOrConfigAsync("delivery_cdek_account", "Integrations:Cdek:Account", cancellationToken);
         var password = await GetSettingOrConfigAsync("delivery_cdek_password", "Integrations:Cdek:Password", cancellationToken);
         var fromPostalCode = await GetSettingOrConfigAsync("delivery_cdek_from_postal_code", "Integrations:Cdek:FromPostalCode", cancellationToken);
+        var fromLocationType = await GetSettingOrConfigAsync("delivery_cdek_from_location_type", "Integrations:Cdek:FromLocationType", cancellationToken);
+        var fromAddress = await GetSettingOrConfigAsync("delivery_cdek_from_address", "Integrations:Cdek:FromAddress", cancellationToken);
+        var fromPickupPointCode = await GetSettingOrConfigAsync("delivery_cdek_from_pickup_point_code", "Integrations:Cdek:FromPickupPointCode", cancellationToken);
         var length = await GetIntSettingAsync("delivery_cdek_package_length_cm", "Integrations:Cdek:PackageLengthCm", 30, cancellationToken);
         var height = await GetIntSettingAsync("delivery_cdek_package_height_cm", "Integrations:Cdek:PackageHeightCm", 20, cancellationToken);
         var width = await GetIntSettingAsync("delivery_cdek_package_width_cm", "Integrations:Cdek:PackageWidthCm", 10, cancellationToken);
 
-        return NormalizeOverrides(new CdekDeliveryIntegrationOverrides(
+        return await NormalizeOverridesAsync(new CdekDeliveryIntegrationOverrides(
             enabled,
             useTestEnvironment,
             account,
             password,
             fromPostalCode,
+            fromLocationType,
+            fromAddress,
+            fromPickupPointCode,
             length,
             height,
-            width));
+            width), cancellationToken);
     }
 
-    private static CdekDeliveryIntegrationOverrides NormalizeOverrides(CdekDeliveryIntegrationOverrides overrides)
+    private async Task<CdekDeliveryIntegrationOverrides> NormalizeOverridesAsync(
+        CdekDeliveryIntegrationOverrides overrides,
+        CancellationToken cancellationToken)
     {
         if (!overrides.Enabled)
             throw new InvalidOperationException("СДЭК отключен в интеграциях.");
@@ -398,16 +430,29 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         var account = NormalizeOptionalText(overrides.Account);
         var password = NormalizeOptionalText(overrides.Password);
         var fromPostalCode = NormalizeOptionalText(overrides.FromPostalCode);
+        var fromLocationType = NormalizeFromLocationType(overrides.FromLocationType);
+        var fromAddress = NormalizeOptionalText(overrides.FromAddress);
+        var fromPickupPointCode = NormalizeOptionalText(overrides.FromPickupPointCode);
         if (string.IsNullOrWhiteSpace(account) || string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("Для СДЭК укажите account и secure password.");
+        if (string.IsNullOrWhiteSpace(fromPostalCode) && !string.IsNullOrWhiteSpace(fromAddress))
+        {
+            var resolvedOrigin = await TryResolveAddressAsync(fromAddress, cancellationToken);
+            fromPostalCode = NormalizeOptionalText(resolvedOrigin?.PostalCode);
+        }
         if (string.IsNullOrWhiteSpace(fromPostalCode))
-            throw new InvalidOperationException("Для СДЭК укажите индекс отправителя.");
+            throw new InvalidOperationException("Для СДЭК укажите индекс отправителя или адрес точки отправления.");
+        if (string.Equals(fromLocationType, "pickup_point", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(fromPickupPointCode))
+            throw new InvalidOperationException("Для отправки через ПВЗ СДЭК укажите код пункта отправления.");
 
         return overrides with
         {
             Account = account,
             Password = password,
-            FromPostalCode = fromPostalCode
+            FromPostalCode = fromPostalCode,
+            FromLocationType = fromLocationType,
+            FromAddress = fromAddress,
+            FromPickupPointCode = fromPickupPointCode
         };
     }
 
@@ -607,6 +652,63 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
+
+    private static string NormalizeFromLocationType(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "pickup_point" => "pickup_point",
+            "other" => "other",
+            _ => "warehouse"
+        };
+    }
+
+    private static double? CalculateDistanceKm(
+        double? pointLatitude,
+        double? pointLongitude,
+        DaDataAddressSuggestion? resolvedAddress)
+    {
+        if (!pointLatitude.HasValue || !pointLongitude.HasValue)
+            return null;
+
+        var addressLatitude = ParseCoordinate(resolvedAddress?.GeoLat);
+        var addressLongitude = ParseCoordinate(resolvedAddress?.GeoLon);
+        if (!addressLatitude.HasValue || !addressLongitude.HasValue)
+            return null;
+
+        return Math.Round(
+            CalculateDistanceKm(
+                addressLatitude.Value,
+                addressLongitude.Value,
+                pointLatitude.Value,
+                pointLongitude.Value),
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    private static double? ParseCoordinate(string? value)
+    {
+        return double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static double CalculateDistanceKm(double latitude1, double longitude1, double latitude2, double longitude2)
+    {
+        const double earthRadiusKm = 6371d;
+        var dLatitude = DegreesToRadians(latitude2 - latitude1);
+        var dLongitude = DegreesToRadians(longitude2 - longitude1);
+        var latitude1Rad = DegreesToRadians(latitude1);
+        var latitude2Rad = DegreesToRadians(latitude2);
+
+        var haversine = Math.Sin(dLatitude / 2) * Math.Sin(dLatitude / 2)
+                        + Math.Cos(latitude1Rad) * Math.Cos(latitude2Rad)
+                        * Math.Sin(dLongitude / 2) * Math.Sin(dLongitude / 2);
+        var arc = 2 * Math.Atan2(Math.Sqrt(haversine), Math.Sqrt(1 - haversine));
+        return earthRadiusKm * arc;
+    }
+
+    private static double DegreesToRadians(double degrees) => degrees * Math.PI / 180d;
 
     private static JsonElement? TryGetProperty(JsonElement element, string propertyName)
         => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var value)

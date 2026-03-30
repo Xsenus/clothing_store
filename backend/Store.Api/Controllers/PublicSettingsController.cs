@@ -444,10 +444,19 @@ public class PublicSettingsController : ControllerBase
         var fromPostalCode = await GetSettingOrConfigAsync(
             "delivery_cdek_from_postal_code",
             "Integrations:Cdek:FromPostalCode");
+        var fromAddress = await GetSettingOrConfigAsync(
+            "delivery_cdek_from_address",
+            "Integrations:Cdek:FromAddress");
+        var dadataApiKey = await GetSettingOrConfigAsync(
+            "dadata_api_key",
+            "Integrations:DaData:ApiKey");
+
+        var hasOrigin = !string.IsNullOrWhiteSpace(fromPostalCode)
+            || (!string.IsNullOrWhiteSpace(fromAddress) && !string.IsNullOrWhiteSpace(dadataApiKey));
 
         return !string.IsNullOrWhiteSpace(account)
             && !string.IsNullOrWhiteSpace(password)
-            && !string.IsNullOrWhiteSpace(fromPostalCode);
+            && hasOrigin;
     }
 
     private async Task<bool> IsRussianPostReadyAsync()

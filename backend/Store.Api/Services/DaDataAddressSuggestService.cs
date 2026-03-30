@@ -18,6 +18,7 @@ public sealed record DaDataAddressSuggestion(
     string? UnrestrictedValue,
     string? GeoLat,
     string? GeoLon,
+    string? PostalCode,
     string? City,
     string? Settlement,
     string? Region);
@@ -109,6 +110,7 @@ public sealed class DaDataAddressSuggestService : IDaDataAddressSuggestService
             ReadString(item, "unrestricted_value"),
             ReadNestedString(item, "data", "geo_lat"),
             ReadNestedString(item, "data", "geo_lon"),
+            ReadNestedString(item, "data", "postal_code"),
             ReadNestedString(item, "data", "city"),
             ReadNestedString(item, "data", "settlement"),
             ReadNestedString(item, "data", "region"));

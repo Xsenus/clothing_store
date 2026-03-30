@@ -779,6 +779,9 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_account", "");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_password", "");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_from_postal_code", "630099");
+        await EnsureAppSettingExistsAsync(db, "delivery_cdek_from_location_type", "warehouse");
+        await EnsureAppSettingExistsAsync(db, "delivery_cdek_from_address", "");
+        await EnsureAppSettingExistsAsync(db, "delivery_cdek_from_pickup_point_code", "");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_length_cm", "30");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_height_cm", "20");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_width_cm", "10");
