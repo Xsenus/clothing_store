@@ -76,21 +76,24 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
         if (string.IsNullOrWhiteSpace(destinationAddress))
             throw new InvalidOperationException("Укажите адрес доставки.");
 
-        var tasks = new List<Task<DeliveryProviderQuoteResult?>>
+        // Delivery services use the same scoped EF DbContext to resolve integration settings.
+        // Parallel execution here can trigger concurrent DbContext operations and make
+        // providers disappear from storefront calculations even though they work individually.
+        var providers = new List<DeliveryProviderQuoteResult?>(4)
         {
-            TryGetYandexQuoteAsync(payload, cancellationToken),
-            TryGetCdekQuoteAsync(payload, cancellationToken),
-            TryGetRussianPostQuoteAsync(payload, cancellationToken),
-            TryGetAvitoQuoteAsync(payload, cancellationToken)
+            await TryGetYandexQuoteAsync(payload, cancellationToken),
+            await TryGetCdekQuoteAsync(payload, cancellationToken),
+            await TryGetRussianPostQuoteAsync(payload, cancellationToken),
+            await TryGetAvitoQuoteAsync(payload, cancellationToken)
         };
 
-        var providers = (await Task.WhenAll(tasks))
+        var availableProviders = providers
             .Where(static item => item is not null)
             .Select(static item => item!)
             .OrderBy(static item => item.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new DeliveryProvidersQuoteResult(destinationAddress, providers);
+        return new DeliveryProvidersQuoteResult(destinationAddress, availableProviders);
     }
 
     public async Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsAsync(
