@@ -1723,8 +1723,8 @@ export default function CheckoutPage() {
                                       : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
                                   }`}
                                 >
-                                  <div className="flex flex-wrap items-start justify-between gap-3">
-                                    <div className="space-y-1">
+                                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                                    <div className="min-w-0 space-y-1">
                                       <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
                                       <p className="text-sm text-muted-foreground">
                                         {point.address || 'Адрес не указан'}
@@ -1735,7 +1735,7 @@ export default function CheckoutPage() {
                                         </p>
                                       ) : null}
                                     </div>
-                                    <div className="text-right">
+                                    <div className="min-w-[96px] text-right">
                                       <p className="font-black">
                                         {isSelected
                                           ? pickupDeliveryLoading
