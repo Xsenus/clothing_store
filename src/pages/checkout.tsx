@@ -1367,7 +1367,7 @@ export default function CheckoutPage() {
         />
         <Header />
 
-        <main className="flex-1 container mx-auto px-4 py-12">
+        <main className="flex-1 container mx-auto px-4 pb-12 pt-24 md:pt-28">
           <h1 className="mb-8 text-4xl font-black uppercase tracking-tighter md:text-5xl">ОФОРМЛЕНИЕ ЗАКАЗА</h1>
 
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">

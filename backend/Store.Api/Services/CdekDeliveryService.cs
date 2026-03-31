@@ -40,6 +40,12 @@ public sealed record CdekDeliveryIntegrationOverrides(
 
 public sealed class CdekDeliveryService : ICdekDeliveryService
 {
+    private enum CdekDeliveryPointUsage
+    {
+        DestinationHandout,
+        OriginReception
+    }
+
     private const string ProviderCode = "cdek";
     private const string TrainingCalculatorInternalErrorCode = "v2_internal_error";
     private const string TrainingCalculatorInternalAdditionalCode = "0xBC236B02";
@@ -85,7 +91,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(null, cancellationToken);
-        return await ListPickupPointsInternalAsync(payload, settings, cancellationToken);
+        return await ListPickupPointsInternalAsync(payload, settings, CdekDeliveryPointUsage.DestinationHandout, cancellationToken);
     }
 
     public async Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsForAdminAsync(
@@ -108,37 +114,36 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         return await ListPickupPointsInternalAsync(
             new DeliveryPickupPointsPayload("cdek", payload.ToAddress, Limit: payload.Limit),
             settings,
+            CdekDeliveryPointUsage.OriginReception,
             cancellationToken);
     }
 
     private async Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsInternalAsync(
         DeliveryPickupPointsPayload payload,
         CdekDeliveryIntegrationOverrides settings,
+        CdekDeliveryPointUsage usage,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
         var token = await GetAccessTokenAsync(client, settings, cancellationToken);
         var resolvedAddress = await TryResolveAddressAsync(payload.ToAddress, cancellationToken);
+        var postalCode = NormalizeOptionalText(resolvedAddress?.PostalCode);
         var cityCode = await ResolveCityCodeAsync(client, settings, token, resolvedAddress, payload.ToAddress, cancellationToken);
-        if (string.IsNullOrWhiteSpace(cityCode))
+        if (string.IsNullOrWhiteSpace(cityCode) && string.IsNullOrWhiteSpace(postalCode))
             throw new InvalidOperationException("СДЭК не смог определить город получателя для поиска ПВЗ.");
 
-        var pickupQuote = await CalculateWithSettingsAsync(
-            new DeliveryCalculatePayload(payload.ToAddress, payload.WeightKg, payload.DeclaredCost, payload.PaymentMethod),
-            settings,
-            cancellationToken);
+        DeliveryProviderQuoteResult? pickupQuote = null;
+        if (payload.WeightKg.HasValue || payload.DeclaredCost.HasValue)
+        {
+            pickupQuote = await CalculateWithSettingsAsync(
+                new DeliveryCalculatePayload(payload.ToAddress, payload.WeightKg, payload.DeclaredCost, payload.PaymentMethod),
+                settings,
+                cancellationToken);
+        }
         var requestedLimit = Math.Clamp(payload.Limit ?? 12, 1, 30);
         var requestLimit = Math.Clamp(Math.Max(requestedLimit * 5, 24), requestedLimit, 60);
 
-        var requestUri = BuildUri(
-            settings,
-            "/v2/deliverypoints",
-            new Dictionary<string, string?>
-            {
-                ["city_code"] = cityCode,
-                ["type"] = "PVZ",
-                ["size"] = requestLimit.ToString(CultureInfo.InvariantCulture)
-            });
+        var requestUri = BuildUri(settings, "/v2/deliverypoints", BuildDeliveryPointsQuery(cityCode, postalCode, requestLimit, usage));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -154,23 +159,31 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         {
             var location = TryGetProperty(item, "location");
             var code = GetString(item, "code") ?? GetString(item, "uuid");
+            var officeName = BuildOfficeName(item, code);
             var name = GetString(item, "name") ?? code ?? "ПВЗ СДЭК";
-            var address = GetString(location, "address") ?? GetString(location, "address_full") ?? string.Empty;
+            var address = GetString(location, "address_full") ?? GetString(location, "address") ?? string.Empty;
             if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(address))
+                continue;
+            var available = usage switch
+            {
+                CdekDeliveryPointUsage.OriginReception => GetBoolean(item, "is_reception") ?? true,
+                _ => GetBoolean(item, "is_handout") ?? true
+            };
+            if (!available)
                 continue;
             var latitude = GetDouble(location, "latitude");
             var longitude = GetDouble(location, "longitude");
 
             points.Add(new DeliveryPickupPointSummary(
                 Id: code,
-                Name: name,
+                Name: string.IsNullOrWhiteSpace(name) ? officeName : name,
                 Address: address,
-                Instruction: GetString(item, "work_time"),
+                Instruction: BuildOfficeInstruction(item),
                 Latitude: latitude,
                 Longitude: longitude,
                 DistanceKm: CalculateDistanceKm(latitude, longitude, resolvedAddress),
-                PaymentMethods: ["cod", "card"],
-                Available: true,
+                PaymentMethods: BuildOfficePaymentMethods(item),
+                Available: available,
                 EstimatedCost: pickupQuote?.PickupPointDelivery?.EstimatedCost,
                 DeliveryDays: pickupQuote?.PickupPointDelivery?.DeliveryDays,
                 Error: null));
@@ -213,6 +226,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         var points = await ListPickupPointsInternalAsync(
             new DeliveryPickupPointsPayload("cdek", payload.ToAddress, Limit: 5, WeightKg: payload.WeightKg, DeclaredCost: payload.DeclaredCost),
             settings,
+            CdekDeliveryPointUsage.DestinationHandout,
             cancellationToken);
 
         return new CdekAdminTestResult(
@@ -537,14 +551,18 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         if (string.IsNullOrWhiteSpace(query))
             return null;
 
+        var postalCode = NormalizeOptionalText(resolvedAddress?.PostalCode);
+
         var uri = BuildUri(
             settings,
             "/v2/location/cities",
             new Dictionary<string, string?>
             {
                 ["country_codes"] = "RU",
+                ["postal_code"] = postalCode,
                 ["city"] = query,
-                ["size"] = "1"
+                ["size"] = "10",
+                ["lang"] = "rus"
             });
 
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -558,6 +576,24 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "[]" : body);
         if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
             return null;
+
+        JsonElement? matchedCity = null;
+        if (!string.IsNullOrWhiteSpace(postalCode))
+        {
+            matchedCity = document.RootElement
+                .EnumerateArray()
+                .FirstOrDefault(city => CityMatchesPostalCode(city, postalCode));
+        }
+
+        if (matchedCity is not { ValueKind: JsonValueKind.Object })
+        {
+            matchedCity = document.RootElement
+                .EnumerateArray()
+                .FirstOrDefault(city => string.Equals(GetString(city, "city"), query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (matchedCity is { ValueKind: JsonValueKind.Object } city)
+            return GetString(city, "code");
 
         return GetString(document.RootElement[0], "code");
     }
@@ -650,7 +686,7 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
     }
 
     private static int NormalizeDimension(int? value, int fallback)
-        => value.GetValueOrDefault(fallback) <= 0 ? fallback : value!.Value;
+        => value is > 0 ? value.Value : fallback;
 
     private static int ToGrams(decimal? weightKg)
     {
@@ -771,6 +807,110 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         return double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : null;
+    }
+
+    private static bool? GetBoolean(JsonElement? element, string propertyName)
+    {
+        var raw = NormalizeOptionalText(GetString(element, propertyName));
+        return raw?.ToLowerInvariant() switch
+        {
+            "1" or "true" => true,
+            "0" or "false" => false,
+            _ => null
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string?> BuildDeliveryPointsQuery(
+        string? cityCode,
+        string? postalCode,
+        int requestLimit,
+        CdekDeliveryPointUsage usage)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["country_code"] = "RU",
+            ["city_code"] = cityCode,
+            ["postal_code"] = postalCode,
+            ["type"] = "ALL",
+            ["size"] = requestLimit.ToString(CultureInfo.InvariantCulture),
+            ["lang"] = "rus"
+        };
+
+        switch (usage)
+        {
+            case CdekDeliveryPointUsage.OriginReception:
+                query["is_reception"] = "true";
+                break;
+            default:
+                query["is_handout"] = "true";
+                break;
+        }
+
+        return query;
+    }
+
+    private static string BuildOfficeName(JsonElement item, string? code)
+    {
+        var explicitName = NormalizeOptionalText(GetString(item, "name"));
+        if (!string.IsNullOrWhiteSpace(explicitName))
+            return explicitName;
+
+        var type = NormalizeOptionalText(GetString(item, "type"));
+        var station = NormalizeOptionalText(GetString(item, "nearest_metro_station"))
+            ?? NormalizeOptionalText(GetString(item, "nearest_station"));
+        var typeLabel = string.Equals(type, "POSTAMAT", StringComparison.OrdinalIgnoreCase)
+            ? "Постамат"
+            : "ПВЗ";
+
+        if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(station))
+            return $"{typeLabel} {code} ({station})";
+        if (!string.IsNullOrWhiteSpace(code))
+            return $"{typeLabel} {code}";
+
+        return $"{typeLabel} СДЭК";
+    }
+
+    private static string? BuildOfficeInstruction(JsonElement item)
+    {
+        var parts = new List<string>();
+        var workTime = NormalizeOptionalText(GetString(item, "work_time"));
+        var note = NormalizeOptionalText(GetString(item, "note"));
+        var addressComment = NormalizeOptionalText(GetString(item, "address_comment"));
+
+        if (!string.IsNullOrWhiteSpace(workTime))
+            parts.Add($"График: {workTime}");
+        if (!string.IsNullOrWhiteSpace(note))
+            parts.Add(note);
+        if (!string.IsNullOrWhiteSpace(addressComment))
+            parts.Add(addressComment);
+
+        return parts.Count > 0 ? string.Join(" • ", parts) : null;
+    }
+
+    private static IReadOnlyList<string>? BuildOfficePaymentMethods(JsonElement item)
+    {
+        var methods = new List<string>();
+
+        if ((GetBoolean(item, "allowed_cod") ?? false) || (GetBoolean(item, "have_cash") ?? false))
+            methods.Add("cod");
+        if ((GetBoolean(item, "have_cashless") ?? false) || (GetBoolean(item, "have_fast_payment_system") ?? false))
+            methods.Add("card");
+
+        return methods.Count > 0 ? methods : null;
+    }
+
+    private static bool CityMatchesPostalCode(JsonElement city, string postalCode)
+    {
+        if (TryGetProperty(city, "postal_codes") is not { ValueKind: JsonValueKind.Array } postalCodes)
+            return false;
+
+        foreach (var item in postalCodes.EnumerateArray())
+        {
+            if (string.Equals(item.ToString(), postalCode, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private sealed record CdekTariffQuote(string TariffCode, int Mode, decimal? Price, int? DeliveryDays);

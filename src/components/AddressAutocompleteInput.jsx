@@ -88,7 +88,7 @@ export default function AddressAutocompleteInput({
           id={listboxId}
           role="listbox"
           className={cn(
-            "absolute left-0 top-full z-50 mt-1 max-h-64 w-full overflow-auto border border-gray-200 bg-white shadow-lg",
+            "absolute left-0 top-full z-40 mt-1 max-h-64 w-full overflow-auto border border-gray-200 bg-white shadow-lg",
             suggestionsClassName
           )}
         >
