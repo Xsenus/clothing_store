@@ -936,9 +936,9 @@ export default function CheckoutPage() {
       || !selectedPickupCard.available
     ) {
       setPickupPointsLoading(false);
-      setPickupPoints([]);
-      setPickupPointsError('');
-      setSelectedPickupPointId('');
+      setPickupPoints((current) => (current.length === 0 ? current : []));
+      setPickupPointsError((current) => (current ? '' : current));
+      setSelectedPickupPointId((current) => (current ? '' : current));
       return;
     }
 
@@ -1006,7 +1006,17 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, deliveryCards, isManagedDeliveryEnabled, paymentMethod, requestedWeightKg, selectedDeliveryMethod, selectedDeliveryProviderCode, subtotal]);
+  }, [
+    address,
+    deliveryProviders,
+    isManagedDeliveryEnabled,
+    paymentMethod,
+    publicSettings,
+    requestedWeightKg,
+    selectedDeliveryMethod,
+    selectedDeliveryProviderCode,
+    subtotal,
+  ]);
 
   const selectedPickupPoint = pickupPoints.find((point) => point.id === selectedPickupPointId) || null;
   const selfPickupDelivery: DeliveryQuoteOption = {
@@ -1049,7 +1059,14 @@ export default function CheckoutPage() {
 
     setSelectedDeliveryMethod('self_pickup');
     setSelectedDeliveryProviderCode(null);
-  }, [deliveryCards, isManagedDeliveryEnabled, selectedDeliveryMethod, selectedDeliveryProviderCode]);
+  }, [
+    address,
+    deliveryProviders,
+    isManagedDeliveryEnabled,
+    publicSettings,
+    selectedDeliveryMethod,
+    selectedDeliveryProviderCode,
+  ]);
 
   const selectedManagedDeliveryCard = selectedDeliveryMethod === 'self_pickup'
     ? null
