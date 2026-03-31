@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AddressAutocompleteInput from "@/components/AddressAutocompleteInput";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,6 +12,13 @@ import { getRoboKassaConfigurationIssues, isSettingEnabled } from "@/lib/yoomone
 type SettingsMap = Record<string, string>;
 type UpdateSettingHandler = (key: string, value: string) => void;
 type IntegrationProps = { settings: SettingsMap; updateSetting: UpdateSettingHandler };
+type CdekPickupPointOption = {
+  id: string;
+  name?: string;
+  address?: string;
+  instruction?: string | null;
+  distanceKm?: number | null;
+};
 
 const CDEK_TEST_ACCOUNT = "wqGwiQx0gg8mLtiEKsUinjVSICCjtTEP";
 const CDEK_TEST_PASSWORD = "RmAmgvSgSl1yirlz9QupbzOJVqhCxcP5";
@@ -248,6 +255,9 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<unknown>(null);
+  const [originPickupPointsLoading, setOriginPickupPointsLoading] = useState(false);
+  const [originPickupPointsError, setOriginPickupPointsError] = useState("");
+  const [originPickupPoints, setOriginPickupPoints] = useState<CdekPickupPointOption[]>([]);
   const issues = useMemo(() => getCdekIssues(settings), [settings]);
   const cdekResult = result && typeof result === "object" ? result as {
     tokenReceived?: boolean;
@@ -261,6 +271,96 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
     pickupPoints?: Array<{ id?: string; address?: string }> | null;
   } : null;
   const cdekUsesTrainingFallback = String(cdekResult?.quote?.details?.quoteSource || "").trim().toLowerCase() === "training_fallback";
+  const normalizedOriginLocationType = String(settings.delivery_cdek_from_location_type || "").trim().toLowerCase();
+  const isOriginPickupPoint = normalizedOriginLocationType === "pickup_point";
+  const selectedOriginPickupPoint = originPickupPoints.find((point) => point.id === settings.delivery_cdek_from_pickup_point_code) || null;
+
+  useEffect(() => {
+    if (!isOriginPickupPoint) {
+      setOriginPickupPoints([]);
+      setOriginPickupPointsError("");
+      setOriginPickupPointsLoading(false);
+      return;
+    }
+
+    const originAddress = String(settings.delivery_cdek_from_address || "").trim();
+    if (!originAddress) {
+      setOriginPickupPoints([]);
+      setOriginPickupPointsError("");
+      setOriginPickupPointsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      setOriginPickupPointsLoading(true);
+      setOriginPickupPointsError("");
+
+      try {
+        const response = await FLOW.adminListCdekPickupPoints({
+          input: {
+            enabled: isSettingEnabled(settings.delivery_cdek_enabled),
+            useTestEnvironment: isSettingEnabled(settings.delivery_cdek_use_test_environment, true),
+            account: settings.delivery_cdek_account || "",
+            password: settings.delivery_cdek_password || "",
+            fromPostalCode: settings.delivery_cdek_from_postal_code || "",
+            fromLocationType: settings.delivery_cdek_from_location_type || "warehouse",
+            fromAddress: settings.delivery_cdek_from_address || "",
+            fromPickupPointCode: settings.delivery_cdek_from_pickup_point_code || "",
+            toAddress: originAddress,
+            limit: 12,
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextPoints = Array.isArray((response as { points?: CdekPickupPointOption[] } | null)?.points)
+          ? ((response as { points?: CdekPickupPointOption[] }).points || [])
+          : [];
+
+        setOriginPickupPoints(nextPoints);
+        setOriginPickupPointsError(nextPoints.length === 0 ? "По этому адресу или городу не нашлось ПВЗ СДЭК." : "");
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+
+        setOriginPickupPoints([]);
+        setOriginPickupPointsError(getErrorMessage(nextError, "Не удалось загрузить список ПВЗ СДЭК."));
+      } finally {
+        if (!cancelled) {
+          setOriginPickupPointsLoading(false);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOriginPickupPoint,
+    settings.delivery_cdek_account,
+    settings.delivery_cdek_enabled,
+    settings.delivery_cdek_from_address,
+    settings.delivery_cdek_from_location_type,
+    settings.delivery_cdek_from_pickup_point_code,
+    settings.delivery_cdek_from_postal_code,
+    settings.delivery_cdek_password,
+    settings.delivery_cdek_use_test_environment,
+  ]);
+
+  const handleOriginPickupPointSelect = (nextPointId: string) => {
+    updateSetting("delivery_cdek_from_pickup_point_code", nextPointId);
+    const nextPoint = originPickupPoints.find((point) => point.id === nextPointId);
+    if (nextPoint?.address) {
+      updateSetting("delivery_cdek_from_address", nextPoint.address);
+    }
+  };
 
   const runTest = async () => {
     setRunning(true);
@@ -344,11 +444,61 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
             id="delivery-cdek-origin-address"
             name="delivery_cdek_from_address"
             value={settings.delivery_cdek_from_address || ""}
-            onValueChange={(nextValue) => updateSetting("delivery_cdek_from_address", nextValue)}
-            placeholder="Новосибирск, Красный проспект, 25"
+            onValueChange={(nextValue) => {
+              updateSetting("delivery_cdek_from_address", nextValue);
+              if (!isOriginPickupPoint) {
+                return;
+              }
+
+              const currentPoint = originPickupPoints.find((point) => point.id === settings.delivery_cdek_from_pickup_point_code);
+              if (!currentPoint || currentPoint.address !== nextValue) {
+                updateSetting("delivery_cdek_from_pickup_point_code", "");
+              }
+            }}
+            placeholder={isOriginPickupPoint ? "Введите город или адрес, чтобы подобрать ПВЗ СДЭК" : "Новосибирск, Красный проспект, 25"}
             inputClassName="rounded-none"
             suggestionsClassName="rounded-none"
           />
+          {isOriginPickupPoint ? (
+            <div className="space-y-2 pt-2">
+              <Label htmlFor="delivery-cdek-origin-point-select">ПВЗ в выбранном городе</Label>
+              <Select
+                value={settings.delivery_cdek_from_pickup_point_code || undefined}
+                onValueChange={handleOriginPickupPointSelect}
+                disabled={originPickupPointsLoading || originPickupPoints.length === 0}
+              >
+                <SelectTrigger id="delivery-cdek-origin-point-select" className="rounded-none">
+                  <SelectValue placeholder={originPickupPointsLoading ? "Загружаем ПВЗ СДЭК..." : "Выберите ПВЗ / офис СДЭК"} />
+                </SelectTrigger>
+                <SelectContent className="rounded-none">
+                  {originPickupPoints.map((point) => (
+                    <SelectItem key={point.id} value={point.id}>
+                      {point.name || point.id}
+                      {point.address ? ` — ${point.address}` : ""}
+                      {point.distanceKm ? ` · ${point.distanceKm.toFixed(1)} км` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedOriginPickupPoint?.address ? (
+                <div className="rounded-none border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
+                  {selectedOriginPickupPoint.address}
+                  {selectedOriginPickupPoint.instruction ? ` · ${selectedOriginPickupPoint.instruction}` : ""}
+                </div>
+              ) : null}
+              {originPickupPointsLoading ? (
+                <div className="text-xs text-muted-foreground">Ищем ПВЗ СДЭК в выбранном городе...</div>
+              ) : null}
+              {!originPickupPointsLoading && originPickupPoints.length > 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  Найдено пунктов: {originPickupPoints.length}. После выбора код ПВЗ заполнится автоматически.
+                </div>
+              ) : null}
+              {!originPickupPointsLoading && originPickupPointsError ? (
+                <div className="text-xs text-red-700">{originPickupPointsError}</div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -357,13 +507,11 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
         <div className="space-y-1"><Label htmlFor="delivery-cdek-length">Длина, см</Label><Input id="delivery-cdek-length" value={settings.delivery_cdek_package_length_cm || "30"} onChange={(event) => updateSetting("delivery_cdek_package_length_cm", event.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="delivery-cdek-height">Высота, см</Label><Input id="delivery-cdek-height" value={settings.delivery_cdek_package_height_cm || "20"} onChange={(event) => updateSetting("delivery_cdek_package_height_cm", event.target.value)} /></div>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <div className="space-y-1"><Label htmlFor="delivery-cdek-width">Ширина, см</Label><Input id="delivery-cdek-width" value={settings.delivery_cdek_package_width_cm || "10"} onChange={(event) => updateSetting("delivery_cdek_package_width_cm", event.target.value)} /></div>
-        <div className="space-y-1 md:col-span-2">
-          <div className="rounded-none border border-black/10 bg-white p-3 text-xs text-muted-foreground">
-            Индекс остается главным параметром для тарифа. Адрес нужен для автоподстановки индекса и понятной фиксации, откуда именно вы отправляете заказы. Если вы сдаете отправления через ПВЗ СДЭК, дополнительно укажите код офиса.
-          </div>
-        </div>
+      </div>
+      <div className="rounded-none border border-black/10 bg-white p-3 text-xs text-muted-foreground">
+        Индекс остается главным параметром для тарифа. Адрес нужен для автоподстановки индекса и понятной фиксации, откуда именно вы отправляете заказы. Если вы сдаете отправления через ПВЗ СДЭК, дополнительно укажите код офиса.
       </div>
       <div className="flex items-center gap-2"><Checkbox id="delivery-cdek-test-environment" checked={isSettingEnabled(settings.delivery_cdek_use_test_environment, true)} onCheckedChange={(checked) => updateSetting("delivery_cdek_use_test_environment", checked ? "true" : "false")} /><Label htmlFor="delivery-cdek-test-environment">Учебный контур api.edu.cdek.ru</Label></div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

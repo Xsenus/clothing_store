@@ -1192,6 +1192,12 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  adminListCdekPickupPoints: async ({ input }) => request("/admin/settings/cdek-delivery/pickup-points", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminTestRussianPostDelivery: async ({ input }) => request("/admin/settings/russian-post-delivery/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

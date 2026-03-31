@@ -2089,6 +2089,40 @@ public class AdminController : ControllerBase
         }
     }
 
+    [HttpPost("settings/cdek-delivery/pickup-points")]
+    public async Task<IResult> GetCdekDeliveryPickupPoints([FromBody] CdekDeliveryPickupPointsAdminPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var points = await _cdekDeliveryService.ListPickupPointsForAdminAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = "cdek",
+                points = points.Select(point => new
+                {
+                    id = point.Id,
+                    name = point.Name,
+                    address = point.Address,
+                    instruction = point.Instruction,
+                    latitude = point.Latitude,
+                    longitude = point.Longitude,
+                    distanceKm = point.DistanceKm,
+                    paymentMethods = point.PaymentMethods,
+                    available = point.Available,
+                    estimatedCost = point.EstimatedCost,
+                    deliveryDays = point.DeliveryDays,
+                    error = point.Error
+                })
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
     [HttpPost("settings/russian-post-delivery/test")]
     public async Task<IResult> TestRussianPostDelivery([FromBody] RussianPostDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
     {

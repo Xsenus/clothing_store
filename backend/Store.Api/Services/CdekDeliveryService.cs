@@ -13,6 +13,7 @@ public interface ICdekDeliveryService
 {
     Task<DeliveryProviderQuoteResult?> TryCalculateAsync(DeliveryCalculatePayload payload, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsAsync(DeliveryPickupPointsPayload payload, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsForAdminAsync(CdekDeliveryPickupPointsAdminPayload payload, CancellationToken cancellationToken = default);
     Task<CdekAdminTestResult> TestIntegrationAsync(CdekDeliveryAdminTestPayload payload, CancellationToken cancellationToken = default);
 }
 
@@ -85,6 +86,29 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
     {
         var settings = await ResolveSettingsAsync(null, cancellationToken);
         return await ListPickupPointsInternalAsync(payload, settings, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsForAdminAsync(
+        CdekDeliveryPickupPointsAdminPayload payload,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await ResolveSettingsAsync(new CdekDeliveryIntegrationOverrides(
+            payload.Enabled,
+            payload.UseTestEnvironment,
+            payload.Account,
+            payload.Password,
+            payload.FromPostalCode,
+            payload.FromLocationType,
+            payload.FromAddress,
+            payload.FromPickupPointCode,
+            PackageLengthCm: null,
+            PackageHeightCm: null,
+            PackageWidthCm: null), cancellationToken, requirePickupPointCode: false);
+
+        return await ListPickupPointsInternalAsync(
+            new DeliveryPickupPointsPayload("cdek", payload.ToAddress, Limit: payload.Limit),
+            settings,
+            cancellationToken);
     }
 
     private async Task<IReadOnlyList<DeliveryPickupPointSummary>> ListPickupPointsInternalAsync(
@@ -389,10 +413,11 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
 
     private async Task<CdekDeliveryIntegrationOverrides> ResolveSettingsAsync(
         CdekDeliveryIntegrationOverrides? overrides,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requirePickupPointCode = true)
     {
         if (overrides is not null)
-            return await NormalizeOverridesAsync(overrides, cancellationToken);
+            return await NormalizeOverridesAsync(overrides, cancellationToken, requirePickupPointCode);
 
         var enabled = await GetBooleanSettingAsync("delivery_cdek_enabled", "Integrations:Cdek:Enabled", false, cancellationToken);
         var useTestEnvironment = await GetBooleanSettingAsync("delivery_cdek_use_test_environment", "Integrations:Cdek:UseTestEnvironment", true, cancellationToken);
@@ -417,12 +442,13 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             fromPickupPointCode,
             length,
             height,
-            width), cancellationToken);
+            width), cancellationToken, requirePickupPointCode);
     }
 
     private async Task<CdekDeliveryIntegrationOverrides> NormalizeOverridesAsync(
         CdekDeliveryIntegrationOverrides overrides,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requirePickupPointCode)
     {
         if (!overrides.Enabled)
             throw new InvalidOperationException("СДЭК отключен в интеграциях.");
@@ -442,7 +468,9 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         }
         if (string.IsNullOrWhiteSpace(fromPostalCode))
             throw new InvalidOperationException("Для СДЭК укажите индекс отправителя или адрес точки отправления.");
-        if (string.Equals(fromLocationType, "pickup_point", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(fromPickupPointCode))
+        if (requirePickupPointCode
+            && string.Equals(fromLocationType, "pickup_point", StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(fromPickupPointCode))
             throw new InvalidOperationException("Для отправки через ПВЗ СДЭК укажите код пункта отправления.");
 
         return overrides with

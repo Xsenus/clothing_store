@@ -237,6 +237,18 @@ public record CdekDeliveryAdminTestPayload(
     int? PackageHeightCm,
     int? PackageWidthCm);
 
+public record CdekDeliveryPickupPointsAdminPayload(
+    bool Enabled,
+    bool UseTestEnvironment,
+    string? Account,
+    string? Password,
+    string? FromPostalCode,
+    string? FromLocationType,
+    string? FromAddress,
+    string? FromPickupPointCode,
+    string ToAddress,
+    int? Limit = null);
+
 public record RussianPostDeliveryAdminTestPayload(
     bool Enabled,
     string? AccessToken,
