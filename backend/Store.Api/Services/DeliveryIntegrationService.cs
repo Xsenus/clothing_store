@@ -125,6 +125,7 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
                     payload.PaymentMethod,
                     PickupPointId: null),
                 cancellationToken);
+            var pickupSummary = await BuildYandexPickupSummaryAsync(payload, cancellationToken);
 
             return new DeliveryProviderQuoteResult(
                 Provider: "yandex_delivery",
@@ -136,27 +137,7 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
                     quote.HomeDelivery.DeliveryDays,
                     quote.HomeDelivery.Tariff,
                     quote.HomeDelivery.Error),
-                PickupPointDelivery: new DeliveryPickupQuoteSummary(
-                    quote.NearestPickupPointDelivery.Available,
-                    quote.NearestPickupPointDelivery.EstimatedCost,
-                    quote.NearestPickupPointDelivery.DeliveryDays,
-                    quote.NearestPickupPointDelivery.Tariff,
-                    quote.NearestPickupPointDelivery.Point is null
-                        ? null
-                        : new DeliveryPickupPointSummary(
-                            quote.NearestPickupPointDelivery.Point.Id,
-                            quote.NearestPickupPointDelivery.Point.Name,
-                            quote.NearestPickupPointDelivery.Point.Address,
-                            quote.NearestPickupPointDelivery.Point.Instruction,
-                            quote.NearestPickupPointDelivery.Point.Latitude,
-                            quote.NearestPickupPointDelivery.Point.Longitude,
-                            quote.NearestPickupPointDelivery.Point.DistanceKm,
-                            quote.NearestPickupPointDelivery.Point.PaymentMethods,
-                            quote.NearestPickupPointDelivery.Point.Available,
-                            quote.NearestPickupPointDelivery.Point.EstimatedCost,
-                            quote.NearestPickupPointDelivery.Point.DeliveryDays,
-                            quote.NearestPickupPointDelivery.Point.Error),
-                    quote.NearestPickupPointDelivery.Error),
+                PickupPointDelivery: pickupSummary,
                 Details: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["testEnvironment"] = quote.Details.TestEnvironment ? "true" : "false",
@@ -168,6 +149,65 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
         {
             return null;
+        }
+    }
+
+    private async Task<DeliveryPickupQuoteSummary> BuildYandexPickupSummaryAsync(
+        DeliveryCalculatePayload payload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var points = await _yandexDeliveryQuoteService.ListPickupPointsAsync(
+                new YandexDeliveryPickupPointsPayload(
+                    payload.ToAddress,
+                    payload.PaymentMethod,
+                    Limit: 8,
+                    payload.WeightKg,
+                    payload.DeclaredCost),
+                cancellationToken);
+
+            var nearestPoint = points.FirstOrDefault(point => point.Available) ?? points.FirstOrDefault();
+            if (nearestPoint is null)
+            {
+                return new DeliveryPickupQuoteSummary(
+                    Available: false,
+                    EstimatedCost: null,
+                    DeliveryDays: null,
+                    Tariff: "self_pickup",
+                    Point: null,
+                    Error: null);
+            }
+
+            return new DeliveryPickupQuoteSummary(
+                Available: nearestPoint.Available,
+                EstimatedCost: nearestPoint.EstimatedCost,
+                DeliveryDays: nearestPoint.DeliveryDays,
+                Tariff: "self_pickup",
+                Point: new DeliveryPickupPointSummary(
+                    nearestPoint.Id,
+                    nearestPoint.Name,
+                    nearestPoint.Address,
+                    nearestPoint.Instruction,
+                    nearestPoint.Latitude,
+                    nearestPoint.Longitude,
+                    nearestPoint.DistanceKm,
+                    nearestPoint.PaymentMethods,
+                    nearestPoint.Available,
+                    nearestPoint.EstimatedCost,
+                    nearestPoint.DeliveryDays,
+                    nearestPoint.Error),
+                Error: nearestPoint.Error);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return new DeliveryPickupQuoteSummary(
+                Available: false,
+                EstimatedCost: null,
+                DeliveryDays: null,
+                Tariff: "self_pickup",
+                Point: null,
+                Error: ex.Message);
         }
     }
 

@@ -144,13 +144,21 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
         if (string.IsNullOrWhiteSpace(destinationAddress))
             throw new InvalidOperationException("Адрес доставки не указан.");
 
-        var (useTestEnvironment, _, apiToken) = await ResolveIntegrationOptionsAsync(overrides, cancellationToken);
+        var (useTestEnvironment, sourceStationId, apiToken) = await ResolveIntegrationOptionsAsync(overrides, cancellationToken);
+        var requestedWeightKg = NormalizeWeight(payload.WeightKg);
+        var declaredCost = NormalizeMoney(payload.DeclaredCost);
+        var packageDimensions = await ResolvePackageDimensionsAsync(overrides, cancellationToken);
         var paymentMethod = NormalizePaymentMethod(payload.PaymentMethod);
+        var totalWeightGrams = ToGrams(requestedWeightKg);
+        var totalAssessedPrice = ToMinorUnits(declaredCost);
+        var clientPrice = paymentMethod == "card_on_receipt" ? totalAssessedPrice : 0;
+        var places = BuildPlaces(totalWeightGrams, packageDimensions);
         var resolvedAddress = await TryResolveAddressAsync(destinationAddress, cancellationToken);
         var locationSearchText = resolvedAddress?.Settlement
             ?? resolvedAddress?.City
             ?? destinationAddress;
         var limit = Math.Clamp(payload.Limit ?? 12, 1, 30);
+        var candidateLimit = Math.Clamp(Math.Max(limit * 2, 12), 1, 30);
 
         var points = await SearchPointsAsync(
             locationSearchText,
@@ -161,9 +169,30 @@ public sealed class YandexDeliveryQuoteService : IYandexDeliveryQuoteService
             [paymentMethod],
             cancellationToken);
 
-        return points
+        var candidatePoints = points
             .Where(static point => !string.IsNullOrWhiteSpace(point.Id))
-            .Select(point => MapPickupPointSummary(point, resolvedAddress))
+            .OrderBy(point => CalculateDistanceKm(point.Position, resolvedAddress) ?? double.MaxValue)
+            .ThenBy(point => point.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(candidateLimit)
+            .ToList();
+
+        if (candidatePoints.Count == 0)
+            return [];
+
+        var decoratedPoints = await DecoratePickupPointsWithQuotesAsync(
+            candidatePoints,
+            resolvedAddress,
+            sourceStationId,
+            apiToken,
+            useTestEnvironment,
+            paymentMethod,
+            totalWeightGrams,
+            totalAssessedPrice,
+            clientPrice,
+            places,
+            cancellationToken);
+
+        return decoratedPoints
             .OrderBy(point => point.DistanceKm ?? double.MaxValue)
             .ThenBy(point => point.Name, StringComparer.OrdinalIgnoreCase)
             .Take(limit)
