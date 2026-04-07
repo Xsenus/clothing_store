@@ -1616,6 +1616,135 @@ export default function CheckoutPage() {
                                   </span>
                                 </div>
                               ) : null}
+                              {card.method === 'pickup' && isSelected ? (
+                                <div
+                                  className="mt-4 space-y-4 border-t border-black/10 pt-4"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  <div className="space-y-1">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <h3 className="font-bold uppercase tracking-wide">Пункт выдачи</h3>
+                                      {card.caption ? (
+                                        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                          {card.caption}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {selectedPickupPoint?.id ? (
+                                      <div className="space-y-1 text-sm text-muted-foreground">
+                                        <p className="font-medium text-foreground">Выбранный пункт</p>
+                                        <p>{selectedPickupPoint.address}</p>
+                                        {selectedPickupPoint.instruction ? <p>{selectedPickupPoint.instruction}</p> : null}
+                                        <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide">
+                                          {pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) ? (
+                                            <span>Срок: {formatDeliveryDays(pickupDelivery.deliveryDays)}</span>
+                                          ) : null}
+                                          {formatPickupDistance(selectedPickupPoint.distanceKm) ? (
+                                            <span>Расстояние: {formatPickupDistance(selectedPickupPoint.distanceKm)}</span>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">
+                                        Выберите удобный пункт выдачи из списка ниже. Стоимость и срок уже рассчитаны для выбранной службы.
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {pickupPointsLoading ? (
+                                    <p className="text-sm text-muted-foreground">
+                                      Подбираем пункты выдачи рядом с вашим адресом...
+                                    </p>
+                                  ) : null}
+
+                                  {!pickupPointsLoading && pickupPointsError ? (
+                                    <p className="text-sm text-red-700">
+                                      {visiblePickupPointsError}
+                                    </p>
+                                  ) : null}
+
+                                  {!pickupPointsLoading && !pickupPointsError && selectedPickupPoint?.id && !pickupDelivery?.available ? (
+                                    <p className="text-sm text-red-700">
+                                      {visibleSelectedDeliveryError}
+                                    </p>
+                                  ) : null}
+
+                                  {pickupPoints.length > 0 ? (
+                                    <div className="space-y-2 border border-black/10 bg-white p-3">
+                                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                                        Пункты выдачи для вашего адреса
+                                      </div>
+                                      <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                                        {pickupPoints.map((point) => {
+                                          const isPickupPointSelected = point.id === selectedPickupPointId;
+
+                                          return (
+                                            <button
+                                              key={point.id}
+                                              type="button"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                setSelectedPickupPointId(point.id);
+                                              }}
+                                              className={`w-full border p-3 text-left transition ${
+                                                isPickupPointSelected
+                                                  ? 'border-black bg-stone-50 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]'
+                                                  : 'border-black/15 bg-white hover:border-black/40 hover:bg-stone-50/60'
+                                              }`}
+                                            >
+                                              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                                                <div className="min-w-0 space-y-1">
+                                                  <p className="font-bold">{point.name || 'Пункт выдачи'}</p>
+                                                  <p className="text-sm text-muted-foreground">
+                                                    {point.address || 'Адрес не указан'}
+                                                  </p>
+                                                  {point.instruction ? (
+                                                    <p className="text-xs text-muted-foreground">
+                                                      {point.instruction}
+                                                    </p>
+                                                  ) : null}
+                                                </div>
+                                                <div className="min-w-[96px] text-right">
+                                                  <p className="font-black">
+                                                    {isPickupPointSelected
+                                                      ? pickupDeliveryLoading
+                                                        ? 'Расчет...'
+                                                        : pickupDelivery?.available
+                                                          ? formatProductPrice(pickupDelivery.estimatedCost ?? 0)
+                                                          : 'Выбрано'
+                                                      : 'Выбрать'}
+                                                  </p>
+                                                  {isPickupPointSelected && !pickupDelivery?.available && !pickupDeliveryLoading ? (
+                                                    <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                      Выбрано
+                                                    </p>
+                                                  ) : null}
+                                                  {isPickupPointSelected && pickupDelivery?.available && formatDeliveryDays(pickupDelivery.deliveryDays) ? (
+                                                    <p className="text-xs uppercase text-muted-foreground">
+                                                      {formatDeliveryDays(pickupDelivery.deliveryDays)}
+                                                    </p>
+                                                  ) : null}
+                                                  {formatPickupDistance(point.distanceKm) ? (
+                                                    <p className="text-xs uppercase text-muted-foreground">
+                                                      {formatPickupDistance(point.distanceKm)}
+                                                    </p>
+                                                  ) : null}
+                                                </div>
+                                              </div>
+                                              {isPickupPointSelected && !pickupDelivery?.available && !pickupDeliveryLoading ? (
+                                                <p className="mt-2 text-xs text-red-700">
+                                                  {visibleSelectedDeliveryError}
+                                                </p>
+                                              ) : null}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1653,7 +1782,7 @@ export default function CheckoutPage() {
                     </div>
                   ) : null}
 
-                  {isPickupSelected ? (
+                  {false ? (
                     <div className="space-y-4 border border-black/10 bg-white p-4">
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center justify-between gap-3">
