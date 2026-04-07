@@ -397,7 +397,7 @@ export function AdminCdekIntegrationTab({ settings, updateSetting }: Integration
           <li>Для боевого использования нужен договор со СДЭК.</li>
           <li>Для разработки используйте учебный контур <a className="underline underline-offset-2" href="https://api.edu.cdek.ru" target="_blank" rel="noreferrer">api.edu.cdek.ru</a> и официальный интеграторский раздел <a className="underline underline-offset-2" href="https://www.cdek.ru/clients/integrator.html" target="_blank" rel="noreferrer">cdek.ru/clients/integrator.html</a>.</li>
           <li>Заполните `Account`, `Secure password`, включите учебный контур и укажите точку отправления: индекс, адрес и при необходимости код ПВЗ/офиса.</li>
-          <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите тест интеграции.</li>
+          <li>После изменения полей нажмите кнопку сохранения текущего раздела внизу страницы, затем запустите тест интеграции.</li>
           <li>Чтобы checkout увидел СДЭК, после сохранения в `public-shell` должно появиться `delivery_cdek_enabled=true`.</li>
           <li>Успешный тест должен вернуть `tokenReceived=true`, `cityCode`, тарифы и список ПВЗ.</li>
           <li>Если учебный калькулятор СДЭК ответит `v2_internal_error`, система покажет резервные demo-тарифы учебного контура вместо падения теста.</li>
@@ -584,7 +584,7 @@ export function AdminRussianPostIntegrationTab({ settings, updateSetting }: Inte
           <li>Заполните `AccessToken`, `X-User-Authorization`, индекс отправителя и параметры типа отправления.</li>
           <li>Публичных универсальных demo-token для этого API нет: успешный тест требует ваши реальные данные из кабинета Отправки.</li>
           <li>Для доставки в отделение обычно подходят `POSTAL_PARCEL` и `ORDINARY`, для курьерского сценария используйте типы вроде `EMS` или `ONLINE_COURIER`.</li>
-          <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите тест интеграции.</li>
+          <li>После изменения полей нажмите кнопку сохранения текущего раздела внизу страницы, затем запустите тест интеграции.</li>
           <li>Чтобы checkout увидел Почту России, после сохранения в `public-shell` должно появиться `delivery_russian_post_enabled=true`.</li>
         </ol>
         <div className="rounded-none border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -663,7 +663,7 @@ export function AdminAvitoIntegrationTab({ settings, updateSetting }: Integratio
           <li>Заполните `Client ID` и `Client Secret` из кабинета разработчика Avito.</li>
           <li>Публичной универсальной тестовой пары `client_id/client_secret` Avito не выдает, поэтому выпуск токена возможен только для вашего приложения.</li>
           <li>При необходимости укажите `scope` и адрес склада для внутренней привязки настроек.</li>
-          <li>После изменения полей нажмите общую кнопку сохранения настроек внизу страницы, затем запустите OAuth test.</li>
+          <li>После изменения полей нажмите кнопку сохранения текущего раздела внизу страницы, затем запустите OAuth test.</li>
           <li>Этот тест проверяет только доступность OAuth-контура и учетные данные.</li>
           <li>Успешный OAuth test сам по себе не включает расчет доставки Avito в checkout, потому что публичный storefront delivery API в текущем проекте не подключен.</li>
         </ol>

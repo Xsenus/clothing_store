@@ -803,13 +803,7 @@ export default function CheckoutPage() {
     let statusTone: StatusTone = 'danger';
     let statusDescription = '';
 
-    if (!config.ready) {
-      priceLabel = 'Не настроено';
-      summary = `${config.label} включен, но публичный checkout еще не готов для расчета.`;
-      statusLabel = 'Не готово';
-      statusTone = 'warning';
-      statusDescription = 'Провайдер включен, но его публичная конфигурация еще не завершена.';
-    } else if (!address.trim()) {
+    if (!address.trim()) {
       priceLabel = 'Нужен адрес';
       summary = method === 'home'
         ? 'Укажите адрес, чтобы рассчитать стоимость и срок доставки до двери.'
@@ -825,6 +819,12 @@ export default function CheckoutPage() {
       statusLabel = 'Работает';
       statusTone = 'success';
       statusDescription = 'Вариант доступен для оформления заказа.';
+    } else if (!config.ready) {
+      priceLabel = 'Не настроено';
+      summary = `${config.label} включен, но публичный checkout еще не готов для расчета.`;
+      statusLabel = 'Не готово';
+      statusTone = 'warning';
+      statusDescription = 'Провайдер включен, но его публичная конфигурация еще не завершена.';
     } else if (isDeliveryCalculationPending && !providerQuote) {
       priceLabel = 'Расчет...';
       summary = `Запрашиваем тарифы ${config.label}.`;

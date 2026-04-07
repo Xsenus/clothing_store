@@ -1343,6 +1343,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
+const AUTH_SETTINGS_CATALOG_VALUES = ["telegram", "telegram-widget", "telegram-gateway", "google", "vk", "yandex"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "checkout", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
@@ -1350,6 +1351,7 @@ const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "
 const DEFAULT_ADMIN_NAVIGATION_STATE = {
   adminTab: "products",
   settingsGroup: "auth",
+  authSettingsCatalog: "telegram",
   generalSettingsCatalog: "branding",
   integrationCatalog: "telegram",
   dictionaryGroup: "sizes" as DictionaryKind,
@@ -1379,6 +1381,7 @@ const readPersistedAdminNavigationState = () => {
     return {
       adminTab: normalizeAdminNavigationValue(parsedValue?.adminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab),
       settingsGroup: normalizeAdminNavigationValue(parsedValue?.settingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup),
+      authSettingsCatalog: normalizeAdminNavigationValue(parsedValue?.authSettingsCatalog, AUTH_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.authSettingsCatalog),
       generalSettingsCatalog: normalizeAdminNavigationValue(parsedValue?.generalSettingsCatalog, GENERAL_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.generalSettingsCatalog),
       integrationCatalog: normalizeAdminNavigationValue(parsedValue?.integrationCatalog, INTEGRATION_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.integrationCatalog),
       dictionaryGroup: normalizeAdminNavigationValue(parsedValue?.dictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
@@ -1771,6 +1774,89 @@ const mergeSettingsWithDefaults = (rawSettings?: Record<string, string> | null) 
   return mergedSettings;
 };
 
+const dedupeSettingKeys = (...groups: ReadonlyArray<ReadonlyArray<string>>) =>
+  Array.from(new Set(groups.flat()));
+
+const getDefaultSettingKeysByPrefix = (...prefixes: string[]) =>
+  Object.keys(DEFAULT_APP_SETTINGS).filter((key) => prefixes.some((prefix) => key.startsWith(prefix)));
+
+const ORDER_SETTINGS_KEYS = Object.values(ORDER_STATUS_ROW_COLOR_SETTING_KEYS);
+const SMTP_SETTINGS_KEYS = dedupeSettingKeys(
+  getDefaultSettingKeysByPrefix("smtp_"),
+  Object.keys(EMAIL_TEMPLATE_SETTING_DEFAULTS),
+);
+const METRICS_SETTINGS_KEYS = getDefaultSettingKeysByPrefix("metrics_");
+const BACKUP_SETTINGS_KEYS = getDefaultSettingKeysByPrefix("database_backup_");
+const IMAGE_UPLOAD_SETTINGS_KEYS = getDefaultSettingKeysByPrefix("image_upload_");
+const AUTH_CORE_SETTING_KEYS = getDefaultSettingKeysByPrefix("auth_");
+
+const AUTH_SETTING_KEYS_BY_CATALOG: Record<(typeof AUTH_SETTINGS_CATALOG_VALUES)[number], readonly string[]> = {
+  telegram: ["telegram_login_enabled", "telegram_bot_username"],
+  "telegram-widget": ["telegram_widget_enabled"],
+  "telegram-gateway": getDefaultSettingKeysByPrefix("telegram_gateway_"),
+  google: ["google_login_enabled", "google_auth_client_id", "google_auth_client_secret"],
+  vk: ["vk_login_enabled", "vk_auth_client_id", "vk_auth_client_secret"],
+  yandex: ["yandex_login_enabled", "yandex_auth_client_id", "yandex_auth_client_secret"],
+};
+
+const GENERAL_SETTING_KEYS_BY_CATALOG: Record<(typeof GENERAL_SETTINGS_CATALOG_VALUES)[number], readonly string[]> = {
+  branding: ["storeName", "site_title", "site_favicon_url", "site_loading_animation_enabled"],
+  checkout: ["checkout_self_pickup_title", "checkout_self_pickup_description", "payment_cod_enabled"],
+  "catalog-card": getDefaultSettingKeysByPrefix("product_card_"),
+  "catalog-page": getDefaultSettingKeysByPrefix("catalog_collections_slider_"),
+  "product-page": getDefaultSettingKeysByPrefix("product_detail_"),
+  "social-links": ["social_links_config_json"],
+  "upload-media": IMAGE_UPLOAD_SETTINGS_KEYS,
+};
+
+const INTEGRATION_SETTING_KEYS_BY_CATALOG: Record<(typeof INTEGRATION_CATALOG_VALUES)[number], readonly string[]> = {
+  telegram: ["telegram_login_enabled", "telegram_bot_username"],
+  yoomoney: dedupeSettingKeys(["payments_yoomoney_enabled"], getDefaultSettingKeysByPrefix("yoomoney_")),
+  yookassa: dedupeSettingKeys(["payments_yookassa_enabled"], getDefaultSettingKeysByPrefix("yookassa_")),
+  robokassa: dedupeSettingKeys(["payments_robokassa_enabled"], getDefaultSettingKeysByPrefix("robokassa_")),
+  dadata: getDefaultSettingKeysByPrefix("dadata_"),
+  yandex: getDefaultSettingKeysByPrefix("yandex_delivery_"),
+  cdek: getDefaultSettingKeysByPrefix("delivery_cdek_"),
+  "russian-post": getDefaultSettingKeysByPrefix("delivery_russian_post_"),
+  avito: getDefaultSettingKeysByPrefix("delivery_avito_"),
+};
+
+const getSettingsKeysForSaveScope = ({
+  settingsGroup,
+  authSettingsCatalog,
+  generalSettingsCatalog,
+  integrationCatalog,
+}: {
+  settingsGroup: string;
+  authSettingsCatalog: string;
+  generalSettingsCatalog: string;
+  integrationCatalog: string;
+}) => {
+  switch (settingsGroup) {
+    case "orders":
+      return ORDER_SETTINGS_KEYS;
+    case "auth":
+      return dedupeSettingKeys(
+        AUTH_CORE_SETTING_KEYS,
+        AUTH_SETTING_KEYS_BY_CATALOG[authSettingsCatalog as keyof typeof AUTH_SETTING_KEYS_BY_CATALOG] || [],
+      );
+    case "smtp":
+      return SMTP_SETTINGS_KEYS;
+    case "metrics":
+      return METRICS_SETTINGS_KEYS;
+    case "integrations":
+      return INTEGRATION_SETTING_KEYS_BY_CATALOG[integrationCatalog as keyof typeof INTEGRATION_SETTING_KEYS_BY_CATALOG] || [];
+    case "legal":
+      return LEGAL_SETTING_KEYS;
+    case "backup":
+      return BACKUP_SETTINGS_KEYS;
+    case "general":
+      return GENERAL_SETTING_KEYS_BY_CATALOG[generalSettingsCatalog as keyof typeof GENERAL_SETTING_KEYS_BY_CATALOG] || [];
+    default:
+      return [];
+  }
+};
+
 const YANDEX_TEST_SOURCE_STATION_ID = "fbed3aa1-2cc6-4370-ab4d-59c5cc9bb924";
 
 type YandexSourceStationPreset = {
@@ -2119,8 +2205,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     managerComment: "",
   });
   const [selectedSettingsGroup, setSelectedSettingsGroup] = useState(() => readPersistedAdminNavigationState().settingsGroup);
+  const [selectedAuthSettingsCatalog, setSelectedAuthSettingsCatalog] = useState(() => readPersistedAdminNavigationState().authSettingsCatalog);
   const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState(() => readPersistedAdminNavigationState().generalSettingsCatalog);
   const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState(() => readPersistedAdminNavigationState().integrationCatalog);
+  const settingsLoaded = Object.keys(settings).length > 0;
   const [selectedUserOrders, setSelectedUserOrders] = useState<AdminOrder[]>([]);
   const [selectedUserOrdersTotal, setSelectedUserOrdersTotal] = useState(0);
   const [selectedUserOrdersLoading, setSelectedUserOrdersLoading] = useState(false);
@@ -2156,6 +2244,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     persistAdminNavigationState({
       adminTab: normalizeAdminNavigationValue(selectedAdminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab),
       settingsGroup: normalizeAdminNavigationValue(selectedSettingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup),
+      authSettingsCatalog: normalizeAdminNavigationValue(selectedAuthSettingsCatalog, AUTH_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.authSettingsCatalog),
       generalSettingsCatalog: normalizeAdminNavigationValue(selectedGeneralSettingsCatalog, GENERAL_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.generalSettingsCatalog),
       integrationCatalog: normalizeAdminNavigationValue(selectedIntegrationCatalog, INTEGRATION_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.integrationCatalog),
       dictionaryGroup: normalizeAdminNavigationValue(selectedDictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
@@ -2164,6 +2253,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     isStandaloneAdmin,
     selectedAdminTab,
     selectedSettingsGroup,
+    selectedAuthSettingsCatalog,
     selectedGeneralSettingsCatalog,
     selectedIntegrationCatalog,
     selectedDictionaryGroup,
@@ -3295,19 +3385,34 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const saveSettings = async () => {
-    try {
-      const currentRemote = await FLOW.adminGetSettings();
-      const mergedSettings = mergeSettingsWithDefaults({
-        ...(currentRemote || {}),
-        ...settings
-      });
+    if (!settingsLoaded) {
+      toast.error("Дождитесь загрузки настроек и попробуйте снова.");
+      return;
+    }
 
-      await FLOW.adminSaveSettings({ input: mergedSettings });
-      setSettings(mergedSettings);
-      setCachedPublicSettings(mergedSettings);
-      toast.success("Настройки сохранены");
+    const keysToSave = getSettingsKeysForSaveScope({
+      settingsGroup: selectedSettingsGroup,
+      authSettingsCatalog: selectedAuthSettingsCatalog,
+      generalSettingsCatalog: selectedGeneralSettingsCatalog,
+      integrationCatalog: selectedIntegrationCatalog,
+    });
+
+    if (keysToSave.length === 0) {
+      toast.error("В этом разделе нет общих настроек для сохранения.");
+      return;
+    }
+
+    const scopedSettings = Object.fromEntries(
+      keysToSave.map((key) => [key, settings[key] ?? DEFAULT_APP_SETTINGS[key] ?? ""]),
+    );
+
+    try {
+      await FLOW.adminSaveSettings({ input: scopedSettings });
+      setSettings((prev) => ({ ...prev, ...scopedSettings }));
+      setCachedPublicSettings({ ...getCachedPublicSettings(), ...scopedSettings });
+      toast.success("Настройки текущего раздела сохранены");
     } catch (error) {
-      toast.error("Не удалось сохранить настройки");
+      toast.error("Не удалось сохранить настройки текущего раздела");
     }
   };
 
@@ -9185,13 +9290,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             Здесь собраны все настройки, которых достаточно с нашей стороны для входа через Telegram, Google, VK и Яндекс. Отдельно у провайдеров все равно нужно разрешить callback URL, который показан ниже в карточках OAuth-провайдеров.
                           </p>
                           <p className="text-xs leading-5 text-muted-foreground">
-                            Кнопки проверки ниже используют уже сохраненные настройки сервера. Если вы только что изменили поля в этой форме, сначала нажмите общую кнопку сохранения настроек внизу страницы.
+                            Кнопки проверки ниже используют уже сохраненные настройки сервера. Если вы только что изменили поля в этой форме, сначала нажмите кнопку сохранения текущего раздела внизу страницы.
                           </p>
                           <p className="text-xs leading-5 text-muted-foreground">
                             Выберите вкладку нужного провайдера: внутри каждой собраны поля, callback URL, тест и пошаговая инструкция со ссылками в официальный кабинет.
                           </p>
                         </div>
-                        <Tabs defaultValue="telegram" className="space-y-4">
+                        <Tabs value={selectedAuthSettingsCatalog} onValueChange={setSelectedAuthSettingsCatalog} className="space-y-4">
                           <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-6">
                             <TabsTrigger value="telegram" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram</TabsTrigger>
                             <TabsTrigger value="telegram-widget" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Telegram Widget</TabsTrigger>
@@ -11273,7 +11378,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </div>
 
                         <p className="text-xs text-muted-foreground">
-                          После изменения включения, расписания или срока хранения нажмите общую кнопку сохранения настроек внизу страницы. Ручное создание и скачивание работает сразу, без отдельного сохранения.
+                          После изменения включения, расписания или срока хранения нажмите кнопку сохранения текущего раздела внизу страницы. Ручное создание и скачивание работает сразу, без отдельного сохранения.
                         </p>
 
                         <div className="grid gap-3 lg:grid-cols-3">
@@ -11887,9 +11992,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               </div>
 
 
-              {selectedSettingsGroup !== "account-merge" && (
+              {selectedSettingsGroup !== "account-merge" && selectedSettingsGroup !== "promo-codes" && (
                 <div className="mt-3 flex gap-2">
-                  <Button onClick={saveSettings}>Сохранить настройки</Button>
+                  <Button onClick={saveSettings} disabled={!settingsLoaded}>Сохранить текущий раздел</Button>
                 </div>
               )}
             </div>

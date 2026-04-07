@@ -574,20 +574,28 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
             throw new HttpRequestException(BuildHttpError("СДЭК не вернул справочник городов", response.StatusCode, body));
 
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "[]" : body);
-        if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
+        var cities = document.RootElement.Clone();
+        if ((cities.ValueKind != JsonValueKind.Array || cities.GetArrayLength() == 0)
+            && !string.IsNullOrWhiteSpace(postalCode)
+            && !string.IsNullOrWhiteSpace(query))
+        {
+            cities = await LoadCitiesAsync(client, settings, token, postalCode, cityQuery: null, cancellationToken);
+        }
+
+        if (cities.ValueKind != JsonValueKind.Array || cities.GetArrayLength() == 0)
             return null;
 
         JsonElement? matchedCity = null;
         if (!string.IsNullOrWhiteSpace(postalCode))
         {
-            matchedCity = document.RootElement
+            matchedCity = cities
                 .EnumerateArray()
                 .FirstOrDefault(city => CityMatchesPostalCode(city, postalCode));
         }
 
         if (matchedCity is not { ValueKind: JsonValueKind.Object })
         {
-            matchedCity = document.RootElement
+            matchedCity = cities
                 .EnumerateArray()
                 .FirstOrDefault(city => string.Equals(GetString(city, "city"), query, StringComparison.OrdinalIgnoreCase));
         }
@@ -595,7 +603,39 @@ public sealed class CdekDeliveryService : ICdekDeliveryService
         if (matchedCity is { ValueKind: JsonValueKind.Object } city)
             return GetString(city, "code");
 
-        return GetString(document.RootElement[0], "code");
+        return GetString(cities[0], "code");
+    }
+
+    private async Task<JsonElement> LoadCitiesAsync(
+        HttpClient client,
+        CdekDeliveryIntegrationOverrides settings,
+        string token,
+        string? postalCode,
+        string? cityQuery,
+        CancellationToken cancellationToken)
+    {
+        var uri = BuildUri(
+            settings,
+            "/v2/location/cities",
+            new Dictionary<string, string?>
+            {
+                ["country_codes"] = "RU",
+                ["postal_code"] = postalCode,
+                ["city"] = cityQuery,
+                ["size"] = "10",
+                ["lang"] = "rus"
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(BuildHttpError("СДЭК не вернул справочник городов", response.StatusCode, body));
+
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "[]" : body);
+        return document.RootElement.Clone();
     }
 
     private static IReadOnlyList<CdekTariffQuote> ExtractTariffs(JsonElement root)
