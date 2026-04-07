@@ -32,6 +32,9 @@ public class PublicSettingsController : ControllerBase
         "yookassa_allow_yoomoney",
         "payments_robokassa_enabled",
         "payments_robokassa_ready",
+        "payment_cod_enabled",
+        "checkout_self_pickup_title",
+        "checkout_self_pickup_description",
         "yandex_delivery_enabled",
         "delivery_cdek_enabled",
         "delivery_cdek_ready",
@@ -287,6 +290,14 @@ public class PublicSettingsController : ControllerBase
 
         if (requested.Contains("payments_robokassa_ready"))
             result["payments_robokassa_ready"] = await IsRoboKassaReadyAsync() ? "true" : "false";
+
+        if (requested.Contains("payment_cod_enabled"))
+        {
+            result["payment_cod_enabled"] = await GetBooleanSettingAsync(
+                "payment_cod_enabled",
+                "Checkout:PaymentCodEnabled",
+                fallback: true) ? "true" : "false";
+        }
 
         if (requested.Contains("yandex_delivery_enabled"))
         {

@@ -1343,7 +1343,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
-const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
+const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "checkout", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
 
@@ -1680,6 +1680,9 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   robokassa_receipt_enabled: "false",
   robokassa_receipt_tax: "none",
   robokassa_tax_system: "osn",
+  payment_cod_enabled: "true",
+  checkout_self_pickup_title: "Новосибирск",
+  checkout_self_pickup_description: "Самовывоз из точки в Новосибирске. После оформления мы свяжемся с вами и подтвердим детали выдачи.",
   catalog_filter_categories_enabled: "true",
   catalog_filter_sizes_enabled: "true",
   catalog_filter_materials_enabled: "true",
@@ -11361,9 +11364,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         подкаталогами и не пролистывать весь раздел целиком.
                       </p>
                       <Tabs value={selectedGeneralSettingsCatalog} onValueChange={setSelectedGeneralSettingsCatalog} className="space-y-4">
-                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-6">
+                        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-7">
                           <TabsTrigger value="branding" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Брендинг
+                          </TabsTrigger>
+                          <TabsTrigger value="checkout" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
+                            Checkout
                           </TabsTrigger>
                           <TabsTrigger value="catalog-card" className="h-11 rounded-none border border-black data-[state=active]:bg-black data-[state=active]:text-white">
                             Карточки каталога
@@ -11471,6 +11477,56 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           />
                         </div>
                       </div>
+                        </TabsContent>
+                        <TabsContent value="checkout" className="mt-0">
+                          <div className="space-y-4 border border-gray-200 p-3">
+                            <div className="space-y-1">
+                              <h4 className="font-semibold">Checkout</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Здесь можно управлять текстом самовывоза и видимостью оплаты при получении на странице оформления заказа.
+                              </p>
+                            </div>
+
+                            <div className="grid gap-3 xl:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="checkout-self-pickup-title">Город / точка самовывоза</Label>
+                                <Input
+                                  id="checkout-self-pickup-title"
+                                  value={settings.checkout_self_pickup_title || ""}
+                                  onChange={(e) => updateSetting("checkout_self_pickup_title", e.target.value)}
+                                  placeholder="Например: Новосибирск"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Этот текст сразу показывается в карточке самовывоза и в сводке заказа.
+                                </p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label htmlFor="checkout-self-pickup-description">Описание самовывоза</Label>
+                                <Textarea
+                                  id="checkout-self-pickup-description"
+                                  value={settings.checkout_self_pickup_description || ""}
+                                  onChange={(e) => updateSetting("checkout_self_pickup_description", e.target.value)}
+                                  placeholder="Например: Самовывоз из точки в Новосибирске. После оформления мы свяжемся с вами и подтвердим детали выдачи."
+                                  className="min-h-[96px] rounded-none"
+                                />
+                              </div>
+                            </div>
+
+                            <label className="flex cursor-pointer items-start justify-between gap-3 rounded-none border border-gray-200 px-3 py-3">
+                              <div className="space-y-1">
+                                <span className="block text-sm font-medium">Показывать оплату при получении</span>
+                                <span className="block text-xs text-muted-foreground">
+                                  Если выключить этот переключатель, способ оплаты пропадет из checkout, а backend перестанет принимать новые заказы с `cod`.
+                                </span>
+                              </div>
+                              <Checkbox
+                                id="payment-cod-enabled"
+                                checked={isSettingEnabled("payment_cod_enabled", true)}
+                                onCheckedChange={(checked) => updateSetting("payment_cod_enabled", checked ? "true" : "false")}
+                              />
+                            </label>
+                          </div>
                         </TabsContent>
                         <TabsContent value="catalog-card" className="mt-0">
                       <div className="space-y-3 border border-gray-200 p-3">

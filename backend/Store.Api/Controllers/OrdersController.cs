@@ -19,6 +19,7 @@ namespace Store.Api.Controllers;
 public class OrdersController : ControllerBase
 {
     private readonly StoreDbContext _db;
+    private readonly IConfiguration _configuration;
     private readonly AuthService _auth;
     private readonly IOrderEmailQueue _orderEmailQueue;
     private readonly IOrderPaymentService _orderPaymentService;
@@ -33,6 +34,7 @@ public class OrdersController : ControllerBase
     /// </summary>
     public OrdersController(
         StoreDbContext db,
+        IConfiguration configuration,
         AuthService auth,
         IOrderEmailQueue orderEmailQueue,
         IOrderPaymentService orderPaymentService,
@@ -41,6 +43,7 @@ public class OrdersController : ControllerBase
         UserIdentityService userIdentityService)
     {
         _db = db;
+        _configuration = configuration;
         _auth = auth;
         _orderEmailQueue = orderEmailQueue;
         _orderPaymentService = orderPaymentService;
@@ -277,9 +280,24 @@ public class OrdersController : ControllerBase
                 2,
                 MidpointRounding.AwayFromZero);
 
+            var isCashOnDeliveryEnabled = await GetBooleanSettingAsync(
+                "payment_cod_enabled",
+                "Checkout:PaymentCodEnabled",
+                fallback: true,
+                HttpContext.RequestAborted);
             var resolvedPaymentMethod = string.IsNullOrWhiteSpace(payload.PaymentMethod)
-                ? "cod"
+                ? (isCashOnDeliveryEnabled ? "cod" : string.Empty)
                 : payload.PaymentMethod.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(resolvedPaymentMethod))
+            {
+                return Results.BadRequest(new { detail = "Выберите доступный способ оплаты перед оформлением заказа." });
+            }
+
+            if (!isCashOnDeliveryEnabled && string.Equals(resolvedPaymentMethod, "cod", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { detail = "Оплата при получении сейчас отключена. Выберите другой способ оплаты." });
+            }
+
             var usesOnlinePayment = _orderPaymentService.IsOnlinePaymentMethod(resolvedPaymentMethod);
             var resolvedStatus = usesOnlinePayment
                 ? "pending_payment"
@@ -561,6 +579,39 @@ public class OrdersController : ControllerBase
             normalized = $"+{normalized}";
 
         return normalized;
+    }
+
+    private async Task<string?> GetSettingOrConfigAsync(
+        string key,
+        string configPath,
+        CancellationToken cancellationToken)
+    {
+        var row = await _db.AppSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Key == key, cancellationToken);
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Value))
+            return row.Value.Trim();
+
+        var configValue = _configuration[configPath];
+        return string.IsNullOrWhiteSpace(configValue) ? null : configValue.Trim();
+    }
+
+    private async Task<bool> GetBooleanSettingAsync(
+        string key,
+        string configPath,
+        bool fallback,
+        CancellationToken cancellationToken)
+    {
+        var raw = await GetSettingOrConfigAsync(key, configPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback
+        };
     }
 
 }

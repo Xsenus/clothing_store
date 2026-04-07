@@ -432,36 +432,6 @@ export default function CheckoutPage() {
   }, []);
 
   useEffect(() => {
-    if (![
-      'yoomoney',
-      'yoomoney_card',
-      'yoomoney_wallet',
-      'yookassa',
-      'yookassa_card',
-      'yookassa_sbp',
-      'yookassa_yoomoney',
-      'robokassa',
-    ].includes(paymentMethod)) {
-      return;
-    }
-
-    const methodStillAvailable = (
-      (paymentMethod === 'yoomoney_card' && yooMoneyCapabilities.allowBankCards)
-      || (paymentMethod === 'yoomoney_wallet' && yooMoneyCapabilities.allowWallet)
-      || (paymentMethod === 'yoomoney' && yooMoneyCapabilities.hasAnyMethod)
-      || (paymentMethod === 'yookassa_card' && yooKassaCapabilities.allowBankCards)
-      || (paymentMethod === 'yookassa_sbp' && yooKassaCapabilities.allowSbp)
-      || (paymentMethod === 'yookassa_yoomoney' && yooKassaCapabilities.allowYooMoney)
-      || (paymentMethod === 'yookassa' && yooKassaCapabilities.hasAnyMethod)
-      || (paymentMethod === 'robokassa' && roboKassaCapabilities.hasAnyMethod)
-    );
-
-    if (!methodStillAvailable) {
-      setPaymentMethod('cod');
-    }
-  }, [paymentMethod, roboKassaCapabilities, yooKassaCapabilities, yooMoneyCapabilities]);
-
-  useEffect(() => {
     let cancelled = false;
 
     const hydrateProfile = async () => {
@@ -513,6 +483,10 @@ export default function CheckoutPage() {
   const yookassaBankCardsEnabled = isSettingEnabled(publicSettings?.yookassa_allow_bank_cards, true);
   const yookassaSbpEnabled = isSettingEnabled(publicSettings?.yookassa_allow_sbp, true);
   const yookassaYooMoneyEnabled = isSettingEnabled(publicSettings?.yookassa_allow_yoomoney, true);
+  const isCashOnDeliveryEnabled = isSettingEnabled(publicSettings?.payment_cod_enabled, true);
+  const selfPickupLocationTitle = String(publicSettings?.checkout_self_pickup_title || '').trim() || 'Новосибирск';
+  const selfPickupLocationDescription = String(publicSettings?.checkout_self_pickup_description || '').trim()
+    || 'Самовывоз доступен после оформления заказа. Мы свяжемся с вами и подтвердим детали выдачи.';
 
   const resolvePaymentStatus = (
     providerEnabled: boolean,
@@ -564,6 +538,13 @@ export default function CheckoutPage() {
     tone: 'success' as const,
     description: 'Базовый способ оплаты всегда доступен для оформления.',
   };
+  const activeCodPaymentStatus = isCashOnDeliveryEnabled
+    ? codPaymentStatus
+    : {
+        label: 'Отключено',
+        tone: 'muted' as const,
+        description: 'Этот способ оплаты скрыт в публичном checkout.',
+      };
   const yooMoneyCardStatus = resolvePaymentStatus(
     yooMoneyCapabilities.enabled,
     yooMoneyCapabilities.ready,
@@ -608,11 +589,11 @@ export default function CheckoutPage() {
       title: 'Оплата при получении',
       badge: 'При получении',
       subtitle: 'Оплатите заказ при получении или примерке.',
-      enabled: true,
-      working: true,
-      statusLabel: codPaymentStatus.label,
-      statusTone: codPaymentStatus.tone,
-      statusDescription: codPaymentStatus.description,
+      enabled: isCashOnDeliveryEnabled,
+      working: isCashOnDeliveryEnabled,
+      statusLabel: activeCodPaymentStatus.label,
+      statusTone: activeCodPaymentStatus.tone,
+      statusDescription: activeCodPaymentStatus.description,
     },
     {
       id: 'payment-yoomoney-card',
@@ -688,10 +669,20 @@ export default function CheckoutPage() {
     },
   ];
 
-  const visiblePaymentOptions = paymentOptions.filter((option) => (
-    option.value === 'cod'
-      || (isAdmin ? true : option.working)
-  ));
+  const workingPaymentOptions = paymentOptions.filter((option) => option.working);
+  const visiblePaymentOptions = isAdmin ? paymentOptions : workingPaymentOptions;
+  const selectedPaymentOption = paymentOptions.find((option) => option.value === paymentMethod) ?? null;
+
+  useEffect(() => {
+    if (workingPaymentOptions.length === 0) {
+      return;
+    }
+
+    const methodStillAvailable = workingPaymentOptions.some((option) => option.value === paymentMethod);
+    if (!methodStillAvailable) {
+      setPaymentMethod(workingPaymentOptions[0]!.value);
+    }
+  }, [paymentMethod, workingPaymentOptions]);
 
   useEffect(() => {
     if (!isManagedDeliveryEnabled || !address.trim() || subtotal <= 0) {
@@ -1111,6 +1102,7 @@ export default function CheckoutPage() {
   const canSubmit = cartItems.length > 0
     && !hasUnavailableItems
     && hasConfirmedContact
+    && Boolean(selectedPaymentOption?.working)
     && !loading
     && !promoCodeLoading
     && !isShippingLoading
@@ -1139,7 +1131,7 @@ export default function CheckoutPage() {
 
   const resolveSelectedShippingAddress = () => {
     if (selectedDeliveryMethod === 'self_pickup') {
-      return 'Самовывоз';
+      return `Самовывоз: ${selfPickupLocationTitle}`;
     }
 
     if (selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address) {
@@ -1331,6 +1323,11 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (!selectedPaymentOption?.working) {
+      toast.error('Сейчас нет доступного способа оплаты. Выберите другой вариант или обновите страницу.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -1492,6 +1489,11 @@ export default function CheckoutPage() {
                         statusDescription={isAdmin ? option.statusDescription : undefined}
                       />
                     ))}
+                    {visiblePaymentOptions.length === 0 ? (
+                      <div className="border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        Сейчас нет доступных способов оплаты для оформления заказа.
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1545,6 +1547,9 @@ export default function CheckoutPage() {
                             'text-sm text-muted-foreground',
                             isSelfPickupSelected ? 'text-black/70' : '',
                           )}>
+                            <p className={cn('font-medium text-foreground', isSelfPickupSelected ? 'text-black' : '')}>
+                              Пункт выдачи: {selfPickupLocationTitle}
+                            </p>
                             Заберете заказ самостоятельно. После оформления мы свяжемся с вами и подтвердим детали выдачи.
                           </div>
                           {isAdmin ? (
@@ -2033,6 +2038,12 @@ export default function CheckoutPage() {
                     Провайдер: {selectedDeliveryProviderCaption}
                   </div>
                 )}
+                {selectedDeliveryMethod === 'self_pickup' ? (
+                  <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
+                    <div>Самовывоз: {selfPickupLocationTitle}</div>
+                    <div className="mt-1">{selfPickupLocationDescription}</div>
+                  </div>
+                ) : null}
                 {selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address && (
                   <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
                     Пункт выдачи: {selectedPickupPoint.address}

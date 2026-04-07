@@ -751,6 +751,12 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "robokassa_receipt_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "robokassa_receipt_tax", "none");
         await EnsureAppSettingExistsAsync(db, "robokassa_tax_system", "");
+        await EnsureAppSettingExistsAsync(db, "payment_cod_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "checkout_self_pickup_title", "Новосибирск");
+        await EnsureAppSettingExistsAsync(
+            db,
+            "checkout_self_pickup_description",
+            "Самовывоз из точки в Новосибирске. После оформления мы свяжемся с вами и подтвердим детали выдачи.");
         foreach (var (key, value) in EmailTemplateCatalog.BuildDefaultSettings())
         {
             await EnsureAppSettingExistsAsync(db, key, value);
