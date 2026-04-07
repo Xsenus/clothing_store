@@ -162,6 +162,18 @@ const getRussianPostIssues = (settings: SettingsMap) => {
   return issues;
 };
 
+const getFivePostIssues = (settings: SettingsMap) => {
+  if (!isSettingEnabled(settings.delivery_fivepost_enabled)) return [];
+  const issues = [];
+  if (!hasValue(settings.delivery_fivepost_pickup_cost) || Number(settings.delivery_fivepost_pickup_cost) <= 0) {
+    issues.push("Укажите фиксированную стоимость доставки 5Post до ПВЗ/постамата.");
+  }
+  if (!hasValue(settings.delivery_fivepost_delivery_days) || Number(settings.delivery_fivepost_delivery_days) <= 0) {
+    issues.push("Укажите срок доставки 5Post в днях.");
+  }
+  return issues;
+};
+
 const getAvitoIssues = (settings: SettingsMap) => {
   if (!isSettingEnabled(settings.delivery_avito_enabled)) return [];
   const issues = [];
@@ -621,6 +633,93 @@ export function AdminRussianPostIntegrationTab({ settings, updateSetting }: Inte
       {russianPostResult?.quote && (
         <div className="rounded-none border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           Проверка прошла: отправитель `{russianPostResult.fromPostalCode || "—"}`, индекс назначения `{russianPostResult.destinationPostalCode || "—"}`, доставка в отделение {russianPostResult.quote?.pickupPointDelivery?.available ? `доступна (${formatRub(russianPostResult.quote?.pickupPointDelivery?.estimatedCost)}, срок ${russianPostResult.quote?.pickupPointDelivery?.deliveryDays ?? "—"} дн.)` : "не найдена"}, доставка до двери {russianPostResult.quote?.homeDelivery?.available ? `доступна (${formatRub(russianPostResult.quote?.homeDelivery?.estimatedCost)}, срок ${russianPostResult.quote?.homeDelivery?.deliveryDays ?? "—"} дн.)` : "не настроена для выбранного MailType"}, найдено отделений: {Array.isArray(russianPostResult.pickupPoints) ? russianPostResult.pickupPoints.length : 0}.
+        </div>
+      )}
+      <ResultBox error={error} result={result} />
+    </div>
+  );
+}
+
+export function AdminFivePostIntegrationTab({ settings, updateSetting }: IntegrationProps) {
+  const [address, setAddress] = useState("630099, Новосибирск, Красный проспект, 25");
+  const [weightKg, setWeightKg] = useState("0.300");
+  const [declaredCost, setDeclaredCost] = useState("1000");
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<unknown>(null);
+  const issues = useMemo(() => getFivePostIssues(settings), [settings]);
+  const fivePostResult = result && typeof result === "object" ? result as {
+    markerCount?: number;
+    pickupCost?: number;
+    deliveryDays?: number;
+    note?: string;
+    pickupPoints?: Array<{ id?: string; address?: string }> | null;
+    quote?: {
+      pickupPointDelivery?: { available?: boolean; estimatedCost?: number | null; deliveryDays?: number | null } | null;
+    } | null;
+  } : null;
+
+  const runTest = async () => {
+    setRunning(true);
+    setError("");
+    try {
+      setResult(await FLOW.adminTestFivePostDelivery({
+        input: {
+          enabled: isSettingEnabled(settings.delivery_fivepost_enabled),
+          pickupCost: Number(String(settings.delivery_fivepost_pickup_cost || "0").replace(",", ".")),
+          deliveryDays: Number(settings.delivery_fivepost_delivery_days || "0"),
+          toAddress: address,
+          paymentMethod: "cod",
+          weightKg: Number(weightKg.replace(",", ".")),
+          declaredCost: Number(declaredCost.replace(",", ".")),
+          limit: 5,
+        },
+      }));
+    } catch (nextError) {
+      setResult(null);
+      setError(getErrorMessage(nextError, "Не удалось проверить 5Post."));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="min-w-0 space-y-3 overflow-hidden border p-3">
+      <div className="flex items-start gap-2"><Checkbox id="delivery-fivepost-enabled" checked={isSettingEnabled(settings.delivery_fivepost_enabled)} onCheckedChange={(checked) => updateSetting("delivery_fivepost_enabled", checked ? "true" : "false")} /><Label htmlFor="delivery-fivepost-enabled" className="leading-snug">Включить 5Post</Label></div>
+      <IssueBox enabled={isSettingEnabled(settings.delivery_fivepost_enabled)} issues={issues} summary="Pickup-only интеграция 5Post на публичной карте ПВЗ и постаматов. Доставка до двери и автосоздание отправлений здесь пока не включаются." />
+      <HelpBox title="Как работает 5Post">
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>Checkout получает от backend ближайшие точки 5Post через публичный points API.</li>
+          <li>Стоимость и срок задаются вручную в настройках как единый storefront-тариф.</li>
+          <li>В этой версии подключаем только ПВЗ и постаматы, без доставки до двери.</li>
+          <li>Кнопка проверки ниже не требует боевых merchant-ключей: она проверяет публичную карту точек и наш локальный pickup-сценарий.</li>
+        </ol>
+      </HelpBox>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="space-y-1"><Label htmlFor="delivery-fivepost-cost">Стоимость pickup, ₽</Label><Input id="delivery-fivepost-cost" value={settings.delivery_fivepost_pickup_cost || ""} onChange={(event) => updateSetting("delivery_fivepost_pickup_cost", event.target.value)} placeholder="Например, 299" /></div>
+        <div className="space-y-1"><Label htmlFor="delivery-fivepost-days">Срок, дней</Label><Input id="delivery-fivepost-days" value={settings.delivery_fivepost_delivery_days || ""} onChange={(event) => updateSetting("delivery_fivepost_delivery_days", event.target.value)} placeholder="Например, 4" /></div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="space-y-1 md:col-span-4">
+          <Label htmlFor="delivery-fivepost-test-address">Тестовый адрес</Label>
+          <AddressAutocompleteInput
+            id="delivery-fivepost-test-address"
+            name="delivery_fivepost_test_address"
+            value={address}
+            onValueChange={setAddress}
+            placeholder="630099, Новосибирск, Красный проспект, 25"
+            inputClassName="rounded-none"
+            suggestionsClassName="rounded-none"
+          />
+        </div>
+        <div className="space-y-1"><Label htmlFor="delivery-fivepost-test-weight">Вес, кг</Label><Input id="delivery-fivepost-test-weight" value={weightKg} onChange={(event) => setWeightKg(event.target.value)} placeholder="0.300" /></div>
+        <div className="space-y-1"><Label htmlFor="delivery-fivepost-test-cost">Объявленная стоимость, ₽</Label><Input id="delivery-fivepost-test-cost" value={declaredCost} onChange={(event) => setDeclaredCost(event.target.value)} placeholder="1000" /></div>
+        <div className="flex items-end"><Button type="button" className="w-full rounded-none md:w-auto" disabled={running || !isSettingEnabled(settings.delivery_fivepost_enabled)} onClick={runTest}>{running ? "Проверяем..." : "Проверить 5Post"}</Button></div>
+      </div>
+      {fivePostResult?.quote?.pickupPointDelivery?.available && (
+        <div className="rounded-none border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          Проверка прошла: найдено точек {Array.isArray(fivePostResult.pickupPoints) ? fivePostResult.pickupPoints.length : 0} из публичной карты 5Post, общий объём карты {fivePostResult.markerCount ?? "—"}, storefront-тариф {formatRub(fivePostResult.pickupCost)} и срок {fivePostResult.deliveryDays ?? "—"} дн.
+          {fivePostResult.note ? ` ${fivePostResult.note}` : ""}
         </div>
       )}
       <ResultBox error={error} result={result} />

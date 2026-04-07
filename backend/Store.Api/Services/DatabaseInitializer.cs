@@ -791,6 +791,9 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_length_cm", "30");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_height_cm", "20");
         await EnsureAppSettingExistsAsync(db, "delivery_cdek_package_width_cm", "10");
+        await EnsureAppSettingExistsAsync(db, "delivery_fivepost_enabled", "false");
+        await EnsureAppSettingExistsAsync(db, "delivery_fivepost_pickup_cost", "");
+        await EnsureAppSettingExistsAsync(db, "delivery_fivepost_delivery_days", "");
         await EnsureAppSettingExistsAsync(db, "delivery_russian_post_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "delivery_russian_post_access_token", "");
         await EnsureAppSettingExistsAsync(db, "delivery_russian_post_authorization_key", "");

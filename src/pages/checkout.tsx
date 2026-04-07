@@ -409,6 +409,7 @@ export default function CheckoutPage() {
           setIsManagedDeliveryEnabled(
             isSettingEnabled(settings?.yandex_delivery_enabled, true)
             || isSettingEnabled(settings?.delivery_cdek_enabled)
+            || isSettingEnabled(settings?.delivery_fivepost_enabled)
             || isSettingEnabled(settings?.delivery_russian_post_enabled)
             || isSettingEnabled(settings?.delivery_avito_enabled),
           );
@@ -757,6 +758,15 @@ export default function CheckoutPage() {
       supportsHome: true,
       supportsPickup: true,
       pickupTitle: 'ПВЗ',
+    },
+    {
+      provider: 'fivepost',
+      label: '5Post',
+      enabled: isSettingEnabled(publicSettings?.delivery_fivepost_enabled),
+      ready: isSettingEnabled(publicSettings?.delivery_fivepost_ready),
+      supportsHome: false,
+      supportsPickup: true,
+      pickupTitle: 'ПВЗ / постамат',
     },
     {
       provider: 'russian_post',

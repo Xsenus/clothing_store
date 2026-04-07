@@ -53,17 +53,20 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
 {
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
     private readonly ICdekDeliveryService _cdekDeliveryService;
+    private readonly IFivePostDeliveryService _fivePostDeliveryService;
     private readonly IRussianPostDeliveryService _russianPostDeliveryService;
     private readonly IAvitoDeliveryService _avitoDeliveryService;
 
     public DeliveryIntegrationService(
         IYandexDeliveryQuoteService yandexDeliveryQuoteService,
         ICdekDeliveryService cdekDeliveryService,
+        IFivePostDeliveryService fivePostDeliveryService,
         IRussianPostDeliveryService russianPostDeliveryService,
         IAvitoDeliveryService avitoDeliveryService)
     {
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
         _cdekDeliveryService = cdekDeliveryService;
+        _fivePostDeliveryService = fivePostDeliveryService;
         _russianPostDeliveryService = russianPostDeliveryService;
         _avitoDeliveryService = avitoDeliveryService;
     }
@@ -79,10 +82,11 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
         // Delivery services use the same scoped EF DbContext to resolve integration settings.
         // Parallel execution here can trigger concurrent DbContext operations and make
         // providers disappear from storefront calculations even though they work individually.
-        var providers = new List<DeliveryProviderQuoteResult?>(4)
+        var providers = new List<DeliveryProviderQuoteResult?>(5)
         {
             await TryGetYandexQuoteAsync(payload, cancellationToken),
             await TryGetCdekQuoteAsync(payload, cancellationToken),
+            await TryGetFivePostQuoteAsync(payload, cancellationToken),
             await TryGetRussianPostQuoteAsync(payload, cancellationToken),
             await TryGetAvitoQuoteAsync(payload, cancellationToken)
         };
@@ -105,6 +109,7 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
         {
             "yandex_delivery" or "yandex" => await MapYandexPickupPointsAsync(payload, cancellationToken),
             "cdek" => await _cdekDeliveryService.ListPickupPointsAsync(payload, cancellationToken),
+            "fivepost" or "5post" => await _fivePostDeliveryService.ListPickupPointsAsync(payload, cancellationToken),
             "russian_post" => await _russianPostDeliveryService.ListPickupPointsAsync(payload, cancellationToken),
             "avito" or "avito_delivery" => await _avitoDeliveryService.ListPickupPointsAsync(payload, cancellationToken),
             _ => throw new InvalidOperationException("Выбран неподдерживаемый провайдер доставки.")
@@ -215,6 +220,11 @@ public sealed class DeliveryIntegrationService : IDeliveryIntegrationService
         DeliveryCalculatePayload payload,
         CancellationToken cancellationToken)
         => _cdekDeliveryService.TryCalculateAsync(payload, cancellationToken);
+
+    private Task<DeliveryProviderQuoteResult?> TryGetFivePostQuoteAsync(
+        DeliveryCalculatePayload payload,
+        CancellationToken cancellationToken)
+        => _fivePostDeliveryService.TryCalculateAsync(payload, cancellationToken);
 
     private Task<DeliveryProviderQuoteResult?> TryGetRussianPostQuoteAsync(
         DeliveryCalculatePayload payload,

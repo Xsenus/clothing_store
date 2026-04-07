@@ -1204,6 +1204,12 @@ export const FLOW = {
     body: JSON.stringify(input),
   }),
 
+  adminTestFivePostDelivery: async ({ input }) => request("/admin/settings/fivepost-delivery/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }),
+
   adminTestAvitoDelivery: async ({ input }) => request("/admin/settings/avito-delivery/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

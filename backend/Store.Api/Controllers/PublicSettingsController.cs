@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Net;
 using Store.Api.Data;
 
@@ -38,6 +39,8 @@ public class PublicSettingsController : ControllerBase
         "yandex_delivery_enabled",
         "delivery_cdek_enabled",
         "delivery_cdek_ready",
+        "delivery_fivepost_enabled",
+        "delivery_fivepost_ready",
         "delivery_russian_post_enabled",
         "delivery_russian_post_ready",
         "delivery_avito_enabled",
@@ -318,6 +321,17 @@ public class PublicSettingsController : ControllerBase
         if (requested.Contains("delivery_cdek_ready"))
             result["delivery_cdek_ready"] = await IsCdekReadyAsync() ? "true" : "false";
 
+        if (requested.Contains("delivery_fivepost_enabled"))
+        {
+            result["delivery_fivepost_enabled"] = await GetBooleanSettingAsync(
+                "delivery_fivepost_enabled",
+                "Integrations:FivePost:Enabled",
+                fallback: false) ? "true" : "false";
+        }
+
+        if (requested.Contains("delivery_fivepost_ready"))
+            result["delivery_fivepost_ready"] = await IsFivePostReadyAsync() ? "true" : "false";
+
         if (requested.Contains("delivery_russian_post_enabled"))
         {
             result["delivery_russian_post_enabled"] = await GetBooleanSettingAsync(
@@ -512,6 +526,32 @@ public class PublicSettingsController : ControllerBase
 
         return !string.IsNullOrWhiteSpace(clientId)
             && !string.IsNullOrWhiteSpace(clientSecret);
+    }
+
+    private async Task<bool> IsFivePostReadyAsync()
+    {
+        var enabled = await GetBooleanSettingAsync(
+            "delivery_fivepost_enabled",
+            "Integrations:FivePost:Enabled",
+            fallback: false);
+        if (!enabled)
+            return false;
+
+        var pickupCostRaw = await GetSettingOrConfigAsync(
+            "delivery_fivepost_pickup_cost",
+            "Integrations:FivePost:PickupCost");
+        var deliveryDaysRaw = await GetSettingOrConfigAsync(
+            "delivery_fivepost_delivery_days",
+            "Integrations:FivePost:DeliveryDays");
+
+        var hasPickupCost = decimal.TryParse(pickupCostRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out var pickupCost)
+            || decimal.TryParse(pickupCostRaw, NumberStyles.Any, CultureInfo.GetCultureInfo("ru-RU"), out pickupCost);
+        var hasDeliveryDays = int.TryParse(deliveryDaysRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var deliveryDays);
+
+        return hasPickupCost
+            && pickupCost > 0m
+            && hasDeliveryDays
+            && deliveryDays > 0;
     }
 
     private async Task<bool> IsTelegramLoginReadyAsync()

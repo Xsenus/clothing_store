@@ -264,6 +264,16 @@ public record RussianPostDeliveryAdminTestPayload(
     int? PackageHeightCm,
     int? PackageWidthCm);
 
+public record FivePostDeliveryAdminTestPayload(
+    bool Enabled,
+    decimal? PickupCost,
+    int? DeliveryDays,
+    string ToAddress,
+    string? PaymentMethod,
+    decimal? WeightKg,
+    decimal? DeclaredCost,
+    int? Limit = null);
+
 public record AvitoDeliveryAdminTestPayload(
     bool Enabled,
     string? ClientId,

@@ -60,6 +60,7 @@ builder.Services.AddScoped<IRoboKassaPaymentService, RoboKassaPaymentService>();
 builder.Services.AddScoped<IYandexDeliveryQuoteService, YandexDeliveryQuoteService>();
 builder.Services.AddScoped<IYandexDeliveryTrackingService, YandexDeliveryTrackingService>();
 builder.Services.AddScoped<ICdekDeliveryService, CdekDeliveryService>();
+builder.Services.AddScoped<IFivePostDeliveryService, FivePostDeliveryService>();
 builder.Services.AddScoped<IRussianPostDeliveryService, RussianPostDeliveryService>();
 builder.Services.AddScoped<IAvitoDeliveryService, AvitoDeliveryService>();
 builder.Services.AddScoped<IDeliveryIntegrationService, DeliveryIntegrationService>();

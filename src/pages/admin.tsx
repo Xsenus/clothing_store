@@ -7,6 +7,7 @@ import AdminSocialLinksSettings from '@/components/admin/AdminSocialLinksSetting
 import {
   AdminAvitoIntegrationTab,
   AdminCdekIntegrationTab,
+  AdminFivePostIntegrationTab,
   AdminRoboKassaIntegrationTab,
   AdminRussianPostIntegrationTab,
 } from '@/components/admin/AdminNewIntegrationsTabs';
@@ -1344,7 +1345,7 @@ const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
 const SETTINGS_GROUP_VALUES = ["orders", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "checkout", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
-const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
+const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "fivepost", "russian-post", "avito"] as const;
 const DICTIONARY_GROUP_VALUES = ["sizes", "materials", "colors", "categories", "collections"] as const;
 
 const DEFAULT_ADMIN_NAVIGATION_STATE = {
@@ -1729,6 +1730,9 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   delivery_cdek_package_length_cm: "30",
   delivery_cdek_package_height_cm: "20",
   delivery_cdek_package_width_cm: "10",
+  delivery_fivepost_enabled: "false",
+  delivery_fivepost_pickup_cost: "",
+  delivery_fivepost_delivery_days: "",
   delivery_russian_post_enabled: "false",
   delivery_russian_post_access_token: "",
   delivery_russian_post_authorization_key: "",
@@ -10027,11 +10031,12 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                           <div className="space-y-2 border border-black/10 bg-slate-50 p-3">
                             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Сервисы доставки</div>
-                            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-4">
+                            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-none bg-transparent p-0 xl:grid-cols-5">
                               <TabsTrigger value="yandex" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Яндекс.Доставка</TabsTrigger>
                               <TabsTrigger value="cdek" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">СДЭК</TabsTrigger>
                               <TabsTrigger value="russian-post" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Почта России</TabsTrigger>
                               <TabsTrigger value="avito" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">Avito</TabsTrigger>
+                              <TabsTrigger value="fivepost" className="h-auto min-h-11 justify-start rounded-none border border-black/15 px-3 py-2 text-left text-xs leading-tight whitespace-normal data-[state=active]:border-black data-[state=active]:bg-black data-[state=active]:text-white data-[state=active]:shadow-none">5Post</TabsTrigger>
                             </TabsList>
                           </div>
                         </div>
@@ -11141,6 +11146,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         </TabsContent>
                         <TabsContent value="cdek" className="mt-3">
                           <AdminCdekIntegrationTab settings={settings} updateSetting={updateSetting} />
+                        </TabsContent>
+                        <TabsContent value="fivepost" className="mt-3">
+                          <AdminFivePostIntegrationTab settings={settings} updateSetting={updateSetting} />
                         </TabsContent>
                         <TabsContent value="russian-post" className="mt-3">
                           <AdminRussianPostIntegrationTab settings={settings} updateSetting={updateSetting} />

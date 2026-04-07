@@ -33,6 +33,7 @@ public class AdminController : ControllerBase
     private readonly IRoboKassaPaymentService _roboKassaPaymentService;
     private readonly IYandexDeliveryQuoteService _yandexDeliveryQuoteService;
     private readonly ICdekDeliveryService _cdekDeliveryService;
+    private readonly IFivePostDeliveryService _fivePostDeliveryService;
     private readonly IRussianPostDeliveryService _russianPostDeliveryService;
     private readonly IAvitoDeliveryService _avitoDeliveryService;
     private readonly IYandexDeliveryTrackingService _yandexDeliveryTrackingService;
@@ -56,6 +57,7 @@ public class AdminController : ControllerBase
         IRoboKassaPaymentService roboKassaPaymentService,
         IYandexDeliveryQuoteService yandexDeliveryQuoteService,
         ICdekDeliveryService cdekDeliveryService,
+        IFivePostDeliveryService fivePostDeliveryService,
         IRussianPostDeliveryService russianPostDeliveryService,
         IAvitoDeliveryService avitoDeliveryService,
         IYandexDeliveryTrackingService yandexDeliveryTrackingService,
@@ -75,6 +77,7 @@ public class AdminController : ControllerBase
         _roboKassaPaymentService = roboKassaPaymentService;
         _yandexDeliveryQuoteService = yandexDeliveryQuoteService;
         _cdekDeliveryService = cdekDeliveryService;
+        _fivePostDeliveryService = fivePostDeliveryService;
         _russianPostDeliveryService = russianPostDeliveryService;
         _avitoDeliveryService = avitoDeliveryService;
         _yandexDeliveryTrackingService = yandexDeliveryTrackingService;
@@ -2115,6 +2118,41 @@ public class AdminController : ControllerBase
                     deliveryDays = point.DeliveryDays,
                     error = point.Error
                 })
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            return Results.BadRequest(new { detail = ex.Message });
+        }
+    }
+
+    [HttpPost("settings/fivepost-delivery/test")]
+    public async Task<IResult> TestFivePostDelivery([FromBody] FivePostDeliveryAdminTestPayload payload, CancellationToken cancellationToken)
+    {
+        if (await RequireAdminUserAsync() is null) return Results.Unauthorized();
+
+        try
+        {
+            var result = await _fivePostDeliveryService.TestIntegrationAsync(payload, cancellationToken);
+            return Results.Ok(new
+            {
+                provider = result.Provider,
+                environment = result.Environment,
+                toAddress = result.DestinationAddress,
+                pickupCost = result.PickupCost,
+                deliveryDays = result.DeliveryDays,
+                markerCount = result.MarkerCount,
+                quote = new
+                {
+                    provider = result.Quote.Provider,
+                    label = result.Quote.Label,
+                    currency = result.Quote.Currency,
+                    homeDelivery = result.Quote.HomeDelivery,
+                    pickupPointDelivery = result.Quote.PickupPointDelivery,
+                    details = result.Quote.Details
+                },
+                pickupPoints = result.PickupPoints,
+                note = result.Note
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
