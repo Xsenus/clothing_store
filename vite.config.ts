@@ -14,7 +14,7 @@ export default defineConfig({
         "Firefox >= 78",
         "Edge >= 80",
       ],
-      modernPolyfills: true,
+      modernPolyfills: false,
     }),
   ],
   resolve: {

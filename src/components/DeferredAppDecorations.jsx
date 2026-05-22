@@ -1,15 +1,10 @@
-import React, { lazy, Suspense, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
+import CookieBanner from "@/components/CookieBanner";
+import MetricsScripts from "@/components/MetricsScripts";
 import SafeRenderBoundary from "@/components/SafeRenderBoundary";
-
-const CookieBanner = lazy(() => import("@/components/CookieBanner"));
-const MetricsScripts = lazy(() => import("@/components/MetricsScripts"));
-const SiteBranding = lazy(() => import("@/components/SiteBranding"));
-const SiteVisitTracker = lazy(() => import("@/components/SiteVisitTracker"));
-const Sonner = lazy(() =>
-  import("@/components/ui/sonner").then((module) => ({
-    default: module.Toaster,
-  })),
-);
+import SiteBranding from "@/components/SiteBranding";
+import SiteVisitTracker from "@/components/SiteVisitTracker";
+import { Toaster as Sonner } from "@/components/ui/sonner";
 
 const scheduleIdleLoad = (callback, timeout = 1200) => {
   if (typeof window === "undefined") {
@@ -44,20 +39,28 @@ export default function DeferredAppDecorations() {
   }
 
   return (
-    <Suspense fallback={null}>
+    <>
       {isShellReady ? (
-        <SafeRenderBoundary source="deferred-app-decorations">
-          <Sonner />
-          <MetricsScripts />
-          <SiteBranding />
-          <SiteVisitTracker />
-        </SafeRenderBoundary>
+        <>
+          <SafeRenderBoundary source="sonner">
+            <Sonner />
+          </SafeRenderBoundary>
+          <SafeRenderBoundary source="metrics-scripts">
+            <MetricsScripts />
+          </SafeRenderBoundary>
+          <SafeRenderBoundary source="site-branding">
+            <SiteBranding />
+          </SafeRenderBoundary>
+          <SafeRenderBoundary source="site-visit-tracker">
+            <SiteVisitTracker />
+          </SafeRenderBoundary>
+        </>
       ) : null}
       {isCookieReady ? (
         <SafeRenderBoundary source="cookie-banner">
           <CookieBanner />
         </SafeRenderBoundary>
       ) : null}
-    </Suspense>
+    </>
   );
 }
