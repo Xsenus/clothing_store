@@ -3,10 +3,9 @@ import {
   getHomeNewProducts,
   getHomePopularProducts,
 } from "@/lib/home-api";
-import { Suspense, lazy, useEffect, useState } from "react";
+import ProductCard from "@/components/ProductCard";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
-
-const ProductCard = lazy(() => import("@/components/ProductCard"));
 
 interface Product {
   _id: string;
@@ -105,17 +104,15 @@ export default function HomeProductSection({
       {isLoading ? (
         <ProductGridPlaceholder />
       ) : (
-        <Suspense fallback={<ProductGridPlaceholder />}>
-          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {products.map((product) => (
-              <ProductCard
-                key={product._id}
-                product={product}
-                allowQuickAdd={false}
-              />
-            ))}
-          </div>
-        </Suspense>
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+          {products.map((product) => (
+            <ProductCard
+              key={product._id}
+              product={product}
+              allowQuickAdd={false}
+            />
+          ))}
+        </div>
       )}
 
       <div className="mt-12 text-center md:hidden">

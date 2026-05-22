@@ -1,17 +1,11 @@
 import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 import DeferredSection from "@/components/home/DeferredSection";
+import HomeCollectionSliderSection from "@/components/home/HomeCollectionSliderSection";
+import HomeProductSection from "@/components/home/HomeProductSection";
 import PageSeo from "@/components/PageSeo";
 import SafeRenderBoundary from "@/components/SafeRenderBoundary";
 import { Button } from "@/components/ui/button";
-import { Suspense, lazy } from "react";
-
-const Footer = lazy(() => import("@/components/Footer"));
-const HomeCollectionSliderSection = lazy(
-  () => import("@/components/home/HomeCollectionSliderSection"),
-);
-const HomeProductSection = lazy(
-  () => import("@/components/home/HomeProductSection"),
-);
 
 const HOME_KEYWORDS = [
   "fashiondemon",
@@ -127,9 +121,7 @@ export default function HomePage() {
               source="home-collection-slider"
               fallback={<CollectionSliderPlaceholder />}
             >
-              <Suspense fallback={<CollectionSliderPlaceholder />}>
-                <HomeCollectionSliderSection />
-              </Suspense>
+              <HomeCollectionSliderSection />
             </SafeRenderBoundary>
           </DeferredSection>
         </div>
@@ -146,13 +138,11 @@ export default function HomePage() {
               source="home-new-products"
               fallback={<ProductGridPlaceholder />}
             >
-              <Suspense fallback={<ProductGridPlaceholder />}>
               <HomeProductSection
                 title="Новинки"
                 linkTo="/catalog?sort=new"
                 fetchMode="new"
               />
-              </Suspense>
             </SafeRenderBoundary>
           </DeferredSection>
         </div>
@@ -169,14 +159,12 @@ export default function HomePage() {
               source="home-popular-products"
               fallback={<ProductGridPlaceholder dark />}
             >
-              <Suspense fallback={<ProductGridPlaceholder dark />}>
               <HomeProductSection
                 title="В тренде"
                 linkTo="/catalog?sort=popular"
                 fetchMode="popular"
                 dark
               />
-              </Suspense>
             </SafeRenderBoundary>
           </DeferredSection>
         </div>
@@ -188,9 +176,7 @@ export default function HomePage() {
         idleTimeout={2800}
       >
         <SafeRenderBoundary source="home-footer" fallback={<FooterPlaceholder />}>
-          <Suspense fallback={<FooterPlaceholder />}>
-            <Footer />
-          </Suspense>
+          <Footer />
         </SafeRenderBoundary>
       </DeferredSection>
     </div>
