@@ -23,6 +23,84 @@
     <link rel="apple-touch-icon" href="/favicon.ico" />
     <link rel="manifest" href="/site.webmanifest" />
     <title>fashiondemon</title>
+    <script>
+      (function () {
+        var sent = 0;
+        var maxReports = 8;
+        var endpoint = "/api/client-errors";
+
+        function trim(value, max) {
+          value = String(value == null ? "" : value);
+          return value.length > max ? value.slice(0, max) + "..." : value;
+        }
+
+        function report(source, name, message) {
+          if (sent >= maxReports) return;
+          sent += 1;
+
+          var body = JSON.stringify({
+            source: trim(source, 120),
+            name: trim(name || "Error", 120),
+            message: trim(message || "", 1200),
+            stack: "",
+            componentStack: "",
+            location: trim(window.location.pathname + window.location.search + window.location.hash, 500),
+            userAgent: trim(navigator.userAgent || "", 500)
+          });
+
+          try {
+            if (navigator.sendBeacon) {
+              var blob = new Blob([body], { type: "application/json" });
+              if (navigator.sendBeacon(endpoint, blob)) return;
+            }
+          } catch (_) {}
+
+          try {
+            fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: body,
+              keepalive: true
+            }).catch(function () {});
+          } catch (_) {}
+        }
+
+        window.__FASHION_DEMON_APP_BOOTED__ = false;
+
+        window.addEventListener("error", function (event) {
+          var target = event.target;
+          if (target && target !== window) {
+            report(
+              "early-resource-error",
+              "ResourceLoadError",
+              (target.tagName || "resource") + " failed: " + (target.currentSrc || target.src || target.href || "")
+            );
+            return;
+          }
+
+          report(
+            "early-window-error",
+            event.error && event.error.name,
+            event.message || (event.error && event.error.message) || "Window error"
+          );
+        }, true);
+
+        window.addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason || {};
+          report(
+            "early-unhandledrejection",
+            reason.name || "UnhandledRejection",
+            reason.message || reason
+          );
+        });
+
+        window.setTimeout(function () {
+          if (!window.__FASHION_DEMON_APP_BOOTED__) {
+            report("boot-watchdog", "BootTimeout", "Application did not mark booted in 8000ms");
+          }
+        }, 8000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

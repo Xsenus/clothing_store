@@ -47,18 +47,18 @@ public class MediaController : ControllerBase
             if (System.IO.File.Exists(diskPath))
             {
                 Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-                return Results.File(diskPath, image.ContentType, image.FileName, enableRangeProcessing: true);
+                return Results.File(diskPath, image.ContentType, enableRangeProcessing: true);
             }
 
             await _galleryStorage.WriteImageToDiskAsync(image);
             if (System.IO.File.Exists(diskPath))
             {
                 Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-                return Results.File(diskPath, image.ContentType, image.FileName, enableRangeProcessing: true);
+                return Results.File(diskPath, image.ContentType, enableRangeProcessing: true);
             }
         }
 
         Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-        return Results.File(image.BinaryData, image.ContentType, image.FileName);
+        return Results.File(image.BinaryData, image.ContentType);
     }
 }

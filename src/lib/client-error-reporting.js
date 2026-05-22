@@ -54,3 +54,47 @@ export const reportClientError = (error, errorInfo, source = "unknown") => {
     // Client error reporting must never create another app error.
   }
 };
+
+export const markApplicationBooted = () => {
+  if (typeof window !== "undefined") {
+    window.__FASHION_DEMON_APP_BOOTED__ = true;
+  }
+};
+
+export const installGlobalErrorReporting = () => {
+  if (typeof window === "undefined" || window.__FASHION_DEMON_GLOBAL_ERRORS__) {
+    return;
+  }
+
+  window.__FASHION_DEMON_GLOBAL_ERRORS__ = true;
+
+  window.addEventListener("error", (event) => {
+    const target = event?.target;
+    if (target && target !== window) {
+      const resourceUrl = target.currentSrc || target.src || target.href || "";
+      reportClientError(
+        {
+          name: "ResourceLoadError",
+          message: `${target.tagName || "resource"} failed: ${resourceUrl}`,
+        },
+        null,
+        "window-resource-error",
+      );
+      return;
+    }
+
+    reportClientError(
+      event?.error || event?.message || "Window error",
+      null,
+      "window-error",
+    );
+  }, true);
+
+  window.addEventListener("unhandledrejection", (event) => {
+    reportClientError(
+      event?.reason || "Unhandled promise rejection",
+      null,
+      "window-unhandledrejection",
+    );
+  });
+};

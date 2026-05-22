@@ -1,9 +1,22 @@
 import path from "path";
 import react from "@vitejs/plugin-react-swc";
+import legacy from "@vitejs/plugin-legacy";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    legacy({
+      targets: [
+        "iOS >= 12",
+        "Safari >= 12",
+        "Chrome >= 80",
+        "Firefox >= 78",
+        "Edge >= 80",
+      ],
+      modernPolyfills: true,
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -13,6 +26,7 @@ export default defineConfig({
     exclude: ["lucide-react"],
   },
   build: {
+    cssTarget: "safari13",
     rollupOptions: {
       output: {
         manualChunks(id) {

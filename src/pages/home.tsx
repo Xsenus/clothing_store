@@ -110,7 +110,7 @@ export default function HomePage() {
               size="lg"
               className="rounded-none bg-white px-12 py-8 text-lg font-bold uppercase tracking-widest text-black transition-all hover:scale-105 hover:bg-gray-200"
             >
-              <a href="#new-arrivals">В магазин</a>
+              <a href="/catalog?sort=new">В магазин</a>
             </Button>
           </div>
         </div>
