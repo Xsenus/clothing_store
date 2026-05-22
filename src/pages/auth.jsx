@@ -217,7 +217,6 @@ export default function AuthPage() {
   const [telegramWidgetError, setTelegramWidgetError] = useState("");
   const [telegramAuthState, setTelegramAuthState] = useState("");
   const [telegramAuthExpiresAt, setTelegramAuthExpiresAt] = useState(0);
-  const [telegramAuthUrl, setTelegramAuthUrl] = useState("");
   const [externalAuthSession, setExternalAuthSession] = useState(null);
   const telegramWidgetRef = useRef(null);
   const authPopupRef = useRef(null);
@@ -341,7 +340,6 @@ export default function AuthPage() {
 
       setTelegramAuthState(started.state);
       setTelegramAuthExpiresAt(Number(started.expiresAt || 0));
-      setTelegramAuthUrl(started.authUrl);
       const popup = window.open(started.authUrl, "_blank");
       if (!popup) {
         window.location.assign(started.authUrl);

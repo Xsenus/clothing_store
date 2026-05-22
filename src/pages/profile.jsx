@@ -625,10 +625,6 @@ export default function ProfilePage() {
     () => externalAuthMethods.filter((method) => method.available || !!method.identity),
     [externalAuthMethods]
   );
-  const hasLinkedTelegramIdentity = useMemo(
-    () => externalAuthMethods.some((method) => method.id === "telegram" && !!method.identity),
-    [externalAuthMethods]
-  );
   const availableDeletionChannels = Array.isArray(profile?.accountDeletion?.availableChannels)
     ? profile.accountDeletion.availableChannels
     : [];

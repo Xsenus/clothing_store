@@ -50,3 +50,5 @@ backend/backups/
 
 # local tooling artifacts
 .codex-temp/
+.serena/
+backend/Store.Api/.github/
