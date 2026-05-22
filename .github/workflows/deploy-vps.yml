@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -57,6 +57,7 @@ jobs:
           script: |
             bash -seuo pipefail <<'EOF'
             BACKEND_TMP_PUBLISH_DIR=""
+            DEPLOY_LOCK_FILE="/tmp/clothing-store-deploy.lock"
 
             on_error() {
               echo "[ERROR] Direct deploy failed"
@@ -84,6 +85,7 @@ jobs:
 
             require_toolchain() {
               command -v bash >/dev/null
+              command -v flock >/dev/null
               command -v grep >/dev/null
               command -v node >/dev/null
               command -v npm >/dev/null
@@ -114,6 +116,18 @@ jobs:
               fi
             }
 
+            acquire_deploy_lock() {
+              if ! command -v flock >/dev/null; then
+                echo "[ERROR] Missing flock on VPS. Install util-linux before deployment."
+                exit 1
+              fi
+
+              exec 9>"$DEPLOY_LOCK_FILE"
+              echo "==> Waiting for VPS deploy lock: $DEPLOY_LOCK_FILE"
+              flock 9
+              echo "[OK] VPS deploy lock acquired"
+            }
+
             trap on_error ERR
             trap cleanup EXIT
 
@@ -124,6 +138,8 @@ jobs:
             echo "BACKEND_SERVICE=$BACKEND_SERVICE"
             echo "BACKEND_DLL_PATH=$BACKEND_DLL_PATH"
             echo "BACKEND_ENV_FILE=$BACKEND_ENV_FILE"
+
+            acquire_deploy_lock
 
             echo "==> Updating source code"
             cd "$APP_DIR"
