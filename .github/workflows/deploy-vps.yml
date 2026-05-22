@@ -172,6 +172,14 @@ jobs:
             sudo systemctl show "$BACKEND_SERVICE" -p WorkingDirectory -p ExecStart -p EnvironmentFiles --no-pager
 
             echo "==> Building frontend"
+            RESOLVED_APP_DIR="$(pwd -P)"
+            if [[ "$RESOLVED_APP_DIR" != "$APP_DIR" ]]; then
+              echo "[ERROR] Refusing to clean node_modules outside APP_DIR"
+              echo "Expected APP_DIR: $APP_DIR"
+              echo "Current directory: $RESOLVED_APP_DIR"
+              exit 1
+            fi
+            rm -rf node_modules
             npm ci
             npm run build
 
