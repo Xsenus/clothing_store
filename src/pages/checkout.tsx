@@ -13,6 +13,7 @@ import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
 import { formatProductPrice } from '@/lib/price-format';
 import { fetchPublicSettings } from '@/lib/site-settings';
+import { trackTopMailRuOrder } from '@/lib/top-mail-ru';
 import { cn } from '@/lib/utils';
 import { getOrCreateVisitorId } from '@/lib/visitor-id';
 import {
@@ -1350,6 +1351,13 @@ export default function CheckoutPage() {
           visitorId,
           promoCode: appliedPromoCode?.code || null,
         },
+      });
+
+      trackTopMailRuOrder({
+        orderId: order?.id,
+        orderNumber: order?.displayOrderNumber || order?.orderNumber,
+        value: total,
+        visitorId,
       });
 
       await clearCart();

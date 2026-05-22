@@ -1,9 +1,11 @@
 import { useEffect } from "react";
+import { useLocation } from "react-router";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import {
   COOKIE_CONSENT_UPDATED_EVENT,
   hasCookieConsent,
 } from "@/lib/cookie-consent";
+import { trackTopMailRuPageView } from "@/lib/top-mail-ru";
 
 const METRIC_KEYS = [
   ["metrics_yandex_metrika_enabled", "metrics_yandex_metrika_code"],
@@ -32,6 +34,8 @@ const injectSnippet = (snippet, key) => {
 };
 
 export default function MetricsScripts() {
+  const location = useLocation();
+
   useEffect(() => {
     let mounted = true;
     const injected = [];
@@ -82,6 +86,28 @@ export default function MetricsScripts() {
       });
     };
   }, []);
+
+  useEffect(() => {
+    const trackPageView = () => {
+      trackTopMailRuPageView({
+        url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+      });
+    };
+
+    trackPageView();
+
+    window.addEventListener(
+      COOKIE_CONSENT_UPDATED_EVENT,
+      trackPageView,
+    );
+
+    return () => {
+      window.removeEventListener(
+        COOKIE_CONSENT_UPDATED_EVENT,
+        trackPageView,
+      );
+    };
+  }, [location.pathname, location.search, location.hash]);
 
   return null;
 }
