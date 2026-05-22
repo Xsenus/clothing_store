@@ -179,7 +179,11 @@ jobs:
               echo "Current directory: $RESOLVED_APP_DIR"
               exit 1
             fi
-            rm -rf node_modules
+            if [[ -d node_modules ]]; then
+              STALE_NODE_MODULES="/tmp/clothing-store-node-modules.$(date +%s).$$"
+              mv node_modules "$STALE_NODE_MODULES"
+              rm -rf "$STALE_NODE_MODULES" || true
+            fi
             npm ci
             npm run build
 
