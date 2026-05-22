@@ -23,6 +23,13 @@ public class ProductsController : ControllerBase
     private sealed record ProductPopularityStats(int Score, long? LastViewedAt);
 
     private const int PopularityLookbackDays = 30;
+    private static readonly HashSet<string> LocalMediaHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fashion-demon.ru",
+        "www.fashion-demon.ru",
+        "fashiondemon.shop",
+        "www.fashiondemon.shop"
+    };
 
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
@@ -65,6 +72,7 @@ public class ProductsController : ControllerBase
         return Results.Json(products.Select(product =>
         {
             var json = ProductJsonService.Parse(product);
+            NormalizeProductMediaUrls(json);
             if (stockByProduct.TryGetValue(product.Id, out var stockPayload))
             {
                 var sizes = stockPayload.Keys.Select(s => JsonValue.Create(s)).ToArray();
@@ -127,6 +135,7 @@ public class ProductsController : ControllerBase
             try
             {
                 var json = JsonNode.Parse(entry.Data)?.AsObject();
+                NormalizeProductMediaUrls(json);
                 foreach (var category in NormalizeLookupValues(json?["categories"] as JsonArray, json?["category"]?.ToString()))
                 {
                     usedCategories.Add(category);
@@ -301,7 +310,7 @@ public class ProductsController : ControllerBase
                 value = x.Name,
                 label = x.Name,
                 slug = x.Slug,
-                imageUrl = x.ImageUrl,
+                imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
                 previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
                 description = x.Description,
@@ -319,7 +328,7 @@ public class ProductsController : ControllerBase
                 value = x.Name,
                 label = x.Name,
                 slug = x.Slug,
-                imageUrl = x.ImageUrl,
+                imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
                 previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
                 description = x.Description,
@@ -392,6 +401,7 @@ public class ProductsController : ControllerBase
 
         var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
         var productJson = ProductJsonService.Parse(product);
+        NormalizeProductMediaUrls(productJson);
         ApplyDictionaryOrdering(productJson, dictionaryOrderMaps);
 
         var collectionNames = NormalizeLookupValues(
@@ -453,6 +463,7 @@ public class ProductsController : ControllerBase
             return Results.NotFound(new { detail = "Product not found" });
 
         var json = ProductJsonService.Parse(p);
+        NormalizeProductMediaUrls(json);
         var sizeDictionaries = await _db.SizeDictionaries
             .AsNoTracking()
             .Select(x => new { x.Id, x.Name, x.SortOrder })
@@ -1201,6 +1212,7 @@ public class ProductsController : ControllerBase
         return products.Select(product =>
         {
             var json = ProductJsonService.Parse(product);
+            NormalizeProductMediaUrls(json);
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
             if (appendVisibilityFields)
                 AppendProductVisibilityFields(json, product);
@@ -1229,6 +1241,62 @@ public class ProductsController : ControllerBase
         json["popularityUpdatedAt"] = stats?.LastViewedAt.HasValue == true
             ? JsonValue.Create(stats.LastViewedAt.Value)
             : null;
+    }
+
+    private static void NormalizeProductMediaUrls(JsonObject? json)
+    {
+        if (json is null)
+            return;
+
+        NormalizeStringUrlProperty(json, "catalogImageUrl");
+        NormalizeStringUrlArray(json["images"] as JsonArray);
+
+        if (json["media"] is JsonArray media)
+        {
+            foreach (var mediaItem in media.OfType<JsonObject>())
+            {
+                NormalizeStringUrlProperty(mediaItem, "url");
+            }
+        }
+    }
+
+    private static void NormalizeStringUrlArray(JsonArray? values)
+    {
+        if (values is null)
+            return;
+
+        for (var i = 0; i < values.Count; i++)
+        {
+            var normalized = NormalizeLocalMediaUrl(values[i]?.ToString());
+            if (!string.IsNullOrWhiteSpace(normalized))
+                values[i] = normalized;
+        }
+    }
+
+    private static void NormalizeStringUrlProperty(JsonObject json, string propertyName)
+    {
+        var normalized = NormalizeLocalMediaUrl(json[propertyName]?.ToString());
+        if (!string.IsNullOrWhiteSpace(normalized))
+            json[propertyName] = normalized;
+    }
+
+    private static string? NormalizeLocalMediaUrl(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+            return normalized;
+
+        if (!LocalMediaHosts.Contains(uri.Host))
+            return normalized;
+
+        if (!uri.AbsolutePath.StartsWith("/api/uploads/", StringComparison.OrdinalIgnoreCase)
+            && !uri.AbsolutePath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+            return normalized;
+
+        return uri.PathAndQuery;
     }
 
     private async Task<Dictionary<string, ProductPopularityStats>> LoadProductPopularityStatsAsync(IEnumerable<string> productIds)
