@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
+import SafeRenderBoundary from "@/components/SafeRenderBoundary";
 
 const CookieBanner = lazy(() => import("@/components/CookieBanner"));
 const MetricsScripts = lazy(() => import("@/components/MetricsScripts"));
@@ -45,14 +46,18 @@ export default function DeferredAppDecorations() {
   return (
     <Suspense fallback={null}>
       {isShellReady ? (
-        <>
+        <SafeRenderBoundary source="deferred-app-decorations">
           <Sonner />
           <MetricsScripts />
           <SiteBranding />
           <SiteVisitTracker />
-        </>
+        </SafeRenderBoundary>
       ) : null}
-      {isCookieReady ? <CookieBanner /> : null}
+      {isCookieReady ? (
+        <SafeRenderBoundary source="cookie-banner">
+          <CookieBanner />
+        </SafeRenderBoundary>
+      ) : null}
     </Suspense>
   );
 }

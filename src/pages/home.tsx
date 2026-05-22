@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import DeferredSection from "@/components/home/DeferredSection";
 import PageSeo from "@/components/PageSeo";
+import SafeRenderBoundary from "@/components/SafeRenderBoundary";
 import { Button } from "@/components/ui/button";
 import { Suspense, lazy } from "react";
 
@@ -122,9 +123,14 @@ export default function HomePage() {
             rootMargin="360px 0px"
             idleTimeout={1500}
           >
-            <Suspense fallback={<CollectionSliderPlaceholder />}>
-              <HomeCollectionSliderSection />
-            </Suspense>
+            <SafeRenderBoundary
+              source="home-collection-slider"
+              fallback={<CollectionSliderPlaceholder />}
+            >
+              <Suspense fallback={<CollectionSliderPlaceholder />}>
+                <HomeCollectionSliderSection />
+              </Suspense>
+            </SafeRenderBoundary>
           </DeferredSection>
         </div>
       </section>
@@ -136,13 +142,18 @@ export default function HomePage() {
             rootMargin="520px 0px"
             idleTimeout={2100}
           >
-            <Suspense fallback={<ProductGridPlaceholder />}>
+            <SafeRenderBoundary
+              source="home-new-products"
+              fallback={<ProductGridPlaceholder />}
+            >
+              <Suspense fallback={<ProductGridPlaceholder />}>
               <HomeProductSection
                 title="Новинки"
                 linkTo="/catalog?sort=new"
                 fetchMode="new"
               />
-            </Suspense>
+              </Suspense>
+            </SafeRenderBoundary>
           </DeferredSection>
         </div>
       </section>
@@ -154,14 +165,19 @@ export default function HomePage() {
             rootMargin="520px 0px"
             idleTimeout={2400}
           >
-            <Suspense fallback={<ProductGridPlaceholder dark />}>
+            <SafeRenderBoundary
+              source="home-popular-products"
+              fallback={<ProductGridPlaceholder dark />}
+            >
+              <Suspense fallback={<ProductGridPlaceholder dark />}>
               <HomeProductSection
                 title="В тренде"
                 linkTo="/catalog?sort=popular"
                 fetchMode="popular"
                 dark
               />
-            </Suspense>
+              </Suspense>
+            </SafeRenderBoundary>
           </DeferredSection>
         </div>
       </section>
@@ -171,9 +187,11 @@ export default function HomePage() {
         rootMargin="720px 0px"
         idleTimeout={2800}
       >
-        <Suspense fallback={<FooterPlaceholder />}>
-          <Footer />
-        </Suspense>
+        <SafeRenderBoundary source="home-footer" fallback={<FooterPlaceholder />}>
+          <Suspense fallback={<FooterPlaceholder />}>
+            <Footer />
+          </Suspense>
+        </SafeRenderBoundary>
       </DeferredSection>
     </div>
   );

@@ -6,6 +6,7 @@ import {
   attemptChunkRecovery,
   isRecoverableChunkError,
 } from "@/lib/chunk-recovery";
+import { reportClientError } from "@/lib/client-error-reporting";
 
 class AppErrorBoundaryInner extends React.Component {
   constructor(props) {
@@ -22,6 +23,7 @@ class AppErrorBoundaryInner extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error("Application render failed.", error, errorInfo);
+    reportClientError(error, errorInfo, "app-error-boundary");
 
     if (!isRecoverableChunkError(error)) {
       return;

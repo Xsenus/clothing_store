@@ -121,7 +121,8 @@ export default function ProductCard({
   const isUnavailable = isHiddenProduct || isOutOfStock;
   const canOpenProduct = !isHiddenProduct && Boolean(product.slug);
   const productHref = canOpenProduct ? `/product/${product.slug}` : null;
-  const productCardImage = product.catalogImageUrl || product.images[0] || "";
+  const productImages = Array.isArray(product.images) ? product.images : [];
+  const productCardImage = product.catalogImageUrl || productImages[0] || "";
   const { backgroundStyle: productCardBackgroundStyle, imageFitMode } =
     useProductMediaBackground(productCardImage);
   const cardImageDisplay = getProductCardImageDisplayClasses(
