@@ -177,7 +177,7 @@ jobs:
 
             echo "==> Syncing frontend dist to Nginx directory"
             sudo mkdir -p "$FRONTEND_DIST_DIR"
-            sudo rsync -a --delete dist/ "$FRONTEND_DIST_DIR/"
+            sudo rsync -a dist/ "$FRONTEND_DIST_DIR/"
 
             BACKEND_TMP_PUBLISH_DIR="$(mktemp -d /tmp/store-api-publish.XXXXXX)"
 
