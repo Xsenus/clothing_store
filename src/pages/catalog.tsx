@@ -20,6 +20,7 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import { SlidersHorizontal } from 'lucide-react';
 import PageSeo from '@/components/PageSeo';
 import CatalogCollectionsSlider, { type CatalogCollectionSliderItem } from '@/components/CatalogCollectionsSlider';
+import { getBrowserStorageItem, removeBrowserStorageItem, setBrowserStorageItem } from '@/lib/browser-storage';
 
 const CATALOG_KEYWORDS = [
   'каталог одежды',
@@ -391,7 +392,7 @@ export default function CatalogPage() {
     // Check URL params for initial sort
     const params = new URLSearchParams(location.search);
     const sortParam = params.get('sort');
-    const storedSort = localStorage.getItem(SORT_STORAGE_KEY);
+    const storedSort = getBrowserStorageItem(SORT_STORAGE_KEY);
     if (sortParam) {
       setSortBy(sortParam);
       return;
@@ -402,7 +403,7 @@ export default function CatalogPage() {
   }, [location.search]);
 
   useEffect(() => {
-    localStorage.setItem(SORT_STORAGE_KEY, sortBy);
+    setBrowserStorageItem(SORT_STORAGE_KEY, sortBy);
   }, [sortBy]);
 
   useEffect(() => {
@@ -797,7 +798,7 @@ export default function CatalogPage() {
     setPriceRange({ min: 0, max: 999999 });
     setMinPriceInput("0");
     setMaxPriceInput("999999");
-    localStorage.removeItem(SORT_STORAGE_KEY);
+    removeBrowserStorageItem(SORT_STORAGE_KEY);
   };
 
   const applyPriceInputs = () => {

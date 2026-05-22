@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLocation } from "react-router";
 
 import { apiRequest } from "@/lib/public-http";
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
 import { getOrCreateVisitorId } from "@/lib/visitor-id";
 
 const LAST_TRACKED_VISIT_KEY = "fashion_demon_last_site_visit_track";
@@ -28,7 +29,7 @@ const shouldSkipRecentDuplicate = (trackKey) => {
   }
 
   try {
-    const rawValue = window.sessionStorage.getItem(LAST_TRACKED_VISIT_KEY);
+    const rawValue = getBrowserStorageItem(LAST_TRACKED_VISIT_KEY, "session");
     if (!rawValue) {
       return false;
     }
@@ -51,12 +52,13 @@ const persistTrackedVisit = (trackKey) => {
   }
 
   try {
-    window.sessionStorage.setItem(
+    setBrowserStorageItem(
       LAST_TRACKED_VISIT_KEY,
       JSON.stringify({
         key: trackKey,
         trackedAt: Date.now(),
       }),
+      "session",
     );
   } catch {
     // Ignore storage write failures and keep tracking lightweight.

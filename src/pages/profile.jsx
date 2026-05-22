@@ -19,6 +19,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import PageSeo from "@/components/PageSeo";
 import { useConfirmDialog } from "@/components/ConfirmDialogProvider";
 import { closeDeferredPopup, navigateDeferredPopup, openDeferredPopup } from "@/lib/deferred-popup";
+import { getBrowserStorageItem } from "@/lib/browser-storage";
 import { fetchPublicSettings } from "@/lib/site-settings";
 import {
   ROBO_KASSA_PAYMENT_METHOD_LABELS,
@@ -488,8 +489,8 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const token = localStorage.getItem("authToken");
-      const refreshToken = localStorage.getItem("refreshToken");
+      const token = getBrowserStorageItem("authToken");
+      const refreshToken = getBrowserStorageItem("refreshToken");
       if (!token && !refreshToken) {
         navigate("/", { replace: true });
         return;

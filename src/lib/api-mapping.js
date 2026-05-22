@@ -1,3 +1,5 @@
+import { getBrowserStorageItem, removeBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
+
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 const WINDOW_ORIGIN = typeof window !== "undefined" ? window.location.origin : "http://localhost";
 const API_ORIGIN = (() => {
@@ -45,22 +47,22 @@ const toAbsoluteMediaUrl = (url) => {
   return `${API_ORIGIN}/${normalizedUrl}`;
 };
 
-const getToken = () => localStorage.getItem("authToken");
-const getRefreshToken = () => localStorage.getItem("refreshToken");
-const getAdminToken = () => localStorage.getItem("adminToken");
+const getToken = () => getBrowserStorageItem("authToken");
+const getRefreshToken = () => getBrowserStorageItem("refreshToken");
+const getAdminToken = () => getBrowserStorageItem("adminToken");
 
 const saveAuthTokens = ({ token, refreshToken }) => {
   if (token) {
-    localStorage.setItem("authToken", token);
+    setBrowserStorageItem("authToken", token);
   }
   if (refreshToken) {
-    localStorage.setItem("refreshToken", refreshToken);
+    setBrowserStorageItem("refreshToken", refreshToken);
   }
 };
 
 const clearAuthTokens = () => {
-  localStorage.removeItem("authToken");
-  localStorage.removeItem("refreshToken");
+  removeBrowserStorageItem("authToken");
+  removeBrowserStorageItem("refreshToken");
 };
 
 const buildRequestUrl = (path) => `${API_URL}${path}`;
@@ -961,7 +963,7 @@ export const FLOW = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    localStorage.setItem("adminToken", result.token);
+    setBrowserStorageItem("adminToken", result.token);
     return result;
   },
 
@@ -1234,7 +1236,7 @@ export const FLOW = {
     } catch {
       // Не блокируем локальный logout при сетевых ошибках.
     } finally {
-      localStorage.removeItem("adminToken");
+      removeBrowserStorageItem("adminToken");
     }
     return true;
   },

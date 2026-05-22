@@ -1,3 +1,5 @@
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
+
 const CHUNK_RECOVERY_STORAGE_KEY = "fashion_demon_chunk_recovery";
 const CHUNK_RECOVERY_WINDOW_MS = 15_000;
 const RECOVERABLE_CHUNK_PATTERNS = [
@@ -39,7 +41,7 @@ const readRecoverySnapshot = () => {
   }
 
   try {
-    const rawValue = window.sessionStorage.getItem(CHUNK_RECOVERY_STORAGE_KEY);
+    const rawValue = getBrowserStorageItem(CHUNK_RECOVERY_STORAGE_KEY, "session");
     if (!rawValue) {
       return null;
     }
@@ -78,7 +80,7 @@ export const attemptChunkRecovery = ({ error, source = "unknown" } = {}) => {
   }
 
   try {
-    window.sessionStorage.setItem(
+    setBrowserStorageItem(
       CHUNK_RECOVERY_STORAGE_KEY,
       JSON.stringify({
         path: currentPath,
@@ -86,6 +88,7 @@ export const attemptChunkRecovery = ({ error, source = "unknown" } = {}) => {
         source,
         error: getErrorText(error).slice(0, 500),
       }),
+      "session",
     );
   } catch {
     // Ignore storage write failures and still try to recover with a reload.

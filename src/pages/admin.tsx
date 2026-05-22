@@ -1,6 +1,7 @@
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import "./admin.css";
+import { getBrowserStorageItem, removeBrowserStorageItem, setBrowserStorageItem } from '@/lib/browser-storage';
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
 import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
 import AdminSocialLinksSettings from '@/components/admin/AdminSocialLinksSettings';
@@ -1372,7 +1373,7 @@ const readPersistedAdminNavigationState = () => {
   }
 
   try {
-    const rawValue = window.localStorage.getItem(ADMIN_NAVIGATION_STORAGE_KEY);
+    const rawValue = getBrowserStorageItem(ADMIN_NAVIGATION_STORAGE_KEY);
     if (!rawValue) {
       return DEFAULT_ADMIN_NAVIGATION_STATE;
     }
@@ -1387,7 +1388,7 @@ const readPersistedAdminNavigationState = () => {
       dictionaryGroup: normalizeAdminNavigationValue(parsedValue?.dictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
     };
   } catch {
-    window.localStorage.removeItem(ADMIN_NAVIGATION_STORAGE_KEY);
+    removeBrowserStorageItem(ADMIN_NAVIGATION_STORAGE_KEY);
     return DEFAULT_ADMIN_NAVIGATION_STATE;
   }
 };
@@ -1411,7 +1412,7 @@ const persistAdminNavigationState = (state: typeof DEFAULT_ADMIN_NAVIGATION_STAT
   }
 
   try {
-    window.localStorage.setItem(ADMIN_NAVIGATION_STORAGE_KEY, JSON.stringify(state));
+    setBrowserStorageItem(ADMIN_NAVIGATION_STORAGE_KEY, JSON.stringify(state));
   } catch {
     // Ignore storage write failures and keep admin usable.
   }

@@ -1,3 +1,5 @@
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
+
 export const PUBLIC_SETTINGS_CACHE_KEY = "sitePublicSettings";
 export const PUBLIC_LEGAL_SETTINGS_CACHE_PREFIX = "sitePublicLegal:";
 export const SITE_BRANDING_UPDATED_EVENT = "site-branding-updated";
@@ -33,7 +35,7 @@ export const getCachedPublicSettings = () => {
   }
 
   try {
-    const raw = localStorage.getItem(PUBLIC_SETTINGS_CACHE_KEY);
+    const raw = getBrowserStorageItem(PUBLIC_SETTINGS_CACHE_KEY);
     memorySettings = raw ? JSON.parse(raw) : {};
     return memorySettings;
   } catch {
@@ -45,7 +47,7 @@ export const getCachedPublicSettings = () => {
 export const setCachedPublicSettings = (settings) => {
   const normalized = settings && typeof settings === "object" ? settings : {};
   memorySettings = normalized;
-  localStorage.setItem(PUBLIC_SETTINGS_CACHE_KEY, JSON.stringify(normalized));
+  setBrowserStorageItem(PUBLIC_SETTINGS_CACHE_KEY, JSON.stringify(normalized));
   window.dispatchEvent(new CustomEvent(SITE_BRANDING_UPDATED_EVENT, { detail: normalized }));
   return normalized;
 };
@@ -87,7 +89,7 @@ export const getCachedPublicLegalText = (key) => {
   }
 
   try {
-    const raw = localStorage.getItem(getLegalCacheKey(normalizedKey));
+    const raw = getBrowserStorageItem(getLegalCacheKey(normalizedKey));
     const value = raw ? JSON.parse(raw) : "";
     const normalizedValue = typeof value === "string" ? value : "";
     legalDocumentCache.set(normalizedKey, normalizedValue);
@@ -108,7 +110,7 @@ export const setCachedPublicLegalText = (key, value) => {
   legalDocumentCache.set(normalizedKey, normalizedValue);
 
   try {
-    localStorage.setItem(
+    setBrowserStorageItem(
       getLegalCacheKey(normalizedKey),
       JSON.stringify(normalizedValue),
     );

@@ -1,4 +1,5 @@
 import { apiRequest } from "@/lib/public-http";
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
 import { getOrCreateVisitorId } from "@/lib/visitor-id";
 
 export const COOKIE_CONSENT_KEY = "cookieConsentAccepted";
@@ -10,7 +11,7 @@ export const getCookieConsentDecision = () => {
   }
 
   try {
-    const storedValue = window.localStorage.getItem(COOKIE_CONSENT_KEY);
+    const storedValue = getBrowserStorageItem(COOKIE_CONSENT_KEY);
     if (storedValue === "1" || storedValue === "accepted") {
       return "accepted";
     }
@@ -56,7 +57,7 @@ const persistCookieConsentDecision = (decision) => {
   }
 
   try {
-    window.localStorage.setItem(COOKIE_CONSENT_KEY, decision);
+    setBrowserStorageItem(COOKIE_CONSENT_KEY, decision);
   } catch {
     // Ignore storage failures and still notify listeners.
   }

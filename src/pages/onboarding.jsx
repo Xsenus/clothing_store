@@ -12,6 +12,7 @@ import { Authenticated } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { FLOW } from "@/lib/api-mapping";
 import PageSeo from "@/components/PageSeo";
+import { getBrowserStorageItem, removeBrowserStorageItem } from "@/lib/browser-storage";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -22,7 +23,7 @@ export default function OnboardingPage() {
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    const stored = localStorage.getItem("pendingUserData");
+    const stored = getBrowserStorageItem("pendingUserData");
     if (stored) {
       try {
         const data = JSON.parse(stored);
@@ -46,7 +47,7 @@ export default function OnboardingPage() {
           shippingAddress,
         },
       });
-      localStorage.removeItem("pendingUserData");
+      removeBrowserStorageItem("pendingUserData");
       toast.success("Профиль успешно создан");
       navigate("/profile");
     } catch (error) {

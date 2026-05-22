@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
 import { clearProductLikeStateCache } from "@/lib/product-like-state";
 
 const AuthContext = createContext(undefined);
@@ -59,8 +60,8 @@ export function AuthProvider({ children }) {
         setIsLoading(false);
       }
     };
-    const token = localStorage.getItem("authToken");
-    const refreshToken = localStorage.getItem("refreshToken");
+    const token = getBrowserStorageItem("authToken");
+    const refreshToken = getBrowserStorageItem("refreshToken");
     if (token) {
       bootstrap();
     } else if (refreshToken) {
@@ -97,8 +98,8 @@ export function AuthProvider({ children }) {
       const refreshToken = formData.get ? formData.get("refreshToken") : formData.refreshToken;
       const rawUser = formData.get ? formData.get("user") : formData.user;
       const nextUser = typeof rawUser === "string" ? JSON.parse(rawUser || "{}") : rawUser;
-      if (token) localStorage.setItem("authToken", token);
-      if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
+      if (token) setBrowserStorageItem("authToken", token);
+      if (refreshToken) setBrowserStorageItem("refreshToken", refreshToken);
       setUser(normalizeAuthUser(nextUser));
       return { signingIn: true };
     }

@@ -1,3 +1,5 @@
+import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
+
 const VISITOR_ID_STORAGE_KEY = "siteVisitorId";
 
 const createVisitorId = () => {
@@ -13,12 +15,12 @@ export const getOrCreateVisitorId = () => {
     return null;
   }
 
-  const existing = window.localStorage.getItem(VISITOR_ID_STORAGE_KEY);
+  const existing = getBrowserStorageItem(VISITOR_ID_STORAGE_KEY);
   if (existing && existing.trim()) {
     return existing.trim();
   }
 
   const nextVisitorId = createVisitorId();
-  window.localStorage.setItem(VISITOR_ID_STORAGE_KEY, nextVisitorId);
+  setBrowserStorageItem(VISITOR_ID_STORAGE_KEY, nextVisitorId);
   return nextVisitorId;
 };

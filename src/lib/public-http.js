@@ -1,3 +1,5 @@
+import { getBrowserStorageItem } from "@/lib/browser-storage";
+
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 const WINDOW_ORIGIN =
   typeof window !== "undefined" ? window.location.origin : "http://localhost";
@@ -26,7 +28,7 @@ const getToken = () => {
   }
 
   try {
-    return window.localStorage.getItem("authToken");
+    return getBrowserStorageItem("authToken");
   } catch {
     return null;
   }
@@ -38,7 +40,7 @@ const getAdminToken = () => {
   }
 
   try {
-    return window.localStorage.getItem("adminToken");
+    return getBrowserStorageItem("adminToken");
   } catch {
     return null;
   }
