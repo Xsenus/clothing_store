@@ -1,19 +1,11 @@
 import { Link } from "react-router";
 
 import SocialLinksList from "@/components/social/SocialLinksList";
+import SupportDialog, {
+  DEFAULT_SUPPORT_EMAIL,
+  DEFAULT_SUPPORT_MESSAGE,
+} from "@/components/SupportDialog";
 import useSiteSocialLinks from "@/hooks/useSiteSocialLinks";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-
-const DEFAULT_SUPPORT_EMAIL = "fashiondemon.shop@internet.ru";
-const DEFAULT_SUPPORT_MESSAGE =
-  "Если у вас возникли вопросы по заказу, оплате, доставке или возврату, напишите нам на почту fashiondemon.shop@internet.ru.";
 
 export default function Footer() {
   const { footerLinks, pageLinks, publicSettings } = useSiteSocialLinks();
@@ -71,7 +63,7 @@ export default function Footer() {
 
           <div>
             <h3 className="mb-4 text-sm font-bold uppercase tracking-widest">
-              Поддержка
+              Клиентам
             </h3>
             <ul className="space-y-2 text-gray-300">
               <li>
@@ -96,37 +88,18 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Dialog>
-                  <DialogTrigger asChild>
+                <SupportDialog
+                  email={supportEmail}
+                  message={supportMessage}
+                  trigger={
                     <button
                       type="button"
                       className="text-left transition-colors hover:text-white"
                     >
                       Поддержка
                     </button>
-                  </DialogTrigger>
-                  <DialogContent className="rounded-none border-black bg-white text-black sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle className="text-2xl font-black uppercase tracking-tight">
-                        Поддержка
-                      </DialogTitle>
-                      <DialogDescription className="sr-only">
-                        Контакты службы поддержки FASHION_DEMON
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-5">
-                      <p className="whitespace-pre-line text-base leading-7 text-neutral-700">
-                        {supportMessage}
-                      </p>
-                      <a
-                        href={`mailto:${supportEmail}`}
-                        className="inline-flex min-h-11 items-center justify-center border border-black bg-black px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-white transition-colors hover:bg-white hover:text-black"
-                      >
-                        {supportEmail}
-                      </a>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                  }
+                />
               </li>
               {socialsPageEnabled ? (
                 <li>

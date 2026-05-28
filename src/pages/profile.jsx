@@ -5,6 +5,10 @@ import Footer from "@/components/Footer";
 import ProductCard from "@/components/ProductCard";
 import "./profile.css";
 import { Button } from "@/components/ui/button";
+import SupportDialog, {
+  DEFAULT_SUPPORT_EMAIL,
+  DEFAULT_SUPPORT_MESSAGE,
+} from "@/components/SupportDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -381,6 +385,37 @@ const getExternalProviderLabel = (provider) => {
   return "Telegram";
 };
 
+const isOrderReturnAvailable = (order) => {
+  const orderStatus = String(order?.status || "").trim().toLowerCase();
+  if (["delivered", "completed", "received"].includes(orderStatus)) {
+    return true;
+  }
+
+  const shippingStatus = String(order?.shippingStatus || order?.yandexDeliveryStatus || "").trim().toLowerCase();
+  if (["delivered", "completed", "received", "recipient_received", "handed_over"].includes(shippingStatus)) {
+    return true;
+  }
+
+  const shippingText = [
+    order?.shippingStatusDescription,
+    order?.yandexDeliveryStatusDescription,
+  ].map((value) => String(value || "").trim().toLowerCase()).join(" ");
+
+  return shippingText.includes("достав") || shippingText.includes("получ");
+};
+
+const buildReturnSupportMessage = (order, supportMessage) => {
+  const orderNumber = formatOrderDisplayNumber(order);
+  return [
+    "Возврат можно оформить после получения заказа.",
+    "",
+    supportMessage,
+    "",
+    `Заказ: ${orderNumber}`,
+    "В письме укажите причину возврата, товары/размеры, контактные данные и адрес, откуда удобно отправить товар.",
+  ].join("\n");
+};
+
 export default function ProfilePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => normalizeProfileTab(searchParams.get("tab")));
@@ -392,6 +427,7 @@ export default function ProfilePage() {
   const [orders, setOrders] = useState([]);
   const [likedItems, setLikedItems] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [publicSettings, setPublicSettings] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [availableExternalAuthProviders, setAvailableExternalAuthProviders] = useState({
     telegram: false,
@@ -419,6 +455,7 @@ export default function ProfilePage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [paymentActionOrderId, setPaymentActionOrderId] = useState("");
   const [paymentRefreshOrderId, setPaymentRefreshOrderId] = useState("");
+  const [returnSupportOrder, setReturnSupportOrder] = useState(null);
   const handledPaymentReturnRef = useRef("");
   const authPopupRef = useRef(null);
   const lastEmailVerificationAutoSubmitRef = useRef("");
@@ -530,6 +567,7 @@ export default function ProfilePage() {
           vk: isPublicSettingEnabled(publicSettings?.vk_login_enabled),
           yandex: isPublicSettingEnabled(publicSettings?.yandex_login_enabled),
         });
+        setPublicSettings(publicSettings || {});
       } catch (error) {
         const status = typeof error === "object" && error && "status" in error
           ? Number(error.status)
@@ -1427,6 +1465,13 @@ export default function ProfilePage() {
     .map((item) => item?.product)
     .filter(Boolean);
 
+  const supportEmail = publicSettings.support_contact_email?.trim() || DEFAULT_SUPPORT_EMAIL;
+  const supportMessage = publicSettings.support_dialog_message?.trim() || DEFAULT_SUPPORT_MESSAGE;
+  const returnSupportOrderNumber = returnSupportOrder ? formatOrderDisplayNumber(returnSupportOrder) : "";
+  const returnSupportMessage = returnSupportOrder
+    ? buildReturnSupportMessage(returnSupportOrder, supportMessage)
+    : supportMessage;
+
   const handleWishlistLikeChange = (liked, product) => {
     if (liked) return;
     setLikedItems((prev) => prev.filter((item) => item.productId !== product._id));
@@ -1659,6 +1704,22 @@ export default function ProfilePage() {
                                       </Button>
                                     ) : null}
                                   </div>
+                                </div>
+                              ) : null}
+                              {isOrderReturnAvailable(order) ? (
+                                <div className="rounded-none border border-gray-200 bg-gray-50 p-3">
+                                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-400">Возврат</p>
+                                  <p className="mb-3 text-sm leading-6 text-gray-700">
+                                    Заказ получен. Если товар не подошел или обнаружен брак, оформите обращение через поддержку.
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 w-full rounded-none px-4 text-xs font-bold uppercase tracking-[0.18em]"
+                                    onClick={() => setReturnSupportOrder(order)}
+                                  >
+                                    Оформить возврат
+                                  </Button>
                                 </div>
                               ) : null}
                               {getOrderShippingStatusText(order) ? (
@@ -2241,6 +2302,30 @@ export default function ProfilePage() {
             {isAdmin && <TabsContent value="admin" className="animate-in fade-in slide-in-from-bottom-4 duration-500"><AdminPage embedded /></TabsContent>}
           </Tabs>
         </main>
+
+        <SupportDialog
+          open={!!returnSupportOrder}
+          onOpenChange={(open) => {
+            if (!open) setReturnSupportOrder(null);
+          }}
+          title="Возврат заказа"
+          description="Обращение в поддержку для оформления возврата"
+          email={supportEmail}
+          message={returnSupportMessage}
+          actionLabel="Написать о возврате"
+          mailSubject={returnSupportOrderNumber ? `Возврат заказа ${returnSupportOrderNumber}` : "Возврат заказа"}
+          mailBody={returnSupportOrder ? [
+            `Здравствуйте! Хочу оформить возврат по заказу ${returnSupportOrderNumber}.`,
+            "",
+            "Причина возврата:",
+            "",
+            "Товары и размеры:",
+            "",
+            "Контактные данные:",
+            "",
+            "Адрес/способ обратной отправки:",
+          ].join("\n") : ""}
+        />
 
         <Footer />
       </div>
