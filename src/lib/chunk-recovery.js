@@ -10,6 +10,7 @@ const RECOVERABLE_CHUNK_PATTERNS = [
   /error loading dynamically imported module/i,
   /Unable to preload CSS/i,
   /CSS_CHUNK_LOAD_FAILED/i,
+  /undefined is not an object \(evaluating ['"].*_result\.default['"]\)/i,
 ];
 
 const getErrorText = (error) => {
@@ -60,6 +61,23 @@ const readRecoverySnapshot = () => {
 export const isRecoverableChunkError = (error) => {
   const errorText = getErrorText(error);
   return RECOVERABLE_CHUNK_PATTERNS.some((pattern) => pattern.test(errorText));
+};
+
+export const isRecoverableAssetUrl = (url) => {
+  if (typeof url !== "string" || !url) {
+    return false;
+  }
+
+  try {
+    const parsedUrl = new URL(url, window.location.origin);
+    return (
+      parsedUrl.origin === window.location.origin &&
+      parsedUrl.pathname.startsWith("/assets/") &&
+      /\.(?:js|mjs|css)$/i.test(parsedUrl.pathname)
+    );
+  } catch {
+    return false;
+  }
 };
 
 export const attemptChunkRecovery = ({ error, source = "unknown" } = {}) => {

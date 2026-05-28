@@ -1,3 +1,8 @@
+import {
+  attemptChunkRecovery,
+  isRecoverableAssetUrl,
+} from "@/lib/chunk-recovery";
+
 const MAX_FIELD_LENGTH = 1200;
 
 const trimField = (value, maxLength = MAX_FIELD_LENGTH) => {
@@ -72,14 +77,25 @@ export const installGlobalErrorReporting = () => {
     const target = event?.target;
     if (target && target !== window) {
       const resourceUrl = target.currentSrc || target.src || target.href || "";
+      const resourceError = {
+        name: "ResourceLoadError",
+        message: `${target.tagName || "resource"} failed: ${resourceUrl}`,
+      };
+
       reportClientError(
-        {
-          name: "ResourceLoadError",
-          message: `${target.tagName || "resource"} failed: ${resourceUrl}`,
-        },
+        resourceError,
         null,
         "window-resource-error",
       );
+
+      if (isRecoverableAssetUrl(resourceUrl)) {
+        event.preventDefault?.();
+        attemptChunkRecovery({
+          error: resourceError,
+          source: "resource-load-error",
+        });
+      }
+
       return;
     }
 
