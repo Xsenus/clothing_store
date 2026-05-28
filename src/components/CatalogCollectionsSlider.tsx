@@ -98,8 +98,7 @@ const getPreviewTiles = (
     return getShuffledPreviewPool(previewPool, seed).slice(0, visibleTileCount);
   }
 
-  const startIndex =
-    (hashCollectionValue(item.value) + rotationTick) % previewPool.length;
+  const startIndex = (rotationTick * visibleTileCount) % previewPool.length;
   const selectedTiles: string[] = [];
 
   for (
