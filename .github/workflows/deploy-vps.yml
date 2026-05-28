@@ -30,7 +30,7 @@ jobs:
       BACKEND_HEALTHCHECK_URL: ${{ vars.BACKEND_HEALTHCHECK_URL != '' && vars.BACKEND_HEALTHCHECK_URL || 'http://127.0.0.1:3001/products' }}
       BACKEND_DLL_PATH: ${{ vars.BACKEND_DLL_PATH != '' && vars.BACKEND_DLL_PATH || '/opt/clothing_store_runtime/store-api/Store.Api.dll' }}
       BACKEND_ENV_FILE: ${{ vars.BACKEND_ENV_FILE != '' && vars.BACKEND_ENV_FILE || '/etc/clothing-store/environment' }}
-      VPS_HOST: 5.44.40.41
+      VPS_HOST: 77.91.92.239
       VPS_USER: root
       VPS_SSH_PORT: "22"
     steps:
