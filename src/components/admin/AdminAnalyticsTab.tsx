@@ -705,9 +705,9 @@ export default function AdminAnalyticsTab({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             icon={<Users className="h-5 w-5" />}
-            title="Посетителей сайта"
+            title="Уникальных посетителей сегодня"
             value={formatInteger(todaySummary?.uniqueVisitorsCount)}
-            hint={`${formatInteger(todaySummary?.visitEventsCount)} визитов сегодня · всего ${formatInteger(snapshot?.totalSiteVisitors)}`}
+            hint={`${formatInteger(todaySummary?.visitEventsCount)} визитов/переходов сегодня · ${formatInteger(snapshot?.totalSiteVisitors)} уникальных посетителей за всё время`}
             comparisonText={getComparisonMeta(todaySummary?.uniqueVisitorsCount, previousDaySummary?.uniqueVisitorsCount)?.text}
             comparisonTone={getComparisonMeta(todaySummary?.uniqueVisitorsCount, previousDaySummary?.uniqueVisitorsCount)?.tone}
           />
@@ -771,9 +771,9 @@ export default function AdminAnalyticsTab({
         />
         <MetricCard
           icon={<Users className="h-5 w-5" />}
-          title="Посетителей за период"
+          title="Уникальных посетителей за период"
           value={formatInteger(periodSummary?.uniqueVisitorsCount)}
-          hint={`${formatInteger(periodSummary?.visitEventsCount)} визитов · всего ${formatInteger(snapshot?.totalSiteVisitors)}`}
+          hint={`${formatInteger(periodSummary?.visitEventsCount)} визитов/переходов за период · ${formatInteger(snapshot?.totalSiteVisitors)} уникальных посетителей за всё время`}
           comparisonText={getComparisonMeta(periodSummary?.uniqueVisitorsCount, previousSummary?.uniqueVisitorsCount)?.text}
           comparisonTone={getComparisonMeta(periodSummary?.uniqueVisitorsCount, previousSummary?.uniqueVisitorsCount)?.tone}
         />
