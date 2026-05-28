@@ -845,7 +845,10 @@ export default function CatalogPage() {
                 <SlidersHorizontal className="w-4 h-4" /> ФИЛЬТРЫ
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-[300px]">
+            <SheetContent
+              side="left"
+              className="h-[100dvh] max-h-[100dvh] w-[min(calc(100vw-40px),360px)] max-w-[calc(100vw-40px)] overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] pt-6"
+            >
               <SheetHeader className="sr-only">
                 <SheetTitle>Фильтры каталога</SheetTitle>
                 <SheetDescription>
