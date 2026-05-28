@@ -610,6 +610,8 @@ interface Product {
   sizeStock?: Record<string, number>;
   isHidden?: boolean;
   hiddenAt?: number | null;
+  creationTime?: number;
+  _creationTime?: number;
 }
 
 interface AdminProductReview {
@@ -5847,17 +5849,17 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   };
 
   const resolveProductCollectionPreviewImageUrls = (product: Product) => {
-    const previewImages = [
+    const previewImage = [
       product.catalogImageUrl,
-      ...(product.images || []),
-      ...((product.media || [])
+      (product.images || [])[0],
+      ((product.media || [])
         .filter((item) => item.type === "image")
-        .map((item) => item.url)),
+        .map((item) => item.url))[0],
     ]
       .map((value) => String(value || "").trim())
-      .filter(Boolean);
+      .find(Boolean);
 
-    return previewImages.filter((value, index, list) => list.indexOf(value) === index);
+    return previewImage ? [previewImage] : [];
   };
 
   const getCollectionPreviewImagesFromProducts = (collectionName?: string | null) => {
@@ -6138,7 +6140,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
             id: editingId,
             _id: editingId,
             likesCount: targetProduct?.likesCount ?? 0,
-            creationTime: (targetProduct as any)?._creationTime || Date.now(),
+            creationTime: targetProduct?._creationTime || targetProduct?.creationTime || Date.now(),
             ...payload
           }
         });
@@ -9128,6 +9130,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                     </div>
                                   ) : (
                                     <div className="space-y-3">
+                                      <p className="text-xs leading-5 text-muted-foreground">
+                                        Автоколлаж собирается только из главных фото карточек товаров: сначала выбранное фото каталога, затем первое изображение товара. Таблицы размеров и дополнительные кадры в превью коллекции не попадают.
+                                      </p>
                                       {collectionPreviewImages.length > 0 ? (
                                         <div className="grid grid-cols-3 gap-2 overflow-hidden">
                                           {collectionPreviewImages.map((imageUrl, index) => (

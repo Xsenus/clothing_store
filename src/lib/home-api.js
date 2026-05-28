@@ -24,6 +24,7 @@ const normalizeProduct = (product) => {
     ...product,
     _id: productId,
     id: productId,
+    _creationTime: Number(product?._creationTime ?? product?.creationTime ?? 0) || 0,
     images,
     media,
     catalogImageUrl: toAbsoluteMediaUrl(product?.catalogImageUrl),

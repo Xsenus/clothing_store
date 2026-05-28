@@ -225,7 +225,8 @@ const sortProducts = (products, sortBy) => {
       return (b.likesCount || 0) - (a.likesCount || 0);
     });
   } else if (sortBy === "new") {
-    sorted.sort((a, b) => (b._creationTime || 0) - (a._creationTime || 0));
+    const getCreationTime = (item) => Number(item?._creationTime ?? item?.creationTime ?? item?.createdAt ?? 0) || 0;
+    sorted.sort((a, b) => getCreationTime(b) - getCreationTime(a));
   } else if (sortBy === "sale") {
     const getDiscount = (item) => {
       const basePrice = Number(item.basePrice ?? item.oldPrice ?? item.price ?? 0);
@@ -249,6 +250,7 @@ const normalizeProduct = (product) => {
     ...product,
     _id: productId,
     id: productId,
+    _creationTime: Number(product?._creationTime ?? product?.creationTime ?? 0) || 0,
     images,
     media,
     catalogImageUrl: toAbsoluteMediaUrl(product?.catalogImageUrl),

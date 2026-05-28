@@ -84,6 +84,7 @@ public class ProductsController : ControllerBase
             }
 
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+            AppendProductMetadataFields(json, product);
             AppendProductVisibilityFields(json, product);
             AppendProductPopularityFields(json, popularityByProduct.GetValueOrDefault(product.Id));
             return json;
@@ -94,7 +95,10 @@ public class ProductsController : ControllerBase
     public async Task<IResult> ListNew()
     {
         var includeHidden = await _auth.RequireAdminAsync(Request);
-        return Results.Json(await BuildOrderedProductPayloadsAsync(ApplyProductVisibility(_db.Products.Where(p => p.IsNew), includeHidden), includeHidden));
+        return Results.Json(await BuildOrderedProductPayloadsAsync(
+            ApplyProductVisibility(_db.Products.Where(p => p.IsNew), includeHidden)
+                .OrderByDescending(p => p.CreationTime),
+            includeHidden));
     }
 
     [HttpGet("popular")]
@@ -168,7 +172,7 @@ public class ProductsController : ControllerBase
                         collectionPreviewImages[collectionKey] = previewImages;
                     }
 
-                    foreach (var previewImageUrl in ResolveProductPreviewImageUrls(json))
+                    foreach (var previewImageUrl in ResolveProductCollectionPreviewImageUrls(json))
                     {
                         if (previewImages.Count >= 18)
                             break;
@@ -376,7 +380,8 @@ public class ProductsController : ControllerBase
     {
         var includeHidden = await _auth.RequireAdminAsync(Request);
         return Results.Json(await BuildOrderedProductPayloadsAsync(
-            ApplyProductVisibility(_db.Products.Where(p => p.Category == category && p.IsNew), includeHidden),
+            ApplyProductVisibility(_db.Products.Where(p => p.Category == category && p.IsNew), includeHidden)
+                .OrderByDescending(p => p.CreationTime),
             includeHidden));
     }
 
@@ -402,6 +407,7 @@ public class ProductsController : ControllerBase
         var dictionaryOrderMaps = await LoadDictionaryOrderMapsAsync();
         var productJson = ProductJsonService.Parse(product);
         NormalizeProductMediaUrls(productJson);
+        AppendProductMetadataFields(productJson, product);
         ApplyDictionaryOrdering(productJson, dictionaryOrderMaps);
 
         var collectionNames = NormalizeLookupValues(
@@ -487,6 +493,7 @@ public class ProductsController : ControllerBase
         }
 
         ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+        AppendProductMetadataFields(json, p);
         AppendProductVisibilityFields(json, p);
         AppendProductPopularityFields(json, (await LoadProductPopularityStatsAsync([p.Id])).GetValueOrDefault(p.Id));
         return Results.Json(json);
@@ -624,6 +631,9 @@ public class ProductsController : ControllerBase
         NormalizePriceFields(payload);
         ApplyDictionaryOrdering(payload, await LoadDictionaryOrderMapsAsync());
         RemoveProductVisibilityFields(payload);
+        var creationTime = payload["creationTime"]?.GetValue<long?>() ?? now;
+        payload["creationTime"] = creationTime;
+        payload["_creationTime"] = creationTime;
 
         var product = new Product
         {
@@ -633,7 +643,7 @@ public class ProductsController : ControllerBase
             IsNew = payload["isNew"]?.GetValue<bool>() ?? false,
             IsPopular = payload["isPopular"]?.GetValue<bool>() ?? false,
             LikesCount = payload["likesCount"]?.GetValue<int>() ?? 0,
-            CreationTime = payload["creationTime"]?.GetValue<long>() ?? now,
+            CreationTime = creationTime,
             IsHidden = isHidden,
             HiddenAt = isHidden ? now : null,
             HiddenByUserId = isHidden ? admin.Id : null,
@@ -662,6 +672,8 @@ public class ProductsController : ControllerBase
         NormalizePriceFields(json);
         ApplyDictionaryOrdering(json, await LoadDictionaryOrderMapsAsync());
         RemoveProductVisibilityFields(json);
+        json["creationTime"] = product.CreationTime;
+        json["_creationTime"] = product.CreationTime;
 
         product.Slug = json["slug"]?.ToString() ?? product.Slug;
         product.Category = json["category"]?.ToString() ?? (json["categories"] as JsonArray)?[0]?.ToString();
@@ -1214,6 +1226,7 @@ public class ProductsController : ControllerBase
             var json = ProductJsonService.Parse(product);
             NormalizeProductMediaUrls(json);
             ApplyDictionaryOrdering(json, dictionaryOrderMaps);
+            AppendProductMetadataFields(json, product);
             if (appendVisibilityFields)
                 AppendProductVisibilityFields(json, product);
             AppendProductPopularityFields(json, popularityByProduct.GetValueOrDefault(product.Id));
@@ -1233,6 +1246,12 @@ public class ProductsController : ControllerBase
     {
         json["isHidden"] = product.IsHidden;
         json["hiddenAt"] = product.HiddenAt.HasValue ? JsonValue.Create(product.HiddenAt.Value) : null;
+    }
+
+    private static void AppendProductMetadataFields(JsonObject json, Product product)
+    {
+        json["creationTime"] = product.CreationTime;
+        json["_creationTime"] = product.CreationTime;
     }
 
     private static void AppendProductPopularityFields(JsonObject json, ProductPopularityStats? stats)
@@ -1435,29 +1454,29 @@ public class ProductsController : ControllerBase
     private static string NormalizeCollectionPreviewMode(string? value)
         => value?.Trim().ToLowerInvariant() == "products" ? "products" : "gallery";
 
-    private static IReadOnlyList<string> ResolveProductPreviewImageUrls(JsonObject? json)
+    private static IReadOnlyList<string> ResolveProductCollectionPreviewImageUrls(JsonObject? json)
     {
-        var result = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void AddCandidate(string? value)
+        static string? NormalizeCandidate(string? value)
         {
             var normalizedValue = value?.Trim();
             if (string.IsNullOrWhiteSpace(normalizedValue))
-                return;
+                return null;
 
-            if (seen.Add(normalizedValue))
-                result.Add(normalizedValue);
+            return normalizedValue;
         }
 
         var catalogImageUrl = json?["catalogImageUrl"]?.ToString()?.Trim();
-        AddCandidate(catalogImageUrl);
+        var normalizedCatalogImageUrl = NormalizeCandidate(catalogImageUrl);
+        if (normalizedCatalogImageUrl is not null)
+            return [normalizedCatalogImageUrl];
 
         if (json?["images"] is JsonArray images)
         {
             foreach (var image in images)
             {
-                AddCandidate(image?.ToString());
+                var normalizedImageUrl = NormalizeCandidate(image?.ToString());
+                if (normalizedImageUrl is not null)
+                    return [normalizedImageUrl];
             }
         }
 
@@ -1469,11 +1488,13 @@ public class ProductsController : ControllerBase
                 if (!string.Equals(mediaType, "image", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                AddCandidate(mediaItem["url"]?.ToString());
+                var normalizedMediaUrl = NormalizeCandidate(mediaItem["url"]?.ToString());
+                if (normalizedMediaUrl is not null)
+                    return [normalizedMediaUrl];
             }
         }
 
-        return result;
+        return [];
     }
 
     private static int ResolveDictionarySortOrder(IReadOnlyDictionary<string, int> orderMap, string value)
