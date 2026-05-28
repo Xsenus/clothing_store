@@ -1614,6 +1614,18 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private string ResolveExternalApiBaseUrl()
     {
+        var configuredWebhookBaseUrl =
+            _configuration["Telegram:WebhookBaseUrl"]
+            ?? Environment.GetEnvironmentVariable("TELEGRAM_WEBHOOK_BASE_URL");
+
+        if (!string.IsNullOrWhiteSpace(configuredWebhookBaseUrl))
+        {
+            if (!Uri.TryCreate(configuredWebhookBaseUrl.Trim(), UriKind.Absolute, out var parsedWebhookBaseUrl))
+                throw new InvalidOperationException("Telegram webhook base URL must be an absolute URL.");
+
+            return $"{parsedWebhookBaseUrl.GetLeftPart(UriPartial.Authority)}{NormalizePathBase(parsedWebhookBaseUrl.AbsolutePath)}";
+        }
+
         var currentRequest = _httpContextAccessor.HttpContext?.Request;
         if (currentRequest is not null)
         {
