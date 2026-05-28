@@ -1639,6 +1639,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   telegram_widget_enabled: "false",
   telegram_bot_username: "",
   telegram_bot_token: "",
+  telegram_proxy_url: "",
   telegram_gateway_enabled: "false",
   telegram_gateway_api_token: "",
   telegram_gateway_sender_username: "",
@@ -1792,7 +1793,7 @@ const IMAGE_UPLOAD_SETTINGS_KEYS = getDefaultSettingKeysByPrefix("image_upload_"
 const AUTH_CORE_SETTING_KEYS = getDefaultSettingKeysByPrefix("auth_");
 
 const AUTH_SETTING_KEYS_BY_CATALOG: Record<(typeof AUTH_SETTINGS_CATALOG_VALUES)[number], readonly string[]> = {
-  telegram: ["telegram_login_enabled", "telegram_bot_username"],
+  telegram: ["telegram_login_enabled", "telegram_bot_username", "telegram_proxy_url"],
   "telegram-widget": ["telegram_widget_enabled"],
   "telegram-gateway": getDefaultSettingKeysByPrefix("telegram_gateway_"),
   google: ["google_login_enabled", "google_auth_client_id", "google_auth_client_secret"],
@@ -1811,7 +1812,7 @@ const GENERAL_SETTING_KEYS_BY_CATALOG: Record<(typeof GENERAL_SETTINGS_CATALOG_V
 };
 
 const INTEGRATION_SETTING_KEYS_BY_CATALOG: Record<(typeof INTEGRATION_CATALOG_VALUES)[number], readonly string[]> = {
-  telegram: ["telegram_login_enabled", "telegram_bot_username"],
+  telegram: ["telegram_login_enabled", "telegram_bot_username", "telegram_proxy_url"],
   yoomoney: dedupeSettingKeys(["payments_yoomoney_enabled"], getDefaultSettingKeysByPrefix("yoomoney_")),
   yookassa: dedupeSettingKeys(["payments_yookassa_enabled"], getDefaultSettingKeysByPrefix("yookassa_")),
   robokassa: dedupeSettingKeys(["payments_robokassa_enabled"], getDefaultSettingKeysByPrefix("robokassa_")),
@@ -10157,6 +10158,21 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               <Input id="telegram-bot-username" value={settings["telegram_bot_username"] || ""} onChange={(e) => updateSetting("telegram_bot_username", e.target.value)} />
                               <p className="text-xs text-muted-foreground">
                                 Необязательное поле. Если оставить пустым, для кнопки входа через Telegram будет использован username последнего активного бота из списка ниже.
+                              </p>
+                            </div>
+
+                            <div className="space-y-1">
+                              <Label htmlFor="telegram-proxy-url">Telegram proxy URL</Label>
+                              <Input
+                                id="telegram-proxy-url"
+                                type="password"
+                                autoComplete="new-password"
+                                value={settings["telegram_proxy_url"] || ""}
+                                onChange={(e) => updateSetting("telegram_proxy_url", e.target.value)}
+                                placeholder="socks5h://user:password@host:1080"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Optional. Used only for outgoing Telegram Bot API and Telegram Gateway requests from the server.
                               </p>
                             </div>
 

@@ -66,6 +66,7 @@ builder.Services.AddScoped<IDeliveryIntegrationService, DeliveryIntegrationServi
 builder.Services.AddScoped<PromoCodeService>();
 builder.Services.AddScoped<TransactionalEmailService>();
 builder.Services.AddScoped<TelegramNotificationService>();
+builder.Services.AddSingleton<TelegramHttpClientFactory>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<OrderEmailQueue>();
 builder.Services.AddSingleton<IOrderEmailQueue>(sp => sp.GetRequiredService<OrderEmailQueue>());

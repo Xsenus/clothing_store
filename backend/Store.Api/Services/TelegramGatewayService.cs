@@ -59,18 +59,18 @@ public class TelegramGatewayService
 
     private readonly StoreDbContext _db;
     private readonly IConfiguration _configuration;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TelegramHttpClientFactory _telegramHttpClientFactory;
     private readonly ILogger<TelegramGatewayService> _logger;
 
     public TelegramGatewayService(
         StoreDbContext db,
         IConfiguration configuration,
-        IHttpClientFactory httpClientFactory,
+        TelegramHttpClientFactory telegramHttpClientFactory,
         ILogger<TelegramGatewayService> logger)
     {
         _db = db;
         _configuration = configuration;
-        _httpClientFactory = httpClientFactory;
+        _telegramHttpClientFactory = telegramHttpClientFactory;
         _logger = logger;
     }
 
@@ -183,7 +183,7 @@ public class TelegramGatewayService
         CancellationToken cancellationToken = default)
     {
         var configuration = await RequireConfigurationAsync(cancellationToken);
-        var client = CreateClient(configuration.ApiToken!);
+        using var client = await CreateClientAsync(configuration.ApiToken!, cancellationToken);
         using var response = await client.PostAsJsonAsync(
             "revokeVerificationMessage",
             new Dictionary<string, object?> { ["request_id"] = requestId },
@@ -218,7 +218,7 @@ public class TelegramGatewayService
         string apiToken,
         CancellationToken cancellationToken)
     {
-        var client = CreateClient(apiToken);
+        using var client = await CreateClientAsync(apiToken, cancellationToken);
         using var response = await client.PostAsJsonAsync(method, requestBody, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         var envelope = DeserializeEnvelope<GatewayRequestStatusDto>(body);
@@ -236,9 +236,9 @@ public class TelegramGatewayService
         throw new TelegramGatewayException(errorCode, MapError(errorCode));
     }
 
-    private HttpClient CreateClient(string apiToken)
+    private async Task<HttpClient> CreateClientAsync(string apiToken, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient(nameof(TelegramGatewayService));
+        var client = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
         client.BaseAddress = new Uri(BaseUrl);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiToken);
         return client;

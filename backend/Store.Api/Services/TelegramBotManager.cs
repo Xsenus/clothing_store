@@ -51,6 +51,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private readonly IServiceProvider _serviceProvider;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TelegramHttpClientFactory _telegramHttpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<TelegramBotManager> _logger;
@@ -72,12 +73,14 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
     public TelegramBotManager(
         IServiceProvider serviceProvider,
         IHttpClientFactory httpClientFactory,
+        TelegramHttpClientFactory telegramHttpClientFactory,
         IConfiguration configuration,
         IHttpContextAccessor httpContextAccessor,
         ILogger<TelegramBotManager> logger)
     {
         _serviceProvider = serviceProvider;
         _httpClientFactory = httpClientFactory;
+        _telegramHttpClientFactory = telegramHttpClientFactory;
         _configuration = configuration;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
@@ -309,7 +312,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         if (!update.TryGetProperty("message", out var messageEl))
             return true;
 
-        var client = _httpClientFactory.CreateClient();
+        using var client = await _telegramHttpClientFactory.CreateClientAsync(token);
         await HandleMessageAsync(client, db, bot, userIdentityService, messageEl, token);
         return true;
     }
@@ -381,7 +384,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private async Task RunBotLoopAsync(string botId, CancellationToken token)
     {
-        var client = _httpClientFactory.CreateClient();
+        using var client = await _telegramHttpClientFactory.CreateClientAsync(token);
         var offset = 0L;
 
         while (!token.IsCancellationRequested)
@@ -1053,8 +1056,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private async Task UpdateBotProfilePhotoAsync(TelegramBot bot, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient();
-        using var photoResponse = await client.GetAsync(bot.ImageUrl!, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var downloadClient = _httpClientFactory.CreateClient();
+        using var photoResponse = await downloadClient.GetAsync(bot.ImageUrl!, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var mediaType = photoResponse.Content.Headers.ContentType?.MediaType?.Trim().ToLowerInvariant();
         if (!photoResponse.IsSuccessStatusCode)
             throw new InvalidOperationException($"Unable to download bot image from {bot.ImageUrl}");
@@ -1088,7 +1091,8 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         {
             Content = formData
         };
-        using var res = await client.SendAsync(req, cancellationToken);
+        using var telegramClient = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
+        using var res = await telegramClient.SendAsync(req, cancellationToken);
         await EnsureSuccessfulTelegramResponseAsync(res, "setMyProfilePhoto", cancellationToken);
     }
 
@@ -1098,7 +1102,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
         if (payload is not null)
             req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-        var client = _httpClientFactory.CreateClient();
+        using var client = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
         using var res = await client.SendAsync(req, cancellationToken);
         var content = await res.Content.ReadAsStringAsync(cancellationToken);
         if (!res.IsSuccessStatusCode)
@@ -1122,7 +1126,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
             req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         }
 
-        var client = _httpClientFactory.CreateClient();
+        using var client = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
         using var res = await client.SendAsync(req, cancellationToken);
         await EnsureSuccessfulTelegramResponseAsync(res, method, cancellationToken);
     }
@@ -1180,7 +1184,7 @@ public class TelegramBotManager : BackgroundService, ITelegramBotManager
 
     private async Task<TelegramBotMeInfo> FetchMeInfoAsync(string token, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient();
+        using var client = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
         using var meRes = await client.GetAsync($"https://api.telegram.org/bot{token}/getMe", cancellationToken);
         var meContent = await meRes.Content.ReadAsStringAsync(cancellationToken);
 

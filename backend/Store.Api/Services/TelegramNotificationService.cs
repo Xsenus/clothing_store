@@ -22,18 +22,18 @@ public class TelegramNotificationService
         ["returned"] = "Возврат"
     };
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TelegramHttpClientFactory _telegramHttpClientFactory;
     private readonly StoreDbContext _db;
     private readonly UserIdentityService _userIdentityService;
     private readonly ILogger<TelegramNotificationService> _logger;
 
     public TelegramNotificationService(
-        IHttpClientFactory httpClientFactory,
+        TelegramHttpClientFactory telegramHttpClientFactory,
         StoreDbContext db,
         UserIdentityService userIdentityService,
         ILogger<TelegramNotificationService> logger)
     {
-        _httpClientFactory = httpClientFactory;
+        _telegramHttpClientFactory = telegramHttpClientFactory;
         _db = db;
         _userIdentityService = userIdentityService;
         _logger = logger;
@@ -115,7 +115,7 @@ public class TelegramNotificationService
 
         try
         {
-            var client = _httpClientFactory.CreateClient();
+            using var client = await _telegramHttpClientFactory.CreateClientAsync(cancellationToken);
             using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.telegram.org/bot{bot.Token}/sendMessage")
             {
                 Content = new StringContent(
