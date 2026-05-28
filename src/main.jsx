@@ -6,6 +6,7 @@ import App from "./App";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import AppBootReporter from "@/components/AppBootReporter";
 import DeferredAppDecorations from "@/components/DeferredAppDecorations";
+import RouteScrollManager from "@/components/RouteScrollManager";
 import { ConfirmDialogProvider } from "@/components/ConfirmDialogProvider";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
@@ -22,6 +23,7 @@ createRoot(document.getElementById("root")).render(
         <AuthProvider>
           <CartProvider>
             <ConfirmDialogProvider>
+              <RouteScrollManager />
               <AppBootReporter />
               <App />
               <DeferredAppDecorations />
