@@ -6,6 +6,7 @@ import HomeProductSection from "@/components/home/HomeProductSection";
 import PageSeo from "@/components/PageSeo";
 import SafeRenderBoundary from "@/components/SafeRenderBoundary";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router";
 
 const HOME_KEYWORDS = [
   "fashiondemon",
@@ -104,7 +105,7 @@ export default function HomePage() {
               size="lg"
               className="rounded-none bg-white px-12 py-8 text-lg font-bold uppercase tracking-widest text-black transition-all hover:scale-105 hover:bg-gray-200"
             >
-              <a href="/catalog?sort=new">В магазин</a>
+              <Link to="/catalog?sort=new">В магазин</Link>
             </Button>
           </div>
         </div>
