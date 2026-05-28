@@ -316,7 +316,7 @@ public class ProductsController : ControllerBase
                 slug = x.Slug,
                 imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
-                previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
+                previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
                 description = x.Description,
                 color = showCollectionColors && x.ShowColorInCatalog ? x.Color : null,
                 showColorInCatalog = showCollectionColors && x.ShowColorInCatalog
@@ -334,7 +334,7 @@ public class ProductsController : ControllerBase
                 slug = x.Slug,
                 imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
-                previewImages = collectionPreviewImages.GetValueOrDefault(NormalizeLookupKey(x.Name), new List<string>()).Take(18).ToList(),
+                previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
                 description = x.Description,
                 color = x.Color,
                 productCount = collectionUsageCounts.GetValueOrDefault(NormalizeLookupKey(x.Name), 0)
@@ -1495,6 +1495,41 @@ public class ProductsController : ControllerBase
         }
 
         return [];
+    }
+
+    private static IReadOnlyList<string> ResolveCollectionPreviewImages(
+        CollectionDictionary collection,
+        IReadOnlyDictionary<string, List<string>> autoPreviewImages)
+    {
+        var manualPreviewImages = ParsePreviewImagesJson(collection.PreviewImagesJson);
+        if (manualPreviewImages is not null)
+            return manualPreviewImages;
+
+        return autoPreviewImages
+            .GetValueOrDefault(NormalizeLookupKey(collection.Name), [])
+            .Take(18)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string>? ParsePreviewImagesJson(string? value)
+    {
+        if (value is null)
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(value)?
+                .Select(item => item?.Trim())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Cast<string>()
+                .Take(18)
+                .ToList() ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private static int ResolveDictionarySortOrder(IReadOnlyDictionary<string, int> orderMap, string value)

@@ -836,7 +836,9 @@ type CollectionPreviewMode = "gallery" | "products";
 type GalleryPickerTarget =
   | { type: "product-media"; slot: number }
   | { type: "collection-create" }
-  | { type: "collection-edit"; itemId: string };
+  | { type: "collection-edit"; itemId: string }
+  | { type: "collection-preview-create" }
+  | { type: "collection-preview-edit"; itemId: string };
 
 type GalleryUploadStatus = "pending" | "uploading" | "success" | "error";
 
@@ -1427,6 +1429,7 @@ interface DictionaryItem {
   color?: string | null;
   imageUrl?: string | null;
   previewMode?: CollectionPreviewMode;
+  previewImages?: string[] | null;
   description?: string | null;
   isActive?: boolean;
   showInCatalogFilter?: boolean;
@@ -1442,6 +1445,7 @@ interface DictionaryDraft {
   color: string;
   imageUrl: string;
   previewMode: CollectionPreviewMode;
+  previewImages: string[] | null;
   description: string;
   isActive: boolean;
   showInCatalogFilter: boolean;
@@ -1479,6 +1483,7 @@ interface DictionaryCreateDialogState {
   color: string;
   imageUrl: string;
   previewMode: CollectionPreviewMode;
+  previewImages: string[] | null;
   description: string;
   showColorInCatalog: boolean;
   sortOrder: string;
@@ -2092,6 +2097,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     color: "#3b82f6",
     imageUrl: "",
     previewMode: "gallery",
+    previewImages: null,
     description: "",
     showColorInCatalog: true,
     sortOrder: "1"
@@ -4120,6 +4126,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       color: getDictionaryDotColor(kind),
       imageUrl: "",
       previewMode: "gallery",
+      previewImages: null,
       description: "",
       showColorInCatalog: true,
       sortOrder: String(getNextDictionarySortOrder(kind))
@@ -4164,6 +4171,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           color: color || undefined,
           imageUrl: imageUrl || undefined,
           previewMode,
+          previewImages: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewImages : undefined,
           description: description || undefined,
           isActive: true,
           showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
@@ -4187,6 +4195,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         color: "#3b82f6",
         imageUrl: "",
         previewMode: "gallery",
+        previewImages: null,
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4203,6 +4212,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     color: item.color || getDictionaryDotColor(item.name || ""),
     imageUrl: item.imageUrl || "",
     previewMode: item.previewMode === "products" ? "products" : "gallery",
+    previewImages: Array.isArray(item.previewImages) ? item.previewImages : null,
     description: item.description || "",
     isActive: item.isActive ?? true,
     showInCatalogFilter: item.showInCatalogFilter ?? true,
@@ -4222,6 +4232,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         color: "#3b82f6",
         imageUrl: "",
         previewMode: "gallery",
+        previewImages: null,
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4309,6 +4320,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           color: draft.color,
           imageUrl: draft.imageUrl,
           previewMode: draft.previewMode,
+          previewImages: kind === "collections" ? draft.previewImages : undefined,
           description: draft.description,
           isActive: draft.isActive,
           showInCatalogFilter: kind !== "collections" && draft.showInCatalogFilter,
@@ -5893,6 +5905,94 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     return previewImages;
   };
 
+  const normalizeCollectionPreviewImages = (values?: string[] | null) =>
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .filter((value, index, list) => list.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index)
+      .slice(0, 18);
+
+  const updateDictionaryDraftPreviewImages = (
+    item: DictionaryItem,
+    updater: (images: string[]) => string[],
+  ) => {
+    setDictionaryDrafts((prev) => {
+      const current = prev[item.id] ?? getDictionaryDraftDefaults(item);
+      const baseImages = current.previewImages === null
+        ? getCollectionPreviewImagesFromProducts(current.name || item.name)
+        : current.previewImages;
+
+      return {
+        ...prev,
+        [item.id]: {
+          ...current,
+          previewImages: normalizeCollectionPreviewImages(updater(baseImages)),
+        },
+      };
+    });
+  };
+
+  const updateCreateDialogPreviewImages = (updater: (images: string[]) => string[]) => {
+    setDictionaryCreateDialog((prev) => {
+      const baseImages = prev.previewImages === null
+        ? getCollectionPreviewImagesFromProducts(prev.name)
+        : prev.previewImages;
+
+      return {
+        ...prev,
+        previewImages: normalizeCollectionPreviewImages(updater(baseImages)),
+      };
+    });
+  };
+
+  const moveCollectionPreviewImage = (item: DictionaryItem, index: number, direction: -1 | 1) => {
+    updateDictionaryDraftPreviewImages(item, (images) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= images.length) return images;
+      const next = [...images];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const removeCollectionPreviewImage = (item: DictionaryItem, index: number) => {
+    updateDictionaryDraftPreviewImages(item, (images) => images.filter((_, imageIndex) => imageIndex !== index));
+  };
+
+  const resetCollectionPreviewImagesToAuto = (item: DictionaryItem) => {
+    setDictionaryDrafts((prev) => {
+      const current = prev[item.id] ?? getDictionaryDraftDefaults(item);
+      return {
+        ...prev,
+        [item.id]: {
+          ...current,
+          previewImages: null,
+        },
+      };
+    });
+  };
+
+  const moveCreateDialogPreviewImage = (index: number, direction: -1 | 1) => {
+    updateCreateDialogPreviewImages((images) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= images.length) return images;
+      const next = [...images];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const removeCreateDialogPreviewImage = (index: number) => {
+    updateCreateDialogPreviewImages((images) => images.filter((_, imageIndex) => imageIndex !== index));
+  };
+
+  const resetCreateDialogPreviewImagesToAuto = () => {
+    setDictionaryCreateDialog((prev) => ({
+      ...prev,
+      previewImages: null,
+    }));
+  };
+
   const resetProductEditor = () => {
     setEditingId(null);
     setEditingProduct(null);
@@ -6478,6 +6578,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     openGalleryPicker({ type: "collection-edit", itemId });
   };
 
+  const openCollectionPreviewCreateGalleryPicker = () => {
+    openGalleryPicker({ type: "collection-preview-create" });
+  };
+
+  const openCollectionPreviewEditGalleryPicker = (itemId: string) => {
+    openGalleryPicker({ type: "collection-preview-edit", itemId });
+  };
+
   const closeGalleryPicker = () => {
     setGalleryPickerTarget(null);
   };
@@ -6489,6 +6597,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       setMediaSlot(galleryPickerTarget.slot, "image", url);
     } else if (galleryPickerTarget.type === "collection-create") {
       setDictionaryCreateDialog((prev) => ({ ...prev, imageUrl: url, previewMode: "gallery" }));
+    } else if (galleryPickerTarget.type === "collection-preview-create") {
+      updateCreateDialogPreviewImages((images) => [...images, url]);
     } else if (galleryPickerTarget.type === "collection-edit") {
       setDictionaryDrafts((prev) => {
         const current = prev[galleryPickerTarget.itemId];
@@ -6502,6 +6612,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           },
         };
       });
+    } else if (galleryPickerTarget.type === "collection-preview-edit") {
+      const targetItem = dictionaries.collections.find((item) => item.id === galleryPickerTarget.itemId);
+      if (targetItem) {
+        updateDictionaryDraftPreviewImages(targetItem, (images) => [...images, url]);
+      }
     }
 
     closeGalleryPicker();
@@ -8987,9 +9102,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       const isEditing = editingDictionaryItemId === item.id;
                       const draft = dictionaryDrafts[item.id] ?? getDictionaryDraftDefaults(item);
                       const itemUsed = isDictionaryItemUsed(selectedDictionaryGroup, item);
-                      const collectionPreviewImages = selectedDictionaryGroup === "collections"
+                      const autoCollectionPreviewImages = selectedDictionaryGroup === "collections"
                         ? getCollectionPreviewImagesFromProducts(draft.name || item.name)
                         : [];
+                      const collectionPreviewImages = draft.previewImages === null
+                        ? autoCollectionPreviewImages
+                        : normalizeCollectionPreviewImages(draft.previewImages);
+                      const isManualCollectionPreview = selectedDictionaryGroup === "collections" && draft.previewImages !== null;
                       return (
                         <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
                           {isEditing ? (
@@ -9132,14 +9251,69 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                     </div>
                                   ) : (
                                     <div className="space-y-3">
-                                      <p className="text-xs leading-5 text-muted-foreground">
-                                        Автоколлаж собирается только из главных фото карточек товаров: сначала выбранное фото каталога, затем первое изображение товара. Таблицы размеров и дополнительные кадры в превью коллекции не попадают.
-                                      </p>
+                                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                        <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
+                                          {isManualCollectionPreview
+                                            ? "Используется ручной список изображений: порядок и состав превью задаются здесь, изображения могут быть не связаны с товарами."
+                                            : "Автоколлаж собирается только из главных фото карточек товаров: сначала выбранное фото каталога, затем первое изображение товара. Таблицы размеров и дополнительные кадры в превью коллекции не попадают."}
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                          <Button type="button" variant="outline" className="rounded-none" onClick={() => openCollectionPreviewEditGalleryPicker(item.id)}>
+                                            <ImagePlus className="mr-2 h-4 w-4" /> Добавить фото
+                                          </Button>
+                                          {!isManualCollectionPreview ? (
+                                            <Button type="button" variant="outline" className="rounded-none" onClick={() => updateDictionaryDraftPreviewImages(item, (images) => images)}>
+                                              <Check className="mr-2 h-4 w-4" /> Зафиксировать текущие
+                                            </Button>
+                                          ) : (
+                                            <Button type="button" variant="outline" className="rounded-none" onClick={() => resetCollectionPreviewImagesToAuto(item)}>
+                                              <RefreshCcw className="mr-2 h-4 w-4" /> Вернуть авто
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
                                       {collectionPreviewImages.length > 0 ? (
-                                        <div className="grid grid-cols-3 gap-2 overflow-hidden">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                           {collectionPreviewImages.map((imageUrl, index) => (
-                                            <div key={`${item.id}-preview-${index}`} className="overflow-hidden border border-slate-200 bg-slate-50">
+                                            <div key={`${item.id}-preview-${index}-${imageUrl}`} className="overflow-hidden border border-slate-200 bg-slate-50">
                                               <img src={imageUrl} alt="" className="h-32 w-full object-cover" />
+                                              <div className="flex items-center justify-between gap-1 border-t border-slate-200 bg-white p-2">
+                                                <span className="text-xs text-muted-foreground">#{index + 1}</span>
+                                                <div className="flex gap-1">
+                                                  <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="outline"
+                                                    className="h-8 w-8 rounded-none"
+                                                    onClick={() => moveCollectionPreviewImage(item, index, -1)}
+                                                    disabled={index === 0}
+                                                    title="Поднять выше"
+                                                  >
+                                                    <ArrowUp className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                  <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="outline"
+                                                    className="h-8 w-8 rounded-none"
+                                                    onClick={() => moveCollectionPreviewImage(item, index, 1)}
+                                                    disabled={index === collectionPreviewImages.length - 1}
+                                                    title="Опустить ниже"
+                                                  >
+                                                    <ArrowDown className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                  <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="outline"
+                                                    className="h-8 w-8 rounded-none border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                                    onClick={() => removeCollectionPreviewImage(item, index)}
+                                                    title="Убрать из превью"
+                                                  >
+                                                    <X className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                </div>
+                                              </div>
                                             </div>
                                           ))}
                                         </div>
@@ -9149,7 +9323,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         </div>
                                       )}
                                       <p className="text-xs leading-5 text-muted-foreground">
-                                        В этом режиме блок на главной и в каталоге сам собирает широкий коллаж из всех изображений товаров коллекции и ротирует их автоматически.
+                                        {isManualCollectionPreview
+                                          ? "Сохраните коллекцию, чтобы применить ручной список на главной странице и в каталоге."
+                                          : "Чтобы удалить или переставить изображения, зафиксируйте текущий список или добавьте фото из галереи."}
                                       </p>
                                     </div>
                                   )}
@@ -13390,11 +13566,73 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name).length > 0 ? (
-                          <div className="grid grid-cols-3 gap-2 overflow-hidden">
-                            {getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name).map((imageUrl, index) => (
-                              <div key={`create-collection-preview-${index}`} className="overflow-hidden border border-black/10 bg-stone-50">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
+                            {dictionaryCreateDialog.previewImages === null
+                              ? "Автоколлаж будет собираться из главных фото товаров коллекции. При необходимости можно сразу задать ручной список."
+                              : "Используется ручной список изображений для превью коллекции."}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" className="rounded-none" onClick={openCollectionPreviewCreateGalleryPicker}>
+                              <ImagePlus className="mr-2 h-4 w-4" /> Добавить фото
+                            </Button>
+                            {dictionaryCreateDialog.previewImages === null ? (
+                              <Button type="button" variant="outline" className="rounded-none" onClick={() => updateCreateDialogPreviewImages((images) => images)}>
+                                <Check className="mr-2 h-4 w-4" /> Зафиксировать текущие
+                              </Button>
+                            ) : (
+                              <Button type="button" variant="outline" className="rounded-none" onClick={resetCreateDialogPreviewImagesToAuto}>
+                                <RefreshCcw className="mr-2 h-4 w-4" /> Вернуть авто
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        {(dictionaryCreateDialog.previewImages === null
+                          ? getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name)
+                          : normalizeCollectionPreviewImages(dictionaryCreateDialog.previewImages)).length > 0 ? (
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {(dictionaryCreateDialog.previewImages === null
+                              ? getCollectionPreviewImagesFromProducts(dictionaryCreateDialog.name)
+                              : normalizeCollectionPreviewImages(dictionaryCreateDialog.previewImages)).map((imageUrl, index, images) => (
+                              <div key={`create-collection-preview-${index}-${imageUrl}`} className="overflow-hidden border border-black/10 bg-stone-50">
                                 <img src={imageUrl} alt="" className="h-32 w-full object-cover" />
+                                <div className="flex items-center justify-between gap-1 border-t border-black/10 bg-white p-2">
+                                  <span className="text-xs text-muted-foreground">#{index + 1}</span>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-8 w-8 rounded-none"
+                                      onClick={() => moveCreateDialogPreviewImage(index, -1)}
+                                      disabled={index === 0}
+                                      title="Поднять выше"
+                                    >
+                                      <ArrowUp className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-8 w-8 rounded-none"
+                                      onClick={() => moveCreateDialogPreviewImage(index, 1)}
+                                      disabled={index === images.length - 1}
+                                      title="Опустить ниже"
+                                    >
+                                      <ArrowDown className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-8 w-8 rounded-none border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                      onClick={() => removeCreateDialogPreviewImage(index)}
+                                      title="Убрать из превью"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -13403,7 +13641,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             Когда у коллекции появятся товары с фото, блок автоматически соберёт широкий коллаж из их изображений.
                           </div>
                         )}
-                        <p className="text-xs text-muted-foreground">Этот режим собирает витрину из всех изображений товаров коллекции и автоматически меняет композицию в слайдере.</p>
+                        <p className="text-xs text-muted-foreground">
+                          {dictionaryCreateDialog.previewImages === null
+                            ? "Чтобы удалить или переставить изображения, зафиксируйте текущий список или добавьте фото из галереи."
+                            : "Ручной список сохранится вместе с коллекцией."}
+                        </p>
                       </div>
                     )}
                   </div>

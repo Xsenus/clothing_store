@@ -2235,7 +2235,9 @@ public class AdminController : ControllerBase
             materials = await GetOrderedDictionaryItemsAsync(_db.MaterialDictionaries),
             colors = await GetOrderedDictionaryItemsAsync(_db.ColorDictionaries),
             categories = await GetOrderedDictionaryItemsAsync(_db.CategoryDictionaries),
-            collections = await GetOrderedDictionaryItemsAsync(_db.CollectionDictionaries)
+            collections = (await GetOrderedDictionaryItemsAsync(_db.CollectionDictionaries))
+                .Select(MapCollectionDictionaryItem)
+                .ToList()
         });
     }
 
@@ -2252,6 +2254,7 @@ public class AdminController : ControllerBase
         var color = NormalizeOptionalColor(payload.Color);
         var imageUrl = NormalizeOptionalText(payload.ImageUrl);
         var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
+        var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2374,6 +2377,7 @@ public class AdminController : ControllerBase
                     Color = color,
                     ImageUrl = imageUrl,
                     PreviewMode = previewMode,
+                    PreviewImagesJson = previewImagesJson,
                     IsActive = isActive,
                     ShowInCatalogFilter = false,
                     ShowColorInCatalog = showColorInCatalog,
@@ -2408,6 +2412,7 @@ public class AdminController : ControllerBase
         var colorValue = NormalizeOptionalColor(payload.Color);
         var imageUrl = NormalizeOptionalText(payload.ImageUrl);
         var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
+        var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2539,6 +2544,7 @@ public class AdminController : ControllerBase
                 collection.Color = colorValue;
                 collection.ImageUrl = imageUrl;
                 collection.PreviewMode = previewMode;
+                collection.PreviewImagesJson = previewImagesJson;
                 collection.IsActive = isActive;
                 collection.ShowInCatalogFilter = false;
                 collection.ShowColorInCatalog = showColorInCatalog;
@@ -2951,6 +2957,23 @@ public class AdminController : ControllerBase
             .ToListAsync();
     }
 
+    private static object MapCollectionDictionaryItem(CollectionDictionary item) => new
+    {
+        item.Id,
+        item.Name,
+        item.Slug,
+        item.Description,
+        item.Color,
+        item.ImageUrl,
+        item.PreviewMode,
+        previewImages = ParsePreviewImagesJson(item.PreviewImagesJson),
+        item.IsActive,
+        item.ShowInCatalogFilter,
+        item.ShowColorInCatalog,
+        item.SortOrder,
+        item.CreatedAt
+    };
+
     private async Task<int> GetNextDictionarySortOrderAsync<T>(DbSet<T> set) where T : class
     {
         var currentMaxSortOrder = await set
@@ -3219,6 +3242,42 @@ public class AdminController : ControllerBase
             "products" => "products",
             _ => "gallery"
         };
+    }
+
+    private static string? NormalizePreviewImagesJson(List<string>? values)
+    {
+        if (values is null)
+            return null;
+
+        var normalized = values
+            .Select(value => value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(18)
+            .ToList();
+
+        return JsonSerializer.Serialize(normalized);
+    }
+
+    private static IReadOnlyList<string>? ParsePreviewImagesJson(string? value)
+    {
+        if (value is null)
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(value)?
+                .Select(item => item?.Trim())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Cast<string>()
+                .Take(18)
+                .ToList() ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private static int NormalizeSortOrder(int? value, int fallback)

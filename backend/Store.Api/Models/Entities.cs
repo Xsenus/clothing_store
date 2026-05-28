@@ -854,6 +854,9 @@ public class CollectionDictionary
     [Column("preview_mode")]
     public string PreviewMode { get; set; } = "gallery";
 
+    [Column("preview_images_json", TypeName = "jsonb")]
+    public string? PreviewImagesJson { get; set; }
+
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 

@@ -355,6 +355,6 @@ public record TelegramBotPatchPayload(
 
 public record TelegramBotValidatePayload(string Token);
 
-public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
+public record DictionaryItemPayload(string Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, List<string>? PreviewImages, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
 
-public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
+public record DictionaryItemPatchPayload(string? Name, string? Slug, string? Description, string? Color, string? ImageUrl, string? PreviewMode, List<string>? PreviewImages, bool? IsActive, bool? ShowInCatalogFilter, bool? ShowColorInCatalog, int? SortOrder);
