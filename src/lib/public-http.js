@@ -22,6 +22,13 @@ const API_PATH_BASE = (() => {
   }
 })();
 
+const LOCAL_MEDIA_HOSTS = new Set([
+  "fashion-demon.ru",
+  "www.fashion-demon.ru",
+  "fashiondemon.shop",
+  "www.fashiondemon.shop",
+]);
+
 const getToken = () => {
   if (typeof window === "undefined") {
     return null;
@@ -83,7 +90,29 @@ export const toAbsoluteMediaUrl = (url) => {
   if (
     normalizedUrl.startsWith("http://") ||
     normalizedUrl.startsWith("https://") ||
-    normalizedUrl.startsWith("//") ||
+    normalizedUrl.startsWith("//")
+  ) {
+    try {
+      const parsed = new URL(normalizedUrl, WINDOW_ORIGIN);
+      if (
+        LOCAL_MEDIA_HOSTS.has(parsed.hostname) &&
+        (parsed.pathname.startsWith("/api/uploads/") ||
+          parsed.pathname.startsWith("/uploads/"))
+      ) {
+        if (parsed.pathname.startsWith("/api/uploads/")) {
+          return `${API_ORIGIN}${parsed.pathname}${parsed.search}`;
+        }
+
+        return `${API_ORIGIN}${API_PATH_BASE}${parsed.pathname}${parsed.search}`;
+      }
+    } catch {
+      return normalizedUrl;
+    }
+
+    return normalizedUrl;
+  }
+
+  if (
     normalizedUrl.startsWith("data:") ||
     normalizedUrl.startsWith("blob:")
   ) {

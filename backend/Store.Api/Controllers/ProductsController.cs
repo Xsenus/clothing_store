@@ -1534,7 +1534,7 @@ public class ProductsController : ControllerBase
         try
         {
             return JsonSerializer.Deserialize<List<string>>(value)?
-                .Select(item => item?.Trim())
+                .Select(NormalizeLocalMediaUrl)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Cast<string>()

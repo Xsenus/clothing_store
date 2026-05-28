@@ -20,6 +20,14 @@ namespace Store.Api.Controllers;
 [Route("admin")]
 public class AdminController : ControllerBase
 {
+    private static readonly HashSet<string> LocalMediaHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fashion-demon.ru",
+        "www.fashion-demon.ru",
+        "fashiondemon.shop",
+        "www.fashiondemon.shop"
+    };
+
     private readonly IConfiguration _configuration;
     private readonly StoreDbContext _db;
     private readonly AuthService _auth;
@@ -3275,7 +3283,7 @@ public class AdminController : ControllerBase
             return null;
 
         var normalized = values
-            .Select(value => value?.Trim())
+            .Select(NormalizeLocalMediaUrl)
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(18)
@@ -3292,7 +3300,7 @@ public class AdminController : ControllerBase
         try
         {
             return JsonSerializer.Deserialize<List<string>>(value)?
-                .Select(item => item?.Trim())
+                .Select(NormalizeLocalMediaUrl)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Cast<string>()
@@ -3303,6 +3311,25 @@ public class AdminController : ControllerBase
         {
             return [];
         }
+    }
+
+    private static string? NormalizeLocalMediaUrl(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+            return normalized;
+
+        if (!LocalMediaHosts.Contains(uri.Host))
+            return normalized;
+
+        if (!uri.AbsolutePath.StartsWith("/api/uploads/", StringComparison.OrdinalIgnoreCase)
+            && !uri.AbsolutePath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+            return normalized;
+
+        return uri.PathAndQuery;
     }
 
     private static int NormalizeSortOrder(int? value, int fallback)
