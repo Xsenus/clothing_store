@@ -832,6 +832,33 @@ interface GalleryImagesPage {
 }
 
 type CollectionPreviewMode = "gallery" | "products";
+type CollectionPreviewRotationMode = "sequential" | "random" | "static";
+
+const DEFAULT_COLLECTION_PREVIEW_TILE_COUNT = 3;
+const MIN_COLLECTION_PREVIEW_TILE_COUNT = 1;
+const MAX_COLLECTION_PREVIEW_TILE_COUNT = 12;
+
+const COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS: Array<{
+  value: CollectionPreviewRotationMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "sequential",
+    label: "По порядку",
+    description: "Витрина берет следующие изображения из списка по кругу. Подходит, когда порядок фото важен.",
+  },
+  {
+    value: "random",
+    label: "Случайно с анимацией",
+    description: "Через интервалы подбирается новый набор фото в случайном порядке с мягкой сменой кадров.",
+  },
+  {
+    value: "static",
+    label: "При открытии страницы",
+    description: "Набор фото выбирается один раз при загрузке страницы и не меняется, пока клиент не обновит страницу.",
+  },
+];
 
 type GalleryPickerTarget =
   | { type: "product-media"; slot: number }
@@ -1430,6 +1457,8 @@ interface DictionaryItem {
   imageUrl?: string | null;
   previewMode?: CollectionPreviewMode;
   previewImages?: string[] | null;
+  previewTileCount?: number | null;
+  previewRotationMode?: CollectionPreviewRotationMode | null;
   description?: string | null;
   isActive?: boolean;
   showInCatalogFilter?: boolean;
@@ -1446,6 +1475,8 @@ interface DictionaryDraft {
   imageUrl: string;
   previewMode: CollectionPreviewMode;
   previewImages: string[] | null;
+  previewTileCount: string;
+  previewRotationMode: CollectionPreviewRotationMode;
   description: string;
   isActive: boolean;
   showInCatalogFilter: boolean;
@@ -1484,6 +1515,8 @@ interface DictionaryCreateDialogState {
   imageUrl: string;
   previewMode: CollectionPreviewMode;
   previewImages: string[] | null;
+  previewTileCount: string;
+  previewRotationMode: CollectionPreviewRotationMode;
   description: string;
   showColorInCatalog: boolean;
   sortOrder: string;
@@ -2098,6 +2131,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     imageUrl: "",
     previewMode: "gallery",
     previewImages: null,
+    previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
+    previewRotationMode: "sequential",
     description: "",
     showColorInCatalog: true,
     sortOrder: "1"
@@ -4127,6 +4162,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       imageUrl: "",
       previewMode: "gallery",
       previewImages: null,
+      previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
+      previewRotationMode: "sequential",
       description: "",
       showColorInCatalog: true,
       sortOrder: String(getNextDictionarySortOrder(kind))
@@ -4172,6 +4209,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           imageUrl: imageUrl || undefined,
           previewMode,
           previewImages: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewImages : undefined,
+          previewTileCount: dictionaryCreateDialog.kind === "collections" ? normalizeCollectionPreviewTileCount(dictionaryCreateDialog.previewTileCount) : undefined,
+          previewRotationMode: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewRotationMode : undefined,
           description: description || undefined,
           isActive: true,
           showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
@@ -4196,6 +4235,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         imageUrl: "",
         previewMode: "gallery",
         previewImages: null,
+        previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
+        previewRotationMode: "sequential",
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4213,6 +4254,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     imageUrl: item.imageUrl || "",
     previewMode: item.previewMode === "products" ? "products" : "gallery",
     previewImages: Array.isArray(item.previewImages) ? item.previewImages : null,
+    previewTileCount: String(normalizeCollectionPreviewTileCount(item.previewTileCount)),
+    previewRotationMode: normalizeCollectionPreviewRotationMode(item.previewRotationMode),
     description: item.description || "",
     isActive: item.isActive ?? true,
     showInCatalogFilter: item.showInCatalogFilter ?? true,
@@ -4233,6 +4276,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         imageUrl: "",
         previewMode: "gallery",
         previewImages: null,
+        previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
+        previewRotationMode: "sequential",
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4321,6 +4366,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           imageUrl: draft.imageUrl,
           previewMode: draft.previewMode,
           previewImages: kind === "collections" ? draft.previewImages : undefined,
+          previewTileCount: kind === "collections" ? normalizeCollectionPreviewTileCount(draft.previewTileCount) : undefined,
+          previewRotationMode: kind === "collections" ? draft.previewRotationMode : undefined,
           description: draft.description,
           isActive: draft.isActive,
           showInCatalogFilter: kind !== "collections" && draft.showInCatalogFilter,
@@ -5911,6 +5958,19 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       .filter(Boolean)
       .filter((value, index, list) => list.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index)
       .slice(0, 18);
+
+  const normalizeCollectionPreviewTileCount = (value?: string | number | null) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return DEFAULT_COLLECTION_PREVIEW_TILE_COUNT;
+    return Math.min(MAX_COLLECTION_PREVIEW_TILE_COUNT, Math.max(MIN_COLLECTION_PREVIEW_TILE_COUNT, Math.round(parsed)));
+  };
+
+  const normalizeCollectionPreviewRotationMode = (value?: string | null): CollectionPreviewRotationMode =>
+    value === "random" || value === "static" ? value : "sequential";
+
+  const getCollectionPreviewRotationModeDescription = (value: CollectionPreviewRotationMode) =>
+    COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS.find((option) => option.value === value)?.description
+      ?? COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS[0].description;
 
   const updateDictionaryDraftPreviewImages = (
     item: DictionaryItem,
@@ -9220,6 +9280,44 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
                                       </SelectContent>
                                     </Select>
+                                  </div>
+
+                                  <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                                    <div className="space-y-1">
+                                      <Label htmlFor={`dict-preview-tile-count-${item.id}`} className="mb-1 block text-xs">Фото в коллаже</Label>
+                                      <Input
+                                        id={`dict-preview-tile-count-${item.id}`}
+                                        type="number"
+                                        min={MIN_COLLECTION_PREVIEW_TILE_COUNT}
+                                        max={MAX_COLLECTION_PREVIEW_TILE_COUNT}
+                                        step="1"
+                                        value={draft.previewTileCount}
+                                        onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewTileCount: e.target.value } }))}
+                                        className="h-11 rounded-none border-slate-300"
+                                      />
+                                      <p className="text-xs leading-5 text-muted-foreground">
+                                        По умолчанию 3. Можно поставить от {MIN_COLLECTION_PREVIEW_TILE_COUNT} до {MAX_COLLECTION_PREVIEW_TILE_COUNT}; если фото меньше, витрина повторит последний кадр.
+                                      </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label htmlFor={`dict-preview-rotation-mode-${item.id}`} className="mb-1 block text-xs">Смена кадров</Label>
+                                      <Select
+                                        value={draft.previewRotationMode}
+                                        onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewRotationMode: normalizeCollectionPreviewRotationMode(value) } }))}
+                                      >
+                                        <SelectTrigger id={`dict-preview-rotation-mode-${item.id}`} className="h-11 rounded-none border-slate-300">
+                                          <SelectValue placeholder="Выберите смену кадров" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS.map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <p className="text-xs leading-5 text-muted-foreground">
+                                        {getCollectionPreviewRotationModeDescription(draft.previewRotationMode)}
+                                      </p>
+                                    </div>
                                   </div>
 
                                   {draft.previewMode === "gallery" ? (
@@ -13535,6 +13633,44 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                      <div className="space-y-2">
+                        <Label htmlFor="create-dictionary-preview-tile-count">Фото в коллаже</Label>
+                        <Input
+                          id="create-dictionary-preview-tile-count"
+                          type="number"
+                          min={MIN_COLLECTION_PREVIEW_TILE_COUNT}
+                          max={MAX_COLLECTION_PREVIEW_TILE_COUNT}
+                          step="1"
+                          value={dictionaryCreateDialog.previewTileCount}
+                          onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, previewTileCount: e.target.value }))}
+                          className="h-11 rounded-none border-black"
+                        />
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Стандартно 3. Если указать 4, 5, 6 или больше, витрина построит коллаж из такого количества кадров.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="create-dictionary-preview-rotation-mode">Смена кадров</Label>
+                        <Select
+                          value={dictionaryCreateDialog.previewRotationMode}
+                          onValueChange={(value) => setDictionaryCreateDialog((prev) => ({ ...prev, previewRotationMode: normalizeCollectionPreviewRotationMode(value) }))}
+                        >
+                          <SelectTrigger id="create-dictionary-preview-rotation-mode" className="h-11 rounded-none border-black">
+                            <SelectValue placeholder="Выберите смену кадров" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          {getCollectionPreviewRotationModeDescription(dictionaryCreateDialog.previewRotationMode)}
+                        </p>
+                      </div>
                     </div>
 
                     {dictionaryCreateDialog.previewMode === "gallery" ? (

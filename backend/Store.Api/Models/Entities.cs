@@ -857,6 +857,12 @@ public class CollectionDictionary
     [Column("preview_images_json", TypeName = "jsonb")]
     public string? PreviewImagesJson { get; set; }
 
+    [Column("preview_tile_count")]
+    public int PreviewTileCount { get; set; } = 3;
+
+    [Column("preview_rotation_mode")]
+    public string PreviewRotationMode { get; set; } = "sequential";
+
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 

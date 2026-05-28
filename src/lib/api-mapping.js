@@ -339,6 +339,14 @@ const normalizeCatalogFiltersPayload = (payload) => {
       ? {
         ...item,
         imageUrl: toAbsoluteMediaUrl(item?.imageUrl),
+        previewTileCount: Number.isFinite(Number(item?.previewTileCount))
+          ? Number(item.previewTileCount)
+          : 3,
+        previewRotationMode:
+          item?.previewRotationMode === "random" ||
+          item?.previewRotationMode === "static"
+            ? item.previewRotationMode
+            : "sequential",
         previewImages: Array.isArray(item?.previewImages) ? item.previewImages.map(toAbsoluteMediaUrl) : [],
       }
       : item
@@ -1112,6 +1120,8 @@ export const FLOW = {
       imageUrl: input.imageUrl,
       previewMode: input.previewMode,
       previewImages: input.previewImages,
+      previewTileCount: input.previewTileCount,
+      previewRotationMode: input.previewRotationMode,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
@@ -1134,6 +1144,8 @@ export const FLOW = {
       imageUrl: input.imageUrl,
       previewMode: input.previewMode,
       previewImages: input.previewImages,
+      previewTileCount: input.previewTileCount,
+      previewRotationMode: input.previewRotationMode,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,

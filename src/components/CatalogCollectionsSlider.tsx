@@ -15,6 +15,8 @@ export interface CatalogCollectionSliderItem {
   slug?: string | null;
   imageUrl?: string | null;
   previewMode?: "gallery" | "products";
+  previewTileCount?: number;
+  previewRotationMode?: "sequential" | "random" | "static";
   previewImages?: string[];
   description?: string | null;
   color?: string | null;
@@ -31,7 +33,8 @@ interface CatalogCollectionsSliderProps {
   className?: string;
 }
 
-const COLLECTION_VISIBLE_TILE_COUNT = 3;
+const DEFAULT_COLLECTION_VISIBLE_TILE_COUNT = 3;
+const MAX_COLLECTION_VISIBLE_TILE_COUNT = 12;
 const COLLECTION_PREVIEW_POOL_LIMIT = 18;
 const COLLECTION_AUTOPLAY_DELAY_MS = 8000;
 
@@ -47,20 +50,52 @@ const getPreviewPool = (item: CatalogCollectionSliderItem) => {
   return tiles.slice(0, COLLECTION_PREVIEW_POOL_LIMIT);
 };
 
+const getVisibleTileCount = (item: CatalogCollectionSliderItem) => {
+  const value = Number(item.previewTileCount);
+  if (!Number.isFinite(value)) return DEFAULT_COLLECTION_VISIBLE_TILE_COUNT;
+  return Math.min(MAX_COLLECTION_VISIBLE_TILE_COUNT, Math.max(1, Math.round(value)));
+};
+
+const getRotationMode = (item: CatalogCollectionSliderItem) =>
+  item.previewRotationMode === "random" || item.previewRotationMode === "static"
+    ? item.previewRotationMode
+    : "sequential";
+
+const getShuffledPreviewPool = (pool: string[], seed: number) => {
+  const next = [...pool];
+  let state = Math.max(1, seed % 2147483647);
+
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    state = (state * 16807) % 2147483647;
+    const targetIndex = state % (index + 1);
+    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+  }
+
+  return next;
+};
+
 const getPreviewTiles = (
   item: CatalogCollectionSliderItem,
   rotationTick: number,
+  openSeed: number,
 ) => {
   const previewPool = getPreviewPool(item);
+  const visibleTileCount = getVisibleTileCount(item);
+  const rotationMode = getRotationMode(item);
 
   if (previewPool.length === 0) return [];
 
-  if (previewPool.length <= COLLECTION_VISIBLE_TILE_COUNT) {
+  if (previewPool.length <= visibleTileCount) {
     const normalizedTiles = [...previewPool];
-    while (normalizedTiles.length < COLLECTION_VISIBLE_TILE_COUNT) {
+    while (normalizedTiles.length < visibleTileCount) {
       normalizedTiles.push(normalizedTiles[normalizedTiles.length - 1]);
     }
-    return normalizedTiles.slice(0, COLLECTION_VISIBLE_TILE_COUNT);
+    return normalizedTiles.slice(0, visibleTileCount);
+  }
+
+  if (rotationMode === "random" || rotationMode === "static") {
+    const seed = hashCollectionValue(item.value) + openSeed + (rotationMode === "random" ? rotationTick * 97 : 0);
+    return getShuffledPreviewPool(previewPool, seed).slice(0, visibleTileCount);
   }
 
   const startIndex =
@@ -69,14 +104,14 @@ const getPreviewTiles = (
 
   for (
     let offset = 0;
-    selectedTiles.length < COLLECTION_VISIBLE_TILE_COUNT &&
+    selectedTiles.length < visibleTileCount &&
     offset < previewPool.length;
     offset += 1
   ) {
     selectedTiles.push(previewPool[(startIndex + offset) % previewPool.length]);
   }
 
-  while (selectedTiles.length < COLLECTION_VISIBLE_TILE_COUNT) {
+  while (selectedTiles.length < visibleTileCount) {
     selectedTiles.push(selectedTiles[selectedTiles.length - 1]);
   }
 
@@ -86,18 +121,22 @@ const getPreviewTiles = (
 const renderCollectionVisual = (
   item: CatalogCollectionSliderItem,
   rotationTick: number,
+  openSeed: number,
 ) => {
-  const previewTiles = getPreviewTiles(item, rotationTick);
+  const previewTiles = getPreviewTiles(item, rotationTick, openSeed);
   const shouldUseProductCollage =
     item.previewMode === "products" && previewTiles.length > 0;
   const imageUrl = item.imageUrl?.trim();
 
   if (shouldUseProductCollage) {
     return (
-      <div className="absolute inset-0 grid grid-cols-3">
+      <div
+        className="absolute inset-0 grid"
+        style={{ gridTemplateColumns: `repeat(${previewTiles.length}, minmax(0, 1fr))` }}
+      >
         {previewTiles.map((tile, index) => (
           <div
-            key={`${item.value}-tile-${index}`}
+            key={`${item.value}-tile-${index}-${tile}`}
             className="relative overflow-hidden border-r border-white/10 last:border-r-0"
           >
             <img
@@ -106,7 +145,7 @@ const renderCollectionVisual = (
               loading="lazy"
               decoding="async"
               fetchpriority="low"
-              className="h-full w-full object-cover transition duration-700 group-hover/slide:scale-105"
+              className="h-full w-full animate-in fade-in zoom-in-95 object-cover transition duration-700 group-hover/slide:scale-105"
             />
           </div>
         ))}
@@ -151,6 +190,7 @@ export default function CatalogCollectionsSlider({
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
   const [rotationTick, setRotationTick] = useState(0);
   const [isAutoplayPaused, setIsAutoplayPaused] = useState(false);
+  const [openSeed] = useState(() => Math.floor(Math.random() * 1_000_000));
 
   useEffect(() => {
     if (!carouselApi || items.length <= 1) {
@@ -177,6 +217,8 @@ export default function CatalogCollectionsSlider({
     }
 
     const autoplayTimer = window.setInterval(() => {
+      setRotationTick((current) => current + 1);
+
       if (items.length > 1) {
         const snapCount = carouselApi?.scrollSnapList().length ?? 0;
         if (snapCount > 1) {
@@ -184,10 +226,7 @@ export default function CatalogCollectionsSlider({
             ((carouselApi?.selectedScrollSnap() ?? 0) + 1) % snapCount;
           carouselApi?.scrollTo(nextIndex);
         }
-        return;
       }
-
-      setRotationTick((current) => current + 1);
     }, COLLECTION_AUTOPLAY_DELAY_MS);
 
     return () => window.clearInterval(autoplayTimer);
@@ -257,7 +296,7 @@ export default function CatalogCollectionsSlider({
                       : "border-black/12",
                   )}
                 >
-                  {renderCollectionVisual(item, rotationTick)}
+                  {renderCollectionVisual(item, rotationTick, openSeed)}
 
                   <div className="absolute inset-0 bg-black/6 transition duration-500 ease-out md:group-hover/slide:bg-black/42 md:group-focus-visible/slide:bg-black/42" />
                   <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.02)_0%,rgba(0,0,0,0.08)_52%,rgba(0,0,0,0.72)_100%)] opacity-90 transition duration-500 ease-out md:opacity-0 md:group-hover/slide:opacity-100 md:group-focus-visible/slide:opacity-100" />

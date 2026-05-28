@@ -317,6 +317,8 @@ public class ProductsController : ControllerBase
                 imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
                 previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
+                previewTileCount = NormalizeCollectionPreviewTileCount(x.PreviewTileCount),
+                previewRotationMode = NormalizeCollectionPreviewRotationMode(x.PreviewRotationMode),
                 description = x.Description,
                 color = showCollectionColors && x.ShowColorInCatalog ? x.Color : null,
                 showColorInCatalog = showCollectionColors && x.ShowColorInCatalog
@@ -335,6 +337,8 @@ public class ProductsController : ControllerBase
                 imageUrl = NormalizeLocalMediaUrl(x.ImageUrl),
                 previewMode = NormalizeCollectionPreviewMode(x.PreviewMode),
                 previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
+                previewTileCount = NormalizeCollectionPreviewTileCount(x.PreviewTileCount),
+                previewRotationMode = NormalizeCollectionPreviewRotationMode(x.PreviewRotationMode),
                 description = x.Description,
                 color = x.Color,
                 productCount = collectionUsageCounts.GetValueOrDefault(NormalizeLookupKey(x.Name), 0)
@@ -1453,6 +1457,17 @@ public class ProductsController : ControllerBase
 
     private static string NormalizeCollectionPreviewMode(string? value)
         => value?.Trim().ToLowerInvariant() == "products" ? "products" : "gallery";
+
+    private static int NormalizeCollectionPreviewTileCount(int? value)
+        => Math.Clamp(value ?? 3, 1, 12);
+
+    private static string NormalizeCollectionPreviewRotationMode(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            "random" => "random",
+            "static" => "static",
+            _ => "sequential"
+        };
 
     private static IReadOnlyList<string> ResolveProductCollectionPreviewImageUrls(JsonObject? json)
     {

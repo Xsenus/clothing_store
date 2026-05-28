@@ -2255,6 +2255,8 @@ public class AdminController : ControllerBase
         var imageUrl = NormalizeOptionalText(payload.ImageUrl);
         var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
         var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
+        var previewTileCount = NormalizeCollectionPreviewTileCount(payload.PreviewTileCount);
+        var previewRotationMode = NormalizeCollectionPreviewRotationMode(payload.PreviewRotationMode);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2378,6 +2380,8 @@ public class AdminController : ControllerBase
                     ImageUrl = imageUrl,
                     PreviewMode = previewMode,
                     PreviewImagesJson = previewImagesJson,
+                    PreviewTileCount = previewTileCount,
+                    PreviewRotationMode = previewRotationMode,
                     IsActive = isActive,
                     ShowInCatalogFilter = false,
                     ShowColorInCatalog = showColorInCatalog,
@@ -2413,6 +2417,8 @@ public class AdminController : ControllerBase
         var imageUrl = NormalizeOptionalText(payload.ImageUrl);
         var previewMode = NormalizeCollectionPreviewMode(payload.PreviewMode);
         var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
+        var previewTileCount = NormalizeCollectionPreviewTileCount(payload.PreviewTileCount);
+        var previewRotationMode = NormalizeCollectionPreviewRotationMode(payload.PreviewRotationMode);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2545,6 +2551,8 @@ public class AdminController : ControllerBase
                 collection.ImageUrl = imageUrl;
                 collection.PreviewMode = previewMode;
                 collection.PreviewImagesJson = previewImagesJson;
+                collection.PreviewTileCount = previewTileCount;
+                collection.PreviewRotationMode = previewRotationMode;
                 collection.IsActive = isActive;
                 collection.ShowInCatalogFilter = false;
                 collection.ShowColorInCatalog = showColorInCatalog;
@@ -2967,6 +2975,8 @@ public class AdminController : ControllerBase
         item.ImageUrl,
         item.PreviewMode,
         previewImages = ParsePreviewImagesJson(item.PreviewImagesJson),
+        previewTileCount = NormalizeCollectionPreviewTileCount(item.PreviewTileCount),
+        previewRotationMode = NormalizeCollectionPreviewRotationMode(item.PreviewRotationMode),
         item.IsActive,
         item.ShowInCatalogFilter,
         item.ShowColorInCatalog,
@@ -3241,6 +3251,21 @@ public class AdminController : ControllerBase
         {
             "products" => "products",
             _ => "gallery"
+        };
+    }
+
+    private static int NormalizeCollectionPreviewTileCount(int? value)
+    {
+        return Math.Clamp(value ?? 3, 1, 12);
+    }
+
+    private static string NormalizeCollectionPreviewRotationMode(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "random" => "random",
+            "static" => "static",
+            _ => "sequential"
         };
     }
 
