@@ -2,10 +2,26 @@ import { Link } from "react-router";
 
 import SocialLinksList from "@/components/social/SocialLinksList";
 import useSiteSocialLinks from "@/hooks/useSiteSocialLinks";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+const DEFAULT_SUPPORT_EMAIL = "fashiondemon.shop@internet.ru";
+const DEFAULT_SUPPORT_MESSAGE =
+  "Если у вас возникли вопросы по заказу, оплате, доставке или возврату, напишите нам на почту fashiondemon.shop@internet.ru.";
 
 export default function Footer() {
-  const { footerLinks, pageLinks } = useSiteSocialLinks();
+  const { footerLinks, pageLinks, publicSettings } = useSiteSocialLinks();
   const socialsPageEnabled = pageLinks.length > 0;
+  const supportEmail =
+    publicSettings.support_contact_email?.trim() || DEFAULT_SUPPORT_EMAIL;
+  const supportMessage =
+    publicSettings.support_dialog_message?.trim() || DEFAULT_SUPPORT_MESSAGE;
 
   return (
     <footer className="bg-black py-12 text-white md:py-16">
@@ -78,6 +94,39 @@ export default function Footer() {
                 >
                   Условия возврата
                 </Link>
+              </li>
+              <li>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-left transition-colors hover:text-white"
+                    >
+                      Поддержка
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="rounded-none border-black bg-white text-black sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="text-2xl font-black uppercase tracking-tight">
+                        Поддержка
+                      </DialogTitle>
+                      <DialogDescription className="sr-only">
+                        Контакты службы поддержки FASHION_DEMON
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-5">
+                      <p className="whitespace-pre-line text-base leading-7 text-neutral-700">
+                        {supportMessage}
+                      </p>
+                      <a
+                        href={`mailto:${supportEmail}`}
+                        className="inline-flex min-h-11 items-center justify-center border border-black bg-black px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-white transition-colors hover:bg-white hover:text-black"
+                      >
+                        {supportEmail}
+                      </a>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </li>
               {socialsPageEnabled ? (
                 <li>

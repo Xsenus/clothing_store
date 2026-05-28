@@ -45,6 +45,8 @@ public class PublicSettingsController : ControllerBase
         "site_title",
         "site_favicon_url",
         "site_loading_animation_enabled",
+        "support_contact_email",
+        "support_dialog_message",
         "social_links_config_json",
         "product_card_background_mode",
         "product_card_background_color",

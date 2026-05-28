@@ -1603,6 +1603,8 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   site_title: "fashiondemon",
   site_favicon_url: "",
   site_loading_animation_enabled: "true",
+  support_contact_email: "fashiondemon.shop@internet.ru",
+  support_dialog_message: "Если у вас возникли вопросы по заказу, оплате, доставке или возврату, напишите нам на почту fashiondemon.shop@internet.ru.",
   social_links_config_json: DEFAULT_SITE_SOCIAL_LINKS_CONFIG_JSON,
   product_card_background_mode: "standard",
   product_card_background_color: "#e9e3da",
@@ -11602,6 +11604,36 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                             checked={(settings.site_loading_animation_enabled || DEFAULT_APP_SETTINGS.site_loading_animation_enabled) !== "false"}
                             onCheckedChange={(checked) => updateSetting("site_loading_animation_enabled", checked ? "true" : "false")}
                           />
+                        </div>
+                      </div>
+                      <div className="space-y-3 rounded-none border border-gray-200 p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-semibold uppercase tracking-[0.12em]">Поддержка в футере</h4>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Эти данные показываются в модальном окне при клике на пункт поддержки в футере сайта.
+                          </p>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
+                          <div className="space-y-1">
+                            <Label htmlFor="support-contact-email">Почта поддержки</Label>
+                            <Input
+                              id="support-contact-email"
+                              type="email"
+                              value={settings.support_contact_email || ""}
+                              onChange={(e) => updateSetting("support_contact_email", e.target.value)}
+                              placeholder="fashiondemon.shop@internet.ru"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="support-dialog-message">Сообщение для покупателей</Label>
+                            <Textarea
+                              id="support-dialog-message"
+                              value={settings.support_dialog_message || ""}
+                              onChange={(e) => updateSetting("support_dialog_message", e.target.value)}
+                              placeholder="Если у вас возникли вопросы, напишите нам на почту fashiondemon.shop@internet.ru."
+                              className="min-h-[96px] rounded-none"
+                            />
+                          </div>
                         </div>
                       </div>
                         </TabsContent>
