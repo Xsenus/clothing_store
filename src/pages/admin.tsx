@@ -837,6 +837,7 @@ type CollectionPreviewRotationMode = "sequential" | "random" | "static";
 const DEFAULT_COLLECTION_PREVIEW_TILE_COUNT = 3;
 const MIN_COLLECTION_PREVIEW_TILE_COUNT = 1;
 const MAX_COLLECTION_PREVIEW_TILE_COUNT = 12;
+const MAX_COLLECTION_PREVIEW_IMAGE_COUNT = 18;
 
 const COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS: Array<{
   value: CollectionPreviewRotationMode;
@@ -5943,7 +5944,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         }
 
         previewImages.push(previewImage);
-        if (previewImages.length >= 6) {
+        if (previewImages.length >= MAX_COLLECTION_PREVIEW_IMAGE_COUNT) {
           return previewImages;
         }
       }
@@ -5957,7 +5958,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       .map((value) => String(value || "").trim())
       .filter(Boolean)
       .filter((value, index, list) => list.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index)
-      .slice(0, 18);
+      .slice(0, MAX_COLLECTION_PREVIEW_IMAGE_COUNT);
 
   const normalizeCollectionPreviewTileCount = (value?: string | number | null) => {
     const parsed = Number(value);
@@ -9417,7 +9418,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         </div>
                                       ) : (
                                         <div className="rounded-none border border-dashed border-slate-300 px-3 py-4 text-sm text-muted-foreground">
-                                          Как только в коллекции появятся товары с изображениями, коллаж соберётся автоматически из всех картинок этой коллекции.
+                                          Как только в коллекции появятся товары с изображениями, коллаж соберётся автоматически из главных фото этих товаров.
                                         </div>
                                       )}
                                       <p className="text-xs leading-5 text-muted-foreground">
@@ -13774,7 +13775,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           </div>
                         ) : (
                           <div className="rounded-none border border-dashed border-black/20 px-3 py-4 text-sm text-muted-foreground">
-                            Когда у коллекции появятся товары с фото, блок автоматически соберёт широкий коллаж из их изображений.
+                            Когда у коллекции появятся товары с фото, блок автоматически соберёт широкий коллаж из главных фото этих товаров.
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground">
