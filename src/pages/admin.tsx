@@ -9336,23 +9336,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                               </div>
                               {selectedDictionaryGroup === "collections" && (
                                 <div className="space-y-3 rounded-none border border-slate-200 p-3">
-                                  <div className="space-y-1">
-                                    <Label htmlFor={`dict-preview-mode-${item.id}`} className="mb-1 block text-xs">Режим изображения коллекции</Label>
-                                    <Select
-                                      value={draft.previewMode}
-                                      onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMode: value as CollectionPreviewMode } }))}
-                                    >
-                                      <SelectTrigger id={`dict-preview-mode-${item.id}`} className="h-11 rounded-none border-slate-300">
-                                        <SelectValue placeholder="Выберите режим" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
-                                        <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-
-                                  <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                                  <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_180px_minmax(260px,1fr)]">
+                                    <div className="space-y-1">
+                                      <Label htmlFor={`dict-preview-mode-${item.id}`} className="mb-1 block text-xs">Режим изображения коллекции</Label>
+                                      <Select
+                                        value={draft.previewMode}
+                                        onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMode: value as CollectionPreviewMode } }))}
+                                      >
+                                        <SelectTrigger id={`dict-preview-mode-${item.id}`} className="h-11 rounded-none border-slate-300">
+                                          <SelectValue placeholder="Выберите режим" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
+                                          <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                      <p className="text-xs leading-5 text-muted-foreground">
+                                        Выберите: отдельное большое изображение или коллаж из фото товаров.
+                                      </p>
+                                    </div>
                                     <div className="space-y-1">
                                       <Label htmlFor={`dict-preview-tile-count-${item.id}`} className="mb-1 block text-xs">Фото в коллаже</Label>
                                       <Input
@@ -9366,7 +9368,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                         className="h-11 rounded-none border-slate-300"
                                       />
                                       <p className="text-xs leading-5 text-muted-foreground">
-                                        По умолчанию 3. Можно поставить от {MIN_COLLECTION_PREVIEW_TILE_COUNT} до {MAX_COLLECTION_PREVIEW_TILE_COUNT}; если фото меньше, витрина повторит последний кадр.
+                                        По умолчанию 3. Можно от {MIN_COLLECTION_PREVIEW_TILE_COUNT} до {MAX_COLLECTION_PREVIEW_TILE_COUNT}.
                                       </p>
                                     </div>
                                     <div className="space-y-1">
@@ -13747,23 +13749,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
                 {dictionaryCreateDialog.kind === "collections" && (
                   <div className="space-y-3 rounded-none border border-black/10 p-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="create-dictionary-preview-mode">Режим изображения коллекции</Label>
-                      <Select
-                        value={dictionaryCreateDialog.previewMode}
-                        onValueChange={(value) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMode: value as CollectionPreviewMode }))}
-                      >
-                        <SelectTrigger id="create-dictionary-preview-mode" className="h-11 rounded-none border-black">
-                          <SelectValue placeholder="Выберите режим" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
-                          <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                    <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_180px_minmax(260px,1fr)]">
+                      <div className="space-y-2">
+                        <Label htmlFor="create-dictionary-preview-mode">Режим изображения коллекции</Label>
+                        <Select
+                          value={dictionaryCreateDialog.previewMode}
+                          onValueChange={(value) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMode: value as CollectionPreviewMode }))}
+                        >
+                          <SelectTrigger id="create-dictionary-preview-mode" className="h-11 rounded-none border-black">
+                            <SelectValue placeholder="Выберите режим" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="gallery">Большое изображение из галереи</SelectItem>
+                            <SelectItem value="products">Автоколлаж из товаров коллекции</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Отдельное изображение или коллаж из фото товаров.
+                        </p>
+                      </div>
                       <div className="space-y-2">
                         <Label htmlFor="create-dictionary-preview-tile-count">Фото в коллаже</Label>
                         <Input
@@ -13777,7 +13781,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                           className="h-11 rounded-none border-black"
                         />
                         <p className="text-xs leading-5 text-muted-foreground">
-                          Стандартно 3. Если указать 4, 5, 6 или больше, витрина построит коллаж из такого количества кадров.
+                          Стандартно 3. Можно от {MIN_COLLECTION_PREVIEW_TILE_COUNT} до {MAX_COLLECTION_PREVIEW_TILE_COUNT}.
                         </p>
                       </div>
                       <div className="space-y-2">
