@@ -47,6 +47,18 @@ const normalizeCollectionSliderItem = (item) =>
           item?.previewRotationMode === "static"
             ? item.previewRotationMode
             : "sequential",
+        previewMobileTileCount: Number.isFinite(Number(item?.previewMobileTileCount))
+          ? Number(item.previewMobileTileCount)
+          : 3,
+        previewMobileRotationMode:
+          item?.previewMobileRotationMode === "sequential" ||
+          item?.previewMobileRotationMode === "random" ||
+          item?.previewMobileRotationMode === "static"
+            ? item.previewMobileRotationMode
+            : "inherit",
+        previewMobileHeight: Number.isFinite(Number(item?.previewMobileHeight))
+          ? Number(item.previewMobileHeight)
+          : 260,
         previewImages: Array.isArray(item?.previewImages)
           ? item.previewImages.map(toAbsoluteMediaUrl)
           : [],

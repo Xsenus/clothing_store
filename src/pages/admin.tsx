@@ -833,11 +833,18 @@ interface GalleryImagesPage {
 
 type CollectionPreviewMode = "gallery" | "products";
 type CollectionPreviewRotationMode = "sequential" | "random" | "static";
+type CollectionPreviewMobileRotationMode = CollectionPreviewRotationMode | "inherit";
 
 const DEFAULT_COLLECTION_PREVIEW_TILE_COUNT = 3;
 const MIN_COLLECTION_PREVIEW_TILE_COUNT = 1;
 const MAX_COLLECTION_PREVIEW_TILE_COUNT = 12;
 const MAX_COLLECTION_PREVIEW_IMAGE_COUNT = 18;
+const DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT = 3;
+const MIN_COLLECTION_PREVIEW_MOBILE_TILE_COUNT = 1;
+const MAX_COLLECTION_PREVIEW_MOBILE_TILE_COUNT = 3;
+const DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT = 260;
+const MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT = 180;
+const MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT = 520;
 
 const COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS: Array<{
   value: CollectionPreviewRotationMode;
@@ -859,6 +866,19 @@ const COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS: Array<{
     label: "При открытии страницы",
     description: "Набор фото выбирается один раз при загрузке страницы и не меняется, пока клиент не обновит страницу.",
   },
+];
+
+const COLLECTION_PREVIEW_MOBILE_ROTATION_MODE_OPTIONS: Array<{
+  value: CollectionPreviewMobileRotationMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "inherit",
+    label: "Как на десктопе",
+    description: "Мобильная витрина использует общий режим смены кадров коллекции.",
+  },
+  ...COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS,
 ];
 
 type GalleryPickerTarget =
@@ -1460,6 +1480,9 @@ interface DictionaryItem {
   previewImages?: string[] | null;
   previewTileCount?: number | null;
   previewRotationMode?: CollectionPreviewRotationMode | null;
+  previewMobileTileCount?: number | null;
+  previewMobileRotationMode?: CollectionPreviewMobileRotationMode | null;
+  previewMobileHeight?: number | null;
   description?: string | null;
   isActive?: boolean;
   showInCatalogFilter?: boolean;
@@ -1478,6 +1501,9 @@ interface DictionaryDraft {
   previewImages: string[] | null;
   previewTileCount: string;
   previewRotationMode: CollectionPreviewRotationMode;
+  previewMobileTileCount: string;
+  previewMobileRotationMode: CollectionPreviewMobileRotationMode;
+  previewMobileHeight: string;
   description: string;
   isActive: boolean;
   showInCatalogFilter: boolean;
@@ -1518,6 +1544,9 @@ interface DictionaryCreateDialogState {
   previewImages: string[] | null;
   previewTileCount: string;
   previewRotationMode: CollectionPreviewRotationMode;
+  previewMobileTileCount: string;
+  previewMobileRotationMode: CollectionPreviewMobileRotationMode;
+  previewMobileHeight: string;
   description: string;
   showColorInCatalog: boolean;
   sortOrder: string;
@@ -2134,6 +2163,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     previewImages: null,
     previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
     previewRotationMode: "sequential",
+    previewMobileTileCount: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT),
+    previewMobileRotationMode: "inherit",
+    previewMobileHeight: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT),
     description: "",
     showColorInCatalog: true,
     sortOrder: "1"
@@ -4165,6 +4197,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       previewImages: null,
       previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
       previewRotationMode: "sequential",
+      previewMobileTileCount: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT),
+      previewMobileRotationMode: "inherit",
+      previewMobileHeight: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT),
       description: "",
       showColorInCatalog: true,
       sortOrder: String(getNextDictionarySortOrder(kind))
@@ -4212,6 +4247,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           previewImages: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewImages : undefined,
           previewTileCount: dictionaryCreateDialog.kind === "collections" ? normalizeCollectionPreviewTileCount(dictionaryCreateDialog.previewTileCount) : undefined,
           previewRotationMode: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewRotationMode : undefined,
+          previewMobileTileCount: dictionaryCreateDialog.kind === "collections" ? normalizeCollectionPreviewMobileTileCount(dictionaryCreateDialog.previewMobileTileCount) : undefined,
+          previewMobileRotationMode: dictionaryCreateDialog.kind === "collections" ? dictionaryCreateDialog.previewMobileRotationMode : undefined,
+          previewMobileHeight: dictionaryCreateDialog.kind === "collections" ? normalizeCollectionPreviewMobileHeight(dictionaryCreateDialog.previewMobileHeight) : undefined,
           description: description || undefined,
           isActive: true,
           showInCatalogFilter: dictionaryCreateDialog.kind !== "collections",
@@ -4238,6 +4276,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         previewImages: null,
         previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
         previewRotationMode: "sequential",
+        previewMobileTileCount: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT),
+        previewMobileRotationMode: "inherit",
+        previewMobileHeight: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT),
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4257,6 +4298,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     previewImages: Array.isArray(item.previewImages) ? item.previewImages : null,
     previewTileCount: String(normalizeCollectionPreviewTileCount(item.previewTileCount)),
     previewRotationMode: normalizeCollectionPreviewRotationMode(item.previewRotationMode),
+    previewMobileTileCount: String(normalizeCollectionPreviewMobileTileCount(item.previewMobileTileCount)),
+    previewMobileRotationMode: normalizeCollectionPreviewMobileRotationMode(item.previewMobileRotationMode),
+    previewMobileHeight: String(normalizeCollectionPreviewMobileHeight(item.previewMobileHeight)),
     description: item.description || "",
     isActive: item.isActive ?? true,
     showInCatalogFilter: item.showInCatalogFilter ?? true,
@@ -4279,6 +4323,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         previewImages: null,
         previewTileCount: String(DEFAULT_COLLECTION_PREVIEW_TILE_COUNT),
         previewRotationMode: "sequential",
+        previewMobileTileCount: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT),
+        previewMobileRotationMode: "inherit",
+        previewMobileHeight: String(DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT),
         description: "",
         showColorInCatalog: true,
         sortOrder: "1"
@@ -4369,6 +4416,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           previewImages: kind === "collections" ? draft.previewImages : undefined,
           previewTileCount: kind === "collections" ? normalizeCollectionPreviewTileCount(draft.previewTileCount) : undefined,
           previewRotationMode: kind === "collections" ? draft.previewRotationMode : undefined,
+          previewMobileTileCount: kind === "collections" ? normalizeCollectionPreviewMobileTileCount(draft.previewMobileTileCount) : undefined,
+          previewMobileRotationMode: kind === "collections" ? draft.previewMobileRotationMode : undefined,
+          previewMobileHeight: kind === "collections" ? normalizeCollectionPreviewMobileHeight(draft.previewMobileHeight) : undefined,
           description: draft.description,
           isActive: draft.isActive,
           showInCatalogFilter: kind !== "collections" && draft.showInCatalogFilter,
@@ -5972,6 +6022,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const getCollectionPreviewRotationModeDescription = (value: CollectionPreviewRotationMode) =>
     COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS.find((option) => option.value === value)?.description
       ?? COLLECTION_PREVIEW_ROTATION_MODE_OPTIONS[0].description;
+
+  const normalizeCollectionPreviewMobileTileCount = (value?: string | number | null) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return DEFAULT_COLLECTION_PREVIEW_MOBILE_TILE_COUNT;
+    return Math.min(MAX_COLLECTION_PREVIEW_MOBILE_TILE_COUNT, Math.max(MIN_COLLECTION_PREVIEW_MOBILE_TILE_COUNT, Math.round(parsed)));
+  };
+
+  const normalizeCollectionPreviewMobileRotationMode = (value?: string | null): CollectionPreviewMobileRotationMode =>
+    value === "sequential" || value === "random" || value === "static" ? value : "inherit";
+
+  const getCollectionPreviewMobileRotationModeDescription = (value: CollectionPreviewMobileRotationMode) =>
+    COLLECTION_PREVIEW_MOBILE_ROTATION_MODE_OPTIONS.find((option) => option.value === value)?.description
+      ?? COLLECTION_PREVIEW_MOBILE_ROTATION_MODE_OPTIONS[0].description;
+
+  const normalizeCollectionPreviewMobileHeight = (value?: string | number | null) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return DEFAULT_COLLECTION_PREVIEW_MOBILE_HEIGHT;
+    return Math.min(MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT, Math.max(MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT, Math.round(parsed)));
+  };
 
   const updateDictionaryDraftPreviewImages = (
     item: DictionaryItem,
@@ -9318,6 +9387,64 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                                       <p className="text-xs leading-5 text-muted-foreground">
                                         {getCollectionPreviewRotationModeDescription(draft.previewRotationMode)}
                                       </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-3 rounded-none border border-slate-200 bg-slate-50 p-3">
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Мобильная витрина</p>
+                                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                        Эти параметры применяются только на телефонах. На планшетах и десктопе остается общий коллаж выше.
+                                      </p>
+                                    </div>
+                                    <div className="grid gap-3 md:grid-cols-3">
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`dict-preview-mobile-tile-count-${item.id}`} className="mb-1 block text-xs">Кадров на экране</Label>
+                                        <Input
+                                          id={`dict-preview-mobile-tile-count-${item.id}`}
+                                          type="number"
+                                          min={MIN_COLLECTION_PREVIEW_MOBILE_TILE_COUNT}
+                                          max={MAX_COLLECTION_PREVIEW_MOBILE_TILE_COUNT}
+                                          step="1"
+                                          value={draft.previewMobileTileCount}
+                                          onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMobileTileCount: e.target.value } }))}
+                                          className="h-11 rounded-none border-slate-300 bg-white"
+                                        />
+                                        <p className="text-xs leading-5 text-muted-foreground">Можно показать 1, 2 или 3 изображения.</p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`dict-preview-mobile-height-${item.id}`} className="mb-1 block text-xs">Высота, px</Label>
+                                        <Input
+                                          id={`dict-preview-mobile-height-${item.id}`}
+                                          type="number"
+                                          min={MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT}
+                                          max={MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT}
+                                          step="10"
+                                          value={draft.previewMobileHeight}
+                                          onChange={(e) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMobileHeight: e.target.value } }))}
+                                          className="h-11 rounded-none border-slate-300 bg-white"
+                                        />
+                                        <p className="text-xs leading-5 text-muted-foreground">Размер карточки на телефоне: от {MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT} до {MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT}px.</p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label htmlFor={`dict-preview-mobile-rotation-mode-${item.id}`} className="mb-1 block text-xs">Смена на телефоне</Label>
+                                        <Select
+                                          value={draft.previewMobileRotationMode}
+                                          onValueChange={(value) => setDictionaryDrafts((prev) => ({ ...prev, [item.id]: { ...draft, previewMobileRotationMode: normalizeCollectionPreviewMobileRotationMode(value) } }))}
+                                        >
+                                          <SelectTrigger id={`dict-preview-mobile-rotation-mode-${item.id}`} className="h-11 rounded-none border-slate-300 bg-white">
+                                            <SelectValue placeholder="Выберите режим" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {COLLECTION_PREVIEW_MOBILE_ROTATION_MODE_OPTIONS.map((option) => (
+                                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <p className="text-xs leading-5 text-muted-foreground">
+                                          {getCollectionPreviewMobileRotationModeDescription(draft.previewMobileRotationMode)}
+                                        </p>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -13671,6 +13798,64 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <p className="text-xs leading-5 text-muted-foreground">
                           {getCollectionPreviewRotationModeDescription(dictionaryCreateDialog.previewRotationMode)}
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 rounded-none border border-black/10 bg-stone-50 p-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Мобильная витрина</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          Отдельные настройки для телефонов: сколько кадров видно, как они меняются и какой высоты будет карточка.
+                        </p>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="create-dictionary-preview-mobile-tile-count">Кадров на экране</Label>
+                          <Input
+                            id="create-dictionary-preview-mobile-tile-count"
+                            type="number"
+                            min={MIN_COLLECTION_PREVIEW_MOBILE_TILE_COUNT}
+                            max={MAX_COLLECTION_PREVIEW_MOBILE_TILE_COUNT}
+                            step="1"
+                            value={dictionaryCreateDialog.previewMobileTileCount}
+                            onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMobileTileCount: e.target.value }))}
+                            className="h-11 rounded-none border-black bg-white"
+                          />
+                          <p className="text-xs leading-5 text-muted-foreground">1, 2 или 3 изображения в мобильном коллаже.</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="create-dictionary-preview-mobile-height">Высота, px</Label>
+                          <Input
+                            id="create-dictionary-preview-mobile-height"
+                            type="number"
+                            min={MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT}
+                            max={MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT}
+                            step="10"
+                            value={dictionaryCreateDialog.previewMobileHeight}
+                            onChange={(e) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMobileHeight: e.target.value }))}
+                            className="h-11 rounded-none border-black bg-white"
+                          />
+                          <p className="text-xs leading-5 text-muted-foreground">От {MIN_COLLECTION_PREVIEW_MOBILE_HEIGHT} до {MAX_COLLECTION_PREVIEW_MOBILE_HEIGHT}px.</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="create-dictionary-preview-mobile-rotation-mode">Смена на телефоне</Label>
+                          <Select
+                            value={dictionaryCreateDialog.previewMobileRotationMode}
+                            onValueChange={(value) => setDictionaryCreateDialog((prev) => ({ ...prev, previewMobileRotationMode: normalizeCollectionPreviewMobileRotationMode(value) }))}
+                          >
+                            <SelectTrigger id="create-dictionary-preview-mobile-rotation-mode" className="h-11 rounded-none border-black bg-white">
+                              <SelectValue placeholder="Выберите режим" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COLLECTION_PREVIEW_MOBILE_ROTATION_MODE_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            {getCollectionPreviewMobileRotationModeDescription(dictionaryCreateDialog.previewMobileRotationMode)}
+                          </p>
+                        </div>
                       </div>
                     </div>
 

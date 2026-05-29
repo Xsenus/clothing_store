@@ -375,6 +375,18 @@ const normalizeCatalogFiltersPayload = (payload) => {
           item?.previewRotationMode === "static"
             ? item.previewRotationMode
             : "sequential",
+        previewMobileTileCount: Number.isFinite(Number(item?.previewMobileTileCount))
+          ? Number(item.previewMobileTileCount)
+          : 3,
+        previewMobileRotationMode:
+          item?.previewMobileRotationMode === "sequential" ||
+          item?.previewMobileRotationMode === "random" ||
+          item?.previewMobileRotationMode === "static"
+            ? item.previewMobileRotationMode
+            : "inherit",
+        previewMobileHeight: Number.isFinite(Number(item?.previewMobileHeight))
+          ? Number(item.previewMobileHeight)
+          : 260,
         previewImages: Array.isArray(item?.previewImages) ? item.previewImages.map(toAbsoluteMediaUrl) : [],
       }
       : item
@@ -1150,6 +1162,9 @@ export const FLOW = {
       previewImages: input.previewImages,
       previewTileCount: input.previewTileCount,
       previewRotationMode: input.previewRotationMode,
+      previewMobileTileCount: input.previewMobileTileCount,
+      previewMobileRotationMode: input.previewMobileRotationMode,
+      previewMobileHeight: input.previewMobileHeight,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,
@@ -1174,6 +1189,9 @@ export const FLOW = {
       previewImages: input.previewImages,
       previewTileCount: input.previewTileCount,
       previewRotationMode: input.previewRotationMode,
+      previewMobileTileCount: input.previewMobileTileCount,
+      previewMobileRotationMode: input.previewMobileRotationMode,
+      previewMobileHeight: input.previewMobileHeight,
       description: input.description,
       isActive: input.isActive,
       showInCatalogFilter: input.showInCatalogFilter,

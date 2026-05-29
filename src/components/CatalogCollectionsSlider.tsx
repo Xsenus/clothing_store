@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   type CarouselApi,
   Carousel,
@@ -17,6 +17,9 @@ export interface CatalogCollectionSliderItem {
   previewMode?: "gallery" | "products";
   previewTileCount?: number;
   previewRotationMode?: "sequential" | "random" | "static";
+  previewMobileTileCount?: number;
+  previewMobileRotationMode?: "inherit" | "sequential" | "random" | "static";
+  previewMobileHeight?: number;
   previewImages?: string[];
   description?: string | null;
   color?: string | null;
@@ -35,8 +38,14 @@ interface CatalogCollectionsSliderProps {
 
 const DEFAULT_COLLECTION_VISIBLE_TILE_COUNT = 3;
 const MAX_COLLECTION_VISIBLE_TILE_COUNT = 12;
+const DEFAULT_COLLECTION_MOBILE_VISIBLE_TILE_COUNT = 3;
+const MAX_COLLECTION_MOBILE_VISIBLE_TILE_COUNT = 3;
+const DEFAULT_COLLECTION_MOBILE_HEIGHT = 260;
+const MIN_COLLECTION_MOBILE_HEIGHT = 180;
+const MAX_COLLECTION_MOBILE_HEIGHT = 520;
 const COLLECTION_PREVIEW_POOL_LIMIT = 18;
 const COLLECTION_AUTOPLAY_DELAY_MS = 8000;
+const MOBILE_COLLECTION_MEDIA_QUERY = "(max-width: 639px)";
 
 const hashCollectionValue = (value: string) =>
   Array.from(value || "").reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -50,16 +59,43 @@ const getPreviewPool = (item: CatalogCollectionSliderItem) => {
   return tiles.slice(0, COLLECTION_PREVIEW_POOL_LIMIT);
 };
 
-const getVisibleTileCount = (item: CatalogCollectionSliderItem) => {
-  const value = Number(item.previewTileCount);
-  if (!Number.isFinite(value)) return DEFAULT_COLLECTION_VISIBLE_TILE_COUNT;
-  return Math.min(MAX_COLLECTION_VISIBLE_TILE_COUNT, Math.max(1, Math.round(value)));
+const getVisibleTileCount = (
+  item: CatalogCollectionSliderItem,
+  isMobileViewport: boolean,
+) => {
+  const value = Number(isMobileViewport ? item.previewMobileTileCount : item.previewTileCount);
+  if (!Number.isFinite(value)) {
+    return isMobileViewport ? DEFAULT_COLLECTION_MOBILE_VISIBLE_TILE_COUNT : DEFAULT_COLLECTION_VISIBLE_TILE_COUNT;
+  }
+
+  const maxTileCount = isMobileViewport ? MAX_COLLECTION_MOBILE_VISIBLE_TILE_COUNT : MAX_COLLECTION_VISIBLE_TILE_COUNT;
+  return Math.min(maxTileCount, Math.max(1, Math.round(value)));
 };
 
-const getRotationMode = (item: CatalogCollectionSliderItem) =>
-  item.previewRotationMode === "random" || item.previewRotationMode === "static"
-    ? item.previewRotationMode
+const getRotationMode = (
+  item: CatalogCollectionSliderItem,
+  isMobileViewport: boolean,
+) => {
+  const desktopMode =
+    item.previewRotationMode === "random" || item.previewRotationMode === "static"
+      ? item.previewRotationMode
+      : "sequential";
+
+  if (!isMobileViewport || item.previewMobileRotationMode === "inherit") {
+    return desktopMode;
+  }
+
+  return item.previewMobileRotationMode === "random" ||
+    item.previewMobileRotationMode === "static"
+    ? item.previewMobileRotationMode
     : "sequential";
+};
+
+const getMobileHeight = (item: CatalogCollectionSliderItem) => {
+  const value = Number(item.previewMobileHeight);
+  if (!Number.isFinite(value)) return DEFAULT_COLLECTION_MOBILE_HEIGHT;
+  return Math.min(MAX_COLLECTION_MOBILE_HEIGHT, Math.max(MIN_COLLECTION_MOBILE_HEIGHT, Math.round(value)));
+};
 
 const getShuffledPreviewPool = (pool: string[], seed: number) => {
   const next = [...pool];
@@ -78,10 +114,11 @@ const getPreviewTiles = (
   item: CatalogCollectionSliderItem,
   rotationTick: number,
   openSeed: number,
+  isMobileViewport: boolean,
 ) => {
   const previewPool = getPreviewPool(item);
-  const visibleTileCount = getVisibleTileCount(item);
-  const rotationMode = getRotationMode(item);
+  const visibleTileCount = getVisibleTileCount(item, isMobileViewport);
+  const rotationMode = getRotationMode(item, isMobileViewport);
 
   if (previewPool.length === 0) return [];
 
@@ -121,8 +158,9 @@ const renderCollectionVisual = (
   item: CatalogCollectionSliderItem,
   rotationTick: number,
   openSeed: number,
+  isMobileViewport: boolean,
 ) => {
-  const previewTiles = getPreviewTiles(item, rotationTick, openSeed);
+  const previewTiles = getPreviewTiles(item, rotationTick, openSeed, isMobileViewport);
   const shouldUseProductCollage =
     item.previewMode === "products" && previewTiles.length > 0;
   const imageUrl = item.imageUrl?.trim();
@@ -177,6 +215,25 @@ const renderCollectionVisual = (
   );
 };
 
+const useIsMobileViewport = () => {
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("matchMedia" in window)) {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia(MOBILE_COLLECTION_MEDIA_QUERY);
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  return isMobileViewport;
+};
+
 export default function CatalogCollectionsSlider({
   items,
   activeValue,
@@ -190,6 +247,7 @@ export default function CatalogCollectionsSlider({
   const [rotationTick, setRotationTick] = useState(0);
   const [isAutoplayPaused, setIsAutoplayPaused] = useState(false);
   const [openSeed] = useState(() => Math.floor(Math.random() * 1_000_000));
+  const isMobileViewport = useIsMobileViewport();
 
   useEffect(() => {
     if (!carouselApi || items.length <= 1) {
@@ -277,6 +335,7 @@ export default function CatalogCollectionsSlider({
         <CarouselContent className="ml-0">
           {items.map((item) => {
             const isActive = activeValue === item.value;
+            const mobileHeight = getMobileHeight(item);
             return (
               <CarouselItem
                 key={item.slug || item.value}
@@ -289,13 +348,14 @@ export default function CatalogCollectionsSlider({
                   aria-label={`Открыть коллекцию ${item.label}`}
                   className={cn(
                     "group/slide relative block w-full overflow-hidden border text-left text-white",
-                    "h-[260px] sm:h-[340px] lg:h-[520px]",
+                    "h-[var(--collection-mobile-height)] sm:h-[340px] lg:h-[520px]",
                     isActive
                       ? "border-black shadow-[0_0_0_2px_rgba(0,0,0,1)]"
                       : "border-black/12",
                   )}
+                  style={{ "--collection-mobile-height": `${mobileHeight}px` } as CSSProperties}
                 >
-                  {renderCollectionVisual(item, rotationTick, openSeed)}
+                  {renderCollectionVisual(item, rotationTick, openSeed, isMobileViewport)}
 
                   <div className="absolute inset-0 bg-black/6 transition duration-500 ease-out md:group-hover/slide:bg-black/42 md:group-focus-visible/slide:bg-black/42" />
                   <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.02)_0%,rgba(0,0,0,0.08)_52%,rgba(0,0,0,0.72)_100%)] opacity-90 transition duration-500 ease-out md:opacity-0 md:group-hover/slide:opacity-100 md:group-focus-visible/slide:opacity-100" />
