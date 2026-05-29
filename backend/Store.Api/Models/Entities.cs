@@ -863,6 +863,15 @@ public class CollectionDictionary
     [Column("preview_rotation_mode")]
     public string PreviewRotationMode { get; set; } = "sequential";
 
+    [Column("preview_mobile_tile_count")]
+    public int PreviewMobileTileCount { get; set; } = 3;
+
+    [Column("preview_mobile_rotation_mode")]
+    public string PreviewMobileRotationMode { get; set; } = "inherit";
+
+    [Column("preview_mobile_height")]
+    public int PreviewMobileHeight { get; set; } = 260;
+
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 

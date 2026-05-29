@@ -2265,6 +2265,9 @@ public class AdminController : ControllerBase
         var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
         var previewTileCount = NormalizeCollectionPreviewTileCount(payload.PreviewTileCount);
         var previewRotationMode = NormalizeCollectionPreviewRotationMode(payload.PreviewRotationMode);
+        var previewMobileTileCount = NormalizeCollectionPreviewMobileTileCount(payload.PreviewMobileTileCount);
+        var previewMobileRotationMode = NormalizeCollectionPreviewMobileRotationMode(payload.PreviewMobileRotationMode);
+        var previewMobileHeight = NormalizeCollectionPreviewMobileHeight(payload.PreviewMobileHeight);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2390,6 +2393,9 @@ public class AdminController : ControllerBase
                     PreviewImagesJson = previewImagesJson,
                     PreviewTileCount = previewTileCount,
                     PreviewRotationMode = previewRotationMode,
+                    PreviewMobileTileCount = previewMobileTileCount,
+                    PreviewMobileRotationMode = previewMobileRotationMode,
+                    PreviewMobileHeight = previewMobileHeight,
                     IsActive = isActive,
                     ShowInCatalogFilter = false,
                     ShowColorInCatalog = showColorInCatalog,
@@ -2427,6 +2433,9 @@ public class AdminController : ControllerBase
         var previewImagesJson = NormalizePreviewImagesJson(payload.PreviewImages);
         var previewTileCount = NormalizeCollectionPreviewTileCount(payload.PreviewTileCount);
         var previewRotationMode = NormalizeCollectionPreviewRotationMode(payload.PreviewRotationMode);
+        var previewMobileTileCount = NormalizeCollectionPreviewMobileTileCount(payload.PreviewMobileTileCount);
+        var previewMobileRotationMode = NormalizeCollectionPreviewMobileRotationMode(payload.PreviewMobileRotationMode);
+        var previewMobileHeight = NormalizeCollectionPreviewMobileHeight(payload.PreviewMobileHeight);
         var isActive = payload.IsActive ?? true;
         var showInCatalogFilter = payload.ShowInCatalogFilter ?? true;
         var showColorInCatalog = payload.ShowColorInCatalog ?? true;
@@ -2561,6 +2570,9 @@ public class AdminController : ControllerBase
                 collection.PreviewImagesJson = previewImagesJson;
                 collection.PreviewTileCount = previewTileCount;
                 collection.PreviewRotationMode = previewRotationMode;
+                collection.PreviewMobileTileCount = previewMobileTileCount;
+                collection.PreviewMobileRotationMode = previewMobileRotationMode;
+                collection.PreviewMobileHeight = previewMobileHeight;
                 collection.IsActive = isActive;
                 collection.ShowInCatalogFilter = false;
                 collection.ShowColorInCatalog = showColorInCatalog;
@@ -2985,6 +2997,9 @@ public class AdminController : ControllerBase
         previewImages = ParsePreviewImagesJson(item.PreviewImagesJson),
         previewTileCount = NormalizeCollectionPreviewTileCount(item.PreviewTileCount),
         previewRotationMode = NormalizeCollectionPreviewRotationMode(item.PreviewRotationMode),
+        previewMobileTileCount = NormalizeCollectionPreviewMobileTileCount(item.PreviewMobileTileCount),
+        previewMobileRotationMode = NormalizeCollectionPreviewMobileRotationMode(item.PreviewMobileRotationMode),
+        previewMobileHeight = NormalizeCollectionPreviewMobileHeight(item.PreviewMobileHeight),
         item.IsActive,
         item.ShowInCatalogFilter,
         item.ShowColorInCatalog,
@@ -3275,6 +3290,27 @@ public class AdminController : ControllerBase
             "static" => "static",
             _ => "sequential"
         };
+    }
+
+    private static int NormalizeCollectionPreviewMobileTileCount(int? value)
+    {
+        return Math.Clamp(value ?? 3, 1, 3);
+    }
+
+    private static string NormalizeCollectionPreviewMobileRotationMode(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "sequential" => "sequential",
+            "random" => "random",
+            "static" => "static",
+            _ => "inherit"
+        };
+    }
+
+    private static int NormalizeCollectionPreviewMobileHeight(int? value)
+    {
+        return Math.Clamp(value ?? 260, 180, 520);
     }
 
     private static string? NormalizePreviewImagesJson(List<string>? values)

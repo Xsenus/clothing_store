@@ -319,6 +319,9 @@ public class ProductsController : ControllerBase
                 previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
                 previewTileCount = NormalizeCollectionPreviewTileCount(x.PreviewTileCount),
                 previewRotationMode = NormalizeCollectionPreviewRotationMode(x.PreviewRotationMode),
+                previewMobileTileCount = NormalizeCollectionPreviewMobileTileCount(x.PreviewMobileTileCount),
+                previewMobileRotationMode = NormalizeCollectionPreviewMobileRotationMode(x.PreviewMobileRotationMode),
+                previewMobileHeight = NormalizeCollectionPreviewMobileHeight(x.PreviewMobileHeight),
                 description = x.Description,
                 color = showCollectionColors && x.ShowColorInCatalog ? x.Color : null,
                 showColorInCatalog = showCollectionColors && x.ShowColorInCatalog
@@ -339,6 +342,9 @@ public class ProductsController : ControllerBase
                 previewImages = ResolveCollectionPreviewImages(x, collectionPreviewImages),
                 previewTileCount = NormalizeCollectionPreviewTileCount(x.PreviewTileCount),
                 previewRotationMode = NormalizeCollectionPreviewRotationMode(x.PreviewRotationMode),
+                previewMobileTileCount = NormalizeCollectionPreviewMobileTileCount(x.PreviewMobileTileCount),
+                previewMobileRotationMode = NormalizeCollectionPreviewMobileRotationMode(x.PreviewMobileRotationMode),
+                previewMobileHeight = NormalizeCollectionPreviewMobileHeight(x.PreviewMobileHeight),
                 description = x.Description,
                 color = x.Color,
                 productCount = collectionUsageCounts.GetValueOrDefault(NormalizeLookupKey(x.Name), 0)
@@ -1468,6 +1474,21 @@ public class ProductsController : ControllerBase
             "static" => "static",
             _ => "sequential"
         };
+
+    private static int NormalizeCollectionPreviewMobileTileCount(int? value)
+        => Math.Clamp(value ?? 3, 1, 3);
+
+    private static string NormalizeCollectionPreviewMobileRotationMode(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            "sequential" => "sequential",
+            "random" => "random",
+            "static" => "static",
+            _ => "inherit"
+        };
+
+    private static int NormalizeCollectionPreviewMobileHeight(int? value)
+        => Math.Clamp(value ?? 260, 180, 520);
 
     private static IReadOnlyList<string> ResolveProductCollectionPreviewImageUrls(JsonObject? json)
     {
