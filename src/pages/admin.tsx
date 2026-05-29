@@ -1445,6 +1445,48 @@ const readPersistedAdminNavigationState = () => {
   }
 };
 
+const readAdminNavigationState = (search?: string) => {
+  const persistedState = readPersistedAdminNavigationState();
+  const searchValue = typeof search === "string"
+    ? search
+    : typeof window !== "undefined"
+      ? window.location.search
+      : "";
+
+  if (!searchValue) {
+    return persistedState;
+  }
+
+  const params = new URLSearchParams(searchValue);
+  return {
+    adminTab: normalizeAdminNavigationValue(params.get("adminTab"), ADMIN_TAB_VALUES, persistedState.adminTab),
+    settingsGroup: normalizeAdminNavigationValue(params.get("settingsGroup"), SETTINGS_GROUP_VALUES, persistedState.settingsGroup),
+    authSettingsCatalog: normalizeAdminNavigationValue(params.get("authSettings"), AUTH_SETTINGS_CATALOG_VALUES, persistedState.authSettingsCatalog),
+    generalSettingsCatalog: normalizeAdminNavigationValue(params.get("generalSettings"), GENERAL_SETTINGS_CATALOG_VALUES, persistedState.generalSettingsCatalog),
+    integrationCatalog: normalizeAdminNavigationValue(params.get("integrationSettings"), INTEGRATION_CATALOG_VALUES, persistedState.integrationCatalog),
+    dictionaryGroup: normalizeAdminNavigationValue(params.get("dictionaryGroup"), DICTIONARY_GROUP_VALUES, persistedState.dictionaryGroup) as DictionaryKind,
+  };
+};
+
+const readAdminWorkspaceState = (search?: string) => {
+  const searchValue = typeof search === "string"
+    ? search
+    : typeof window !== "undefined"
+      ? window.location.search
+      : "";
+  const params = new URLSearchParams(searchValue);
+  const dictionaryItemId = params.get("dictionaryItem")?.trim() || null;
+  const productModeValue = params.get("productMode");
+  const productMode = productModeValue === "new" || productModeValue === "edit" ? productModeValue : null;
+  const productId = params.get("productId")?.trim() || null;
+
+  return {
+    dictionaryItemId,
+    productMode,
+    productId,
+  };
+};
+
 const formatDateInputValue = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -2139,10 +2181,15 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     () => isTelegramLoginTestReady && hasConfiguredValue(telegramWidgetUsername),
     [isTelegramLoginTestReady, telegramWidgetUsername]
   );
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isStandaloneAdmin = !embedded;
+  const adminNavigationStateFromLocation = readAdminNavigationState(location.search);
+  const adminWorkspaceStateFromLocation = readAdminWorkspaceState(location.search);
   const [dictionaries, setDictionaries] = useState<Record<DictionaryKind, DictionaryItem[]>>({ sizes: [], materials: [], colors: [], categories: [], collections: [] });
   const [dictionaryDrafts, setDictionaryDrafts] = useState<Record<string, DictionaryDraft>>({});
-  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>(() => readPersistedAdminNavigationState().dictionaryGroup);
-  const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(null);
+  const [selectedDictionaryGroup, setSelectedDictionaryGroup] = useState<DictionaryKind>(() => adminNavigationStateFromLocation.dictionaryGroup);
+  const [editingDictionaryItemId, setEditingDictionaryItemId] = useState<string | null>(() => adminWorkspaceStateFromLocation.dictionaryItemId);
   const [dictionaryDeleteDialog, setDictionaryDeleteDialog] = useState<DictionaryDeleteDialogState>({
     open: false,
     kind: "sizes",
@@ -2284,10 +2331,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     yandexRequestId: "",
     managerComment: "",
   });
-  const [selectedSettingsGroup, setSelectedSettingsGroup] = useState(() => readPersistedAdminNavigationState().settingsGroup);
-  const [selectedAuthSettingsCatalog, setSelectedAuthSettingsCatalog] = useState(() => readPersistedAdminNavigationState().authSettingsCatalog);
-  const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState(() => readPersistedAdminNavigationState().generalSettingsCatalog);
-  const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState(() => readPersistedAdminNavigationState().integrationCatalog);
+  const [selectedSettingsGroup, setSelectedSettingsGroup] = useState(() => adminNavigationStateFromLocation.settingsGroup);
+  const [selectedAuthSettingsCatalog, setSelectedAuthSettingsCatalog] = useState(() => adminNavigationStateFromLocation.authSettingsCatalog);
+  const [selectedGeneralSettingsCatalog, setSelectedGeneralSettingsCatalog] = useState(() => adminNavigationStateFromLocation.generalSettingsCatalog);
+  const [selectedIntegrationCatalog, setSelectedIntegrationCatalog] = useState(() => adminNavigationStateFromLocation.integrationCatalog);
   const settingsLoaded = Object.keys(settings).length > 0;
   const [selectedUserOrders, setSelectedUserOrders] = useState<AdminOrder[]>([]);
   const [selectedUserOrdersTotal, setSelectedUserOrdersTotal] = useState(0);
@@ -2306,21 +2353,14 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const ordersRequestIdRef = useRef(0);
   const latestOrderTablePreferencesRef = useRef<OrderTablePreferences>(createDefaultOrderTablePreferences());
   const deferredOrderSearch = useDeferredValue(orderSearch);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const isStandaloneAdmin = !embedded;
   const isCreateProductRoute = isStandaloneAdmin && location.pathname === "/admin/products/new";
   const editProductRouteMatch = isStandaloneAdmin
     ? location.pathname.match(/^\/admin\/products\/([^/]+)\/edit$/)
     : null;
   const routeEditingProductId = editProductRouteMatch?.[1] || null;
-  const [selectedAdminTab, setSelectedAdminTab] = useState(() => readPersistedAdminNavigationState().adminTab);
+  const [selectedAdminTab, setSelectedAdminTab] = useState(() => adminNavigationStateFromLocation.adminTab);
 
   useEffect(() => {
-    if (!isStandaloneAdmin) {
-      return;
-    }
-
     persistAdminNavigationState({
       adminTab: normalizeAdminNavigationValue(selectedAdminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab),
       settingsGroup: normalizeAdminNavigationValue(selectedSettingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup),
@@ -2330,7 +2370,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
       dictionaryGroup: normalizeAdminNavigationValue(selectedDictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup) as DictionaryKind,
     });
   }, [
-    isStandaloneAdmin,
     selectedAdminTab,
     selectedSettingsGroup,
     selectedAuthSettingsCatalog,
@@ -2340,8 +2379,10 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   ]);
 
   // Form State
-  const [isOpen, setIsOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [isOpen, setIsOpen] = useState(() => !isStandaloneAdmin && selectedAdminTab === "products" && adminWorkspaceStateFromLocation.productMode !== null);
+  const [editingId, setEditingId] = useState<string | null>(() =>
+    !isStandaloneAdmin && adminWorkspaceStateFromLocation.productMode === "edit" ? adminWorkspaceStateFromLocation.productId : null,
+  );
   const [formData, setFormData] = useState(createEmptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productReviews, setProductReviews] = useState<AdminProductReview[]>([]);
@@ -2382,6 +2423,58 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [selectedProductEditorDictionaryTab, setSelectedProductEditorDictionaryTab] = useState<DictionaryKind>("categories");
   const GALLERY_PAGE_SIZE = 24;
   const MEDIA_GALLERY_PAGE_SIZE = 16;
+
+  useEffect(() => {
+    if (!embedded) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    params.set("tab", "admin");
+    params.set("adminTab", normalizeAdminNavigationValue(selectedAdminTab, ADMIN_TAB_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.adminTab));
+    params.set("settingsGroup", normalizeAdminNavigationValue(selectedSettingsGroup, SETTINGS_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.settingsGroup));
+    params.set("authSettings", normalizeAdminNavigationValue(selectedAuthSettingsCatalog, AUTH_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.authSettingsCatalog));
+    params.set("generalSettings", normalizeAdminNavigationValue(selectedGeneralSettingsCatalog, GENERAL_SETTINGS_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.generalSettingsCatalog));
+    params.set("integrationSettings", normalizeAdminNavigationValue(selectedIntegrationCatalog, INTEGRATION_CATALOG_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.integrationCatalog));
+    params.set("dictionaryGroup", normalizeAdminNavigationValue(selectedDictionaryGroup, DICTIONARY_GROUP_VALUES, DEFAULT_ADMIN_NAVIGATION_STATE.dictionaryGroup));
+
+    if (selectedAdminTab === "dictionaries" && editingDictionaryItemId) {
+      params.set("dictionaryItem", editingDictionaryItemId);
+    } else {
+      params.delete("dictionaryItem");
+    }
+
+    if (selectedAdminTab === "products" && isOpen) {
+      params.set("productMode", editingId ? "edit" : "new");
+      if (editingId) {
+        params.set("productId", editingId);
+      } else {
+        params.delete("productId");
+      }
+    } else {
+      params.delete("productMode");
+      params.delete("productId");
+    }
+
+    const nextSearch = params.toString();
+    if (nextSearch !== location.search.replace(/^\?/, "")) {
+      navigate({ pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" }, { replace: true });
+    }
+  }, [
+    embedded,
+    location.pathname,
+    location.search,
+    navigate,
+    selectedAdminTab,
+    selectedSettingsGroup,
+    selectedAuthSettingsCatalog,
+    selectedGeneralSettingsCatalog,
+    selectedIntegrationCatalog,
+    selectedDictionaryGroup,
+    editingDictionaryItemId,
+    isOpen,
+    editingId,
+  ]);
 
   const compareDictionaryNames = (left: string, right: string) =>
     left.localeCompare(right, "ru", { numeric: true, sensitivity: "base" });
@@ -4338,6 +4431,11 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
     setDictionaryDrafts((prev) => ({ ...prev, [item.id]: getDictionaryDraftDefaults(item) }));
   };
 
+  const handleDictionaryGroupChange = (group: DictionaryKind) => {
+    setSelectedDictionaryGroup(group);
+    setEditingDictionaryItemId(null);
+  };
+
   const cancelEditDictionaryItem = (item: DictionaryItem) => {
     setEditingDictionaryItemId(null);
     setDictionaryDrafts((prev) => {
@@ -6211,6 +6309,9 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
   const handleAdminTabChange = (value: string) => {
     setSelectedAdminTab(value);
+    if (value !== "dictionaries") {
+      setEditingDictionaryItemId(null);
+    }
     if (value === "products") {
       closeOrderEditor();
       closeOrderActionDialog();
@@ -6263,6 +6364,34 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
 
     setIsOpen(false);
   }, [isStandaloneAdmin, isCreateProductRoute, routeEditingProductId, products, loading, navigate]);
+
+  useEffect(() => {
+    if (isStandaloneAdmin || selectedAdminTab !== "products" || loading) {
+      return;
+    }
+
+    const workspaceState = readAdminWorkspaceState(location.search);
+    if (workspaceState.productMode === "new") {
+      if (!isOpen || editingId) {
+        openProductForm();
+      }
+      return;
+    }
+
+    if (workspaceState.productMode === "edit" && workspaceState.productId) {
+      if (editingId === workspaceState.productId && isOpen) {
+        return;
+      }
+
+      const targetProduct = products.find((p) => p._id === workspaceState.productId || (p as any).id === workspaceState.productId);
+      if (targetProduct) {
+        openProductForm(targetProduct);
+      } else {
+        toast.error("Товар не найден");
+        resetProductEditor();
+      }
+    }
+  }, [isStandaloneAdmin, selectedAdminTab, loading, location.search, products, isOpen, editingId]);
 
   useEffect(() => {
     if (!selectedProductStockHistory?._id) return;
@@ -9146,7 +9275,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                         <button
                           key={group.key}
                           type="button"
-                          onClick={() => setSelectedDictionaryGroup(group.key)}
+                          onClick={() => handleDictionaryGroupChange(group.key)}
                           className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${isSelected ? "border-slate-900 bg-slate-900 text-white" : "border-transparent hover:bg-slate-100"}`}
                         >
                           <div className="font-semibold">{group.label}</div>
