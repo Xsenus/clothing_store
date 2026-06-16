@@ -33,6 +33,9 @@
     --ring: 0 0% 0%;
 
     --radius: 0rem;
+    --fd-accent: #dc2626;
+    --fd-accent-hover: #ef4444;
+    --fd-accent-soft: rgba(220, 38, 38, 0.16);
   }
 
   .dark {

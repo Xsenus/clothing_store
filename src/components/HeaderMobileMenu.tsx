@@ -56,7 +56,7 @@ export default function HeaderMobileMenu({
               key={link.path}
               to={link.path}
               className={`text-2xl font-bold transition-colors hover:text-muted-foreground ${
-                activePathname === link.path
+                (link.path.includes("#") ? activePathname === link.path : activePathname.split("#")[0] === link.path)
                   ? "underline decoration-2 underline-offset-4"
                   : ""
               }`}

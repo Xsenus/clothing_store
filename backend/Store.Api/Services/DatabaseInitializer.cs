@@ -757,6 +757,9 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "robokassa_receipt_tax", "none");
         await EnsureAppSettingExistsAsync(db, "robokassa_tax_system", "");
         await EnsureAppSettingExistsAsync(db, "payment_cod_enabled", "true");
+        await EnsureAppSettingExistsAsync(db, "checkout_free_shipping_threshold", "5000");
+        await EnsureAppSettingExistsAsync(db, "site_accent_color", "#dc2626");
+        await EnsureAppSettingExistsAsync(db, "site_accent_hover_color", "#ef4444");
         await EnsureAppSettingExistsAsync(db, "checkout_self_pickup_title", "Новосибирск");
         await EnsureAppSettingExistsAsync(
             db,
@@ -833,6 +836,8 @@ public class DatabaseInitializer
             ["home_trust_hero_json"] = ToJson(new
             {
                 enabled = true,
+                eyebrow = "",
+                eyebrowEnabled = false,
                 title = "Смелость - это стиль",
                 subtitle = "Переосмысляем уличную моду с демоническим характером",
                 primaryCtaText = "Смотреть новинки",
@@ -840,7 +845,7 @@ public class DatabaseInitializer
                 secondaryCtaText = "Выбрать свой образ",
                 secondaryCtaUrl = "/catalog",
                 secondaryCtaEnabled = true,
-                metaText = "Доставка 7-21 день • Бесплатно от 8000 ₽ • Возврат 14 дней"
+                metaText = "Доставка 1-7 дней в среднем • Бесплатно от 5000 ₽ • Возврат 14 дней"
             }),
             ["home_trust_benefits_json"] = ToJson(new
             {
@@ -848,10 +853,10 @@ public class DatabaseInitializer
                 title = "Почему выбирают Fashion Demon",
                 items = new[]
                 {
-                    new { id = "bold-design", icon = "flame", title = "Смелый дизайн", description = "Уникальные принты, крой и детали, которых нет у других.", sortOrder = 10, enabled = true },
-                    new { id = "real-quality", icon = "shirt", title = "Реальное качество", description = "Плотные ткани, аккуратная фурнитура и пошив. Носится долго.", sortOrder = 20, enabled = true },
-                    new { id = "honest-delivery", icon = "truck", title = "Честные сроки", description = "Понятная доставка без лишних обещаний. Средний срок - 7-21 день.", sortOrder = 30, enabled = true },
-                    new { id = "easy-return", icon = "shield", title = "Легко купить и вернуть", description = "Удобная оплата и возврат в течение 14 дней.", sortOrder = 40, enabled = true }
+                    new { id = "bold-design", icon = "flame", layout = "left", title = "Смелый дизайн", description = "Уникальные принты, крой и детали, которых нет у других.", sortOrder = 10, enabled = true },
+                    new { id = "real-quality", icon = "shirt", layout = "center", title = "Реальное качество", description = "Плотные ткани, аккуратная фурнитура и пошив. Носится долго.", sortOrder = 20, enabled = true },
+                    new { id = "honest-delivery", icon = "truck", layout = "right", title = "Честные сроки", description = "Понятная доставка без лишних обещаний. Средний срок - 1-7 дней.", sortOrder = 30, enabled = true },
+                    new { id = "easy-return", icon = "shield", layout = "left", title = "Легко купить и вернуть", description = "Удобная оплата и возврат в течение 14 дней.", sortOrder = 40, enabled = true }
                 }
             }),
             ["home_trust_about_json"] = ToJson(new

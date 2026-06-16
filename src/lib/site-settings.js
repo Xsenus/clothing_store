@@ -1,4 +1,5 @@
 import { getBrowserStorageItem, setBrowserStorageItem } from "@/lib/browser-storage";
+import { applySiteThemeSettings } from "@/lib/site-theme";
 
 export const PUBLIC_SETTINGS_CACHE_KEY = "sitePublicSettings";
 export const PUBLIC_LEGAL_SETTINGS_CACHE_PREFIX = "sitePublicLegal:";
@@ -31,15 +32,18 @@ const getLegalCacheKey = (key) =>
 
 export const getCachedPublicSettings = () => {
   if (memorySettings) {
+    applySiteThemeSettings(memorySettings);
     return memorySettings;
   }
 
   try {
     const raw = getBrowserStorageItem(PUBLIC_SETTINGS_CACHE_KEY);
     memorySettings = raw ? JSON.parse(raw) : {};
+    applySiteThemeSettings(memorySettings);
     return memorySettings;
   } catch {
     memorySettings = {};
+    applySiteThemeSettings(memorySettings);
     return {};
   }
 };
@@ -47,6 +51,7 @@ export const getCachedPublicSettings = () => {
 export const setCachedPublicSettings = (settings) => {
   const normalized = settings && typeof settings === "object" ? settings : {};
   memorySettings = normalized;
+  applySiteThemeSettings(normalized);
   setBrowserStorageItem(PUBLIC_SETTINGS_CACHE_KEY, JSON.stringify(normalized));
   window.dispatchEvent(new CustomEvent(SITE_BRANDING_UPDATED_EVENT, { detail: normalized }));
   return normalized;

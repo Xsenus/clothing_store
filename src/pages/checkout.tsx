@@ -11,6 +11,11 @@ import { Label } from '@/components/ui/label';
 import { Authenticated, useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { FLOW } from '@/lib/api-mapping';
+import {
+  applyFreeShippingToQuote,
+  getFreeShippingState,
+  sortDeliveryCardsByPrice,
+} from '@/lib/checkout-shipping';
 import { formatProductPrice } from '@/lib/price-format';
 import { fetchPublicSettings } from '@/lib/site-settings';
 import { trackTopMailRuOrder } from '@/lib/top-mail-ru';
@@ -25,8 +30,8 @@ import {
 } from '@/lib/yoomoney';
 import { toast } from 'sonner';
 
-type DeliveryMethod = 'home' | 'pickup' | 'self_pickup';
-type ManagedDeliveryMethod = Exclude<DeliveryMethod, 'self_pickup'>;
+type DeliveryMethod = 'home' | 'pickup';
+type ManagedDeliveryMethod = DeliveryMethod;
 type StatusTone = 'success' | 'warning' | 'danger' | 'muted';
 
 interface DeliveryQuoteOption {
@@ -331,8 +336,11 @@ export default function CheckoutPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [apartment, setApartment] = useState('');
+  const [entrance, setEntrance] = useState('');
+  const [floor, setFloor] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cod');
-  const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('self_pickup');
+  const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<DeliveryMethod>('home');
   const [selectedDeliveryProviderCode, setSelectedDeliveryProviderCode] = useState<string | null>(null);
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [promoCodeLoading, setPromoCodeLoading] = useState(false);
@@ -485,9 +493,7 @@ export default function CheckoutPage() {
   const yookassaSbpEnabled = isSettingEnabled(publicSettings?.yookassa_allow_sbp, true);
   const yookassaYooMoneyEnabled = isSettingEnabled(publicSettings?.yookassa_allow_yoomoney, true);
   const isCashOnDeliveryEnabled = isSettingEnabled(publicSettings?.payment_cod_enabled, true);
-  const selfPickupLocationTitle = String(publicSettings?.checkout_self_pickup_title || '').trim() || 'Новосибирск';
-  const selfPickupLocationDescription = String(publicSettings?.checkout_self_pickup_description || '').trim()
-    || 'Самовывоз доступен после оформления заказа. Мы свяжемся с вами и подтвердим детали выдачи.';
+  const freeShippingState = getFreeShippingState(subtotal, publicSettings?.checkout_free_shipping_threshold);
 
   const resolvePaymentStatus = (
     providerEnabled: boolean,
@@ -789,9 +795,14 @@ export default function CheckoutPage() {
     method: ManagedDeliveryMethod,
   ): CheckoutDeliveryCard => {
     const providerQuote = deliveryProviderMap.get(config.provider) || null;
-    const quote = method === 'home'
+    const rawQuote = method === 'home'
       ? providerQuote?.homeDelivery || null
       : providerQuote?.pickupPointDelivery || null;
+    const {
+      quote,
+      applied: freeShippingApplied,
+      originalCost,
+    } = applyFreeShippingToQuote(rawQuote, subtotal, freeShippingState.threshold);
     const available = Boolean(quote?.available);
     const optionError = normalizeDeliveryError(quote?.error);
     const title = `${config.label}: ${method === 'home' ? 'до двери' : config.pickupTitle}`;
@@ -813,10 +824,13 @@ export default function CheckoutPage() {
       statusTone = 'muted';
       statusDescription = 'Без адреса этот вариант нельзя рассчитать.';
     } else if (available) {
-      priceLabel = formatProductPrice(quote?.estimatedCost ?? 0);
+      priceLabel = freeShippingApplied ? 'Бесплатно' : formatProductPrice(quote?.estimatedCost ?? 0);
       summary = method === 'home'
         ? `Доставка по адресу: ${address}`
         : `Выберите удобный ${config.pickupTitle.toLowerCase()} из списка ниже.`;
+      if (freeShippingApplied && originalCost) {
+        summary = `${summary} Бесплатная доставка от ${formatProductPrice(freeShippingState.threshold)} применена.`;
+      }
       statusLabel = 'Работает';
       statusTone = 'success';
       statusDescription = 'Вариант доступен для оформления заказа.';
@@ -882,7 +896,7 @@ export default function CheckoutPage() {
     };
   };
 
-  const deliveryCards = deliveryProviderConfigs.flatMap((config) => {
+  const deliveryCards = sortDeliveryCardsByPrice(deliveryProviderConfigs.flatMap((config) => {
     if (!config.enabled) {
       return [];
     }
@@ -897,7 +911,7 @@ export default function CheckoutPage() {
     }
 
     return nextCards;
-  });
+  }));
 
   const visibleDeliveryCards = deliveryCards.filter((card) => isAdmin || card.available);
   const adminDeliveryDiagnostics = isAdmin
@@ -1011,24 +1025,13 @@ export default function CheckoutPage() {
   ]);
 
   const selectedPickupPoint = pickupPoints.find((point) => point.id === selectedPickupPointId) || null;
-  const selfPickupDelivery: DeliveryQuoteOption = {
-    available: true,
-    estimatedCost: 0,
-    deliveryDays: null,
-    tariff: 'self_pickup',
-    error: null,
-  };
 
   useEffect(() => {
     if (!isManagedDeliveryEnabled) {
-      if (selectedDeliveryMethod !== 'self_pickup' || selectedDeliveryProviderCode !== null) {
-        setSelectedDeliveryMethod('self_pickup');
+      if (selectedDeliveryMethod !== 'home' || selectedDeliveryProviderCode !== null) {
+        setSelectedDeliveryMethod('home');
         setSelectedDeliveryProviderCode(null);
       }
-      return;
-    }
-
-    if (selectedDeliveryMethod === 'self_pickup') {
       return;
     }
 
@@ -1049,7 +1052,7 @@ export default function CheckoutPage() {
       return;
     }
 
-    setSelectedDeliveryMethod('self_pickup');
+    setSelectedDeliveryMethod('home');
     setSelectedDeliveryProviderCode(null);
   }, [
     address,
@@ -1060,28 +1063,26 @@ export default function CheckoutPage() {
     selectedDeliveryProviderCode,
   ]);
 
-  const selectedManagedDeliveryCard = selectedDeliveryMethod === 'self_pickup'
-    ? null
-    : deliveryCards.find((card) => (
+  const selectedManagedDeliveryCard = deliveryCards.find((card) => (
       card.provider === selectedDeliveryProviderCode
       && card.method === selectedDeliveryMethod
     )) || null;
   const selectedManagedDeliveryQuote = selectedManagedDeliveryCard?.quote || null;
   const selectedDeliveryProvider = selectedManagedDeliveryCard?.providerQuote || null;
-  const pickupDelivery = selectedDeliveryMethod === 'pickup' && selectedManagedDeliveryQuote
+  const rawPickupDelivery = selectedDeliveryMethod === 'pickup' && selectedManagedDeliveryQuote
     ? {
         ...selectedManagedDeliveryQuote,
         estimatedCost: selectedPickupPoint?.estimatedCost ?? selectedManagedDeliveryQuote.estimatedCost,
         deliveryDays: selectedPickupPoint?.deliveryDays ?? selectedManagedDeliveryQuote.deliveryDays,
       }
     : selectedManagedDeliveryQuote;
+  const pickupDelivery = selectedDeliveryMethod === 'pickup'
+    ? applyFreeShippingToQuote(rawPickupDelivery, subtotal, freeShippingState.threshold).quote
+    : rawPickupDelivery;
   const selectedDeliveryOption = selectedDeliveryMethod === 'pickup'
     ? pickupDelivery
-    : selectedDeliveryMethod === 'self_pickup'
-      ? selfPickupDelivery
-      : selectedManagedDeliveryQuote;
+    : selectedManagedDeliveryQuote;
   const isPickupSelected = selectedDeliveryMethod === 'pickup';
-  const isSelfPickupSelected = selectedDeliveryMethod === 'self_pickup';
   const shipping = Number(selectedDeliveryOption?.estimatedCost ?? 0);
   const total = subtotal - promoDiscount + shipping;
   const visiblePickupPointsError = pickupPointsError
@@ -1108,9 +1109,7 @@ export default function CheckoutPage() {
     && !promoCodeLoading
     && !isShippingLoading
     && (
-      selectedDeliveryMethod === 'self_pickup'
-        ? true
-        : selectedDeliveryMethod === 'home'
+      selectedDeliveryMethod === 'home'
         ? Boolean(selectedManagedDeliveryQuote?.available)
         : Boolean(selectedPickupPoint?.id && pickupDelivery?.available)
     );
@@ -1118,23 +1117,19 @@ export default function CheckoutPage() {
     ? selectedDeliveryProvider?.provider || selectedDeliveryProviderCode || null
     : selectedDeliveryMethod === 'pickup'
       ? selectedDeliveryProvider?.provider || selectedDeliveryProviderCode || null
-      : 'self_pickup';
+      : null;
   const selectedShippingTariff = selectedDeliveryMethod === 'home'
     ? selectedManagedDeliveryQuote?.tariff || null
     : selectedDeliveryMethod === 'pickup'
       ? pickupDelivery?.tariff || null
-      : 'self_pickup';
+      : null;
   const selectedDeliveryProviderCaption = selectedDeliveryMethod === 'home'
     ? getDeliveryProviderCaption(selectedDeliveryProvider) || selectedManagedDeliveryCard?.providerLabel || null
     : selectedDeliveryMethod === 'pickup'
       ? getDeliveryProviderCaption(selectedDeliveryProvider) || selectedManagedDeliveryCard?.providerLabel || null
-      : 'Самовывоз';
+      : null;
 
   const resolveSelectedShippingAddress = () => {
-    if (selectedDeliveryMethod === 'self_pickup') {
-      return `Самовывоз: ${selfPickupLocationTitle}`;
-    }
-
     if (selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address) {
       return `Пункт выдачи: ${selectedPickupPoint.address}`;
     }
@@ -1160,7 +1155,7 @@ export default function CheckoutPage() {
     }
 
     setSelectedDeliveryMethod(method);
-    setSelectedDeliveryProviderCode(method === 'self_pickup' ? null : providerCode);
+    setSelectedDeliveryProviderCode(providerCode);
   };
 
   const handleDeliveryMethodKeyDown = (
@@ -1176,7 +1171,7 @@ export default function CheckoutPage() {
     if (event.key === ' ' || event.key === 'Enter') {
       event.preventDefault();
       setSelectedDeliveryMethod(method);
-      setSelectedDeliveryProviderCode(method === 'self_pickup' ? null : providerCode);
+      setSelectedDeliveryProviderCode(providerCode);
     }
   };
 
@@ -1309,7 +1304,7 @@ export default function CheckoutPage() {
       return;
     }
 
-    if ((selectedDeliveryMethod === 'home' || selectedDeliveryMethod === 'pickup') && !address.trim()) {
+    if (!address.trim()) {
       toast.error('Укажите адрес для расчета доставки.');
       return;
     }
@@ -1339,6 +1334,9 @@ export default function CheckoutPage() {
           customerEmail: email,
           customerPhone: phone,
           shippingAddress: resolveSelectedShippingAddress(),
+          shippingApartment: apartment,
+          shippingEntrance: entrance,
+          shippingFloor: floor,
           paymentMethod,
           items: cartItems,
           shippingAmount: shipping,
@@ -1467,9 +1465,40 @@ export default function CheckoutPage() {
                     />
                     <p className="text-sm text-muted-foreground">
                       {isManagedDeliveryEnabled
-                        ? 'Для доставки до двери и в пункт выдачи укажите адрес. Для самовывоза поле можно оставить пустым.'
-                        : 'Онлайн-интеграции доставки сейчас отключены. Для самовывоза адрес можно не указывать.'}
+                        ? 'Для доставки до двери и в пункт выдачи укажите адрес.'
+                        : 'Онлайн-интеграции доставки сейчас отключены. Оформление недоступно до включения доставки.'}
                     </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="checkout-apartment">Квартира</Label>
+                      <Input
+                        id="checkout-apartment"
+                        name="address-line2"
+                        autoComplete="address-line2"
+                        value={apartment}
+                        onChange={(event) => setApartment(event.target.value)}
+                        className="rounded-none border-black focus-visible:ring-black"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="checkout-entrance">Подъезд</Label>
+                      <Input
+                        id="checkout-entrance"
+                        value={entrance}
+                        onChange={(event) => setEntrance(event.target.value)}
+                        className="rounded-none border-black focus-visible:ring-black"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="checkout-floor">Этаж</Label>
+                      <Input
+                        id="checkout-floor"
+                        value={floor}
+                        onChange={(event) => setFloor(event.target.value)}
+                        className="rounded-none border-black focus-visible:ring-black"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1513,11 +1542,11 @@ export default function CheckoutPage() {
 
                   {!isManagedDeliveryEnabled ? (
                     <p className="text-sm text-muted-foreground">
-                      Онлайн-интеграции доставки отключены, поэтому сейчас доступен только самовывоз.
+                      Онлайн-интеграции доставки отключены. Оформление станет доступно после включения службы доставки.
                     </p>
                   ) : !address.trim() && (
                     <p className="text-sm text-muted-foreground">
-                      Для доставки до двери и ПВЗ сначала укажите адрес. Самовывоз доступен без адреса.
+                      Для доставки до двери и ПВЗ сначала укажите адрес.
                     </p>
                   )}
                   {isAdmin ? (
@@ -1525,57 +1554,18 @@ export default function CheckoutPage() {
                       Для администратора показаны все включенные службы доставки и их статус. Покупателю видны только рабочие варианты.
                     </p>
                   ) : null}
+                  <div className="border border-[color:var(--fd-accent)] bg-[var(--fd-accent-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
+                    {freeShippingState.reached
+                      ? `Бесплатная доставка от ${formatProductPrice(freeShippingState.threshold)} применится к доступным службам`
+                      : `До бесплатной доставки осталось ${formatProductPrice(freeShippingState.remaining)}`}
+                  </div>
 
                   <div className="grid gap-2" role="radiogroup" aria-label="Способ доставки">
-                    <div
-                      role="radio"
-                      aria-checked={isSelfPickupSelected}
-                      aria-labelledby="checkout-delivery-self-pickup-label"
-                      tabIndex={0}
-                      className={cn(
-                        'space-y-3 rounded-none border p-4 transition',
-                        isSelfPickupSelected
-                          ? 'border-black bg-[linear-gradient(180deg,#faf6ee_0%,#f1e9db_100%)] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08),0_10px_24px_rgba(0,0,0,0.06)]'
-                          : 'cursor-pointer border-gray-200 hover:border-black/40',
-                      )}
-                      onClick={() => handleDeliveryMethodSelect('self_pickup')}
-                      onKeyDown={(event) => handleDeliveryMethodKeyDown(event, 'self_pickup')}
-                    >
-                      <div className="flex items-start gap-3">
-                        <DeliveryOptionIndicator selected={isSelfPickupSelected} />
-                        <div className="flex-1 space-y-2">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <span id="checkout-delivery-self-pickup-label" className="font-bold">Самовывоз</span>
-                            <span className={cn(
-                              'font-black',
-                              isSelfPickupSelected ? 'text-black' : '',
-                            )}>0 ₽</span>
-                          </div>
-                          <div className={cn(
-                            'text-sm text-muted-foreground',
-                            isSelfPickupSelected ? 'text-black/70' : '',
-                          )}>
-                            <p className={cn('font-medium text-foreground', isSelfPickupSelected ? 'text-black' : '')}>
-                              Пункт выдачи: {selfPickupLocationTitle}
-                            </p>
-                            Заберете заказ самостоятельно. После оформления мы свяжемся с вами и подтвердим детали выдачи.
-                          </div>
-                          {isAdmin ? (
-                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                              <span className={cn(
-                                'inline-flex items-center border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
-                                STATUS_TONE_CLASS_NAMES.success,
-                              )}>
-                                Работает
-                              </span>
-                              <span className={cn('text-xs', isSelfPickupSelected ? 'text-black/60' : 'text-muted-foreground')}>
-                                Самовывоз доступен независимо от интеграций доставки.
-                              </span>
-                            </div>
-                          ) : null}
-                        </div>
+                    {visibleDeliveryCards.length === 0 ? (
+                      <div className="border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        Сейчас нет доступных способов доставки для указанного адреса.
                       </div>
-                    </div>
+                    ) : null}
                     {visibleDeliveryCards.map((card) => {
                       const isSelected = selectedDeliveryMethod === card.method && selectedDeliveryProviderCode === card.provider;
 
@@ -1921,7 +1911,7 @@ export default function CheckoutPage() {
 
                 <Button
                   type="submit"
-                  className="w-full h-16 rounded-none bg-black text-xl font-black uppercase tracking-widest text-white transition-all hover:bg-gray-800"
+                  className="h-16 w-full rounded-none bg-[var(--fd-accent)] text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-soft)] transition-all hover:bg-[var(--fd-accent-hover)] disabled:opacity-60"
                   disabled={!canSubmit}
                 >
                   {loading ? 'Обработка...' : `ОФОРМИТЬ ЗАКАЗ - ${formatProductPrice(total)}`}
@@ -2038,20 +2028,27 @@ export default function CheckoutPage() {
                 <div className="flex justify-between text-sm">
                   <span>Доставка{isShippingLoading ? ' (расчет...)' : ''}</span>
                   <span className="font-bold">
-                    {selectedDeliveryOption?.available ? formatProductPrice(shipping) : '—'}
+                    {selectedDeliveryOption?.available && shipping === 0 && freeShippingState.reached
+                      ? 'Бесплатно'
+                      : selectedDeliveryOption?.available
+                        ? formatProductPrice(shipping)
+                        : '—'}
                   </span>
                 </div>
+                {freeShippingState.reached ? (
+                  <div className="text-xs uppercase tracking-wide text-[color:var(--fd-accent)]">
+                    Бесплатная доставка от {formatProductPrice(freeShippingState.threshold)} применена к доступному тарифу.
+                  </div>
+                ) : (
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    До бесплатной доставки осталось {formatProductPrice(freeShippingState.remaining)}.
+                  </div>
+                )}
                 {selectedDeliveryProviderCaption && (
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">
                     Провайдер: {selectedDeliveryProviderCaption}
                   </div>
                 )}
-                {selectedDeliveryMethod === 'self_pickup' ? (
-                  <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
-                    <div>Самовывоз: {selfPickupLocationTitle}</div>
-                    <div className="mt-1">{selfPickupLocationDescription}</div>
-                  </div>
-                ) : null}
                 {selectedDeliveryMethod === 'pickup' && selectedPickupPoint?.address && (
                   <div className="border border-black/10 bg-white px-3 py-2 text-xs text-muted-foreground">
                     Пункт выдачи: {selectedPickupPoint.address}

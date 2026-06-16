@@ -258,6 +258,14 @@ public class OrdersController : ControllerBase
                 .ToList();
             var computedItemsAmount = Math.Round(serializedItems.Sum(item => item.unitPrice * item.quantity), 2, MidpointRounding.AwayFromZero);
             var resolvedShippingAmount = Math.Max(0d, Math.Round(payload.ShippingAmount ?? 0d, 2, MidpointRounding.AwayFromZero));
+            var freeShippingThreshold = await GetDoubleSettingAsync(
+                "checkout_free_shipping_threshold",
+                "Checkout:FreeShippingThreshold",
+                fallback: 5000d,
+                HttpContext.RequestAborted);
+            if (freeShippingThreshold > 0d && computedItemsAmount >= freeShippingThreshold)
+                resolvedShippingAmount = 0d;
+
             var resolvedPromoCode = PromoCodeService.NormalizeCode(payload.PromoCode);
             var promoCodeDiscountAmount = 0d;
             if (!string.IsNullOrWhiteSpace(resolvedPromoCode))
@@ -310,21 +318,21 @@ public class OrdersController : ControllerBase
             var resolvedVisitorId = VisitorTrackingSupport.NormalizeVisitorId(payload.VisitorId);
             var resolvedViewerKey = VisitorTrackingSupport.ResolveViewerKey(user, resolvedVisitorId);
             var normalizedShippingMethod = payload.ShippingMethod?.Trim().ToLowerInvariant();
+            if (string.Equals(normalizedShippingMethod, "self_pickup", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { detail = "Самовывоз сейчас недоступен. Выберите службу доставки." });
+            }
+
             var resolvedShippingMethod = normalizedShippingMethod switch
             {
                 "pickup" => "pickup",
-                "self_pickup" => "self_pickup",
                 _ => "home"
             };
             var resolvedPickupPointId = resolvedShippingMethod != "pickup" || string.IsNullOrWhiteSpace(payload.PickupPointId)
                 ? null
                 : payload.PickupPointId.Trim();
-            var resolvedShippingProvider = resolvedShippingMethod == "self_pickup"
-                ? null
-                : NormalizeOptionalText(payload.ShippingProvider);
-            var resolvedShippingTariff = resolvedShippingMethod == "self_pickup"
-                ? null
-                : NormalizeOptionalText(payload.ShippingTariff);
+            var resolvedShippingProvider = NormalizeOptionalText(payload.ShippingProvider);
+            var resolvedShippingTariff = NormalizeOptionalText(payload.ShippingTariff);
             var resolvedCustomerName = payload.CustomerName?.Trim() ?? string.Empty;
             var resolvedCustomerEmail = string.IsNullOrWhiteSpace(payload.CustomerEmail)
                 ? confirmedUserEmail ?? string.Empty
@@ -340,9 +348,27 @@ public class OrdersController : ControllerBase
             {
                 return Results.BadRequest(new { detail = "Для оформления заказа укажите подтвержденный email или телефон из профиля." });
             }
-            var resolvedShippingAddress = resolvedShippingMethod == "self_pickup"
-                ? (string.IsNullOrWhiteSpace(payload.ShippingAddress) ? "Самовывоз" : payload.ShippingAddress.Trim())
-                : payload.ShippingAddress?.Trim() ?? string.Empty;
+            var baseShippingAddress = payload.ShippingAddress?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(baseShippingAddress))
+            {
+                return Results.BadRequest(new { detail = "Укажите адрес доставки." });
+            }
+
+            var resolvedShippingApartment = NormalizeOptionalText(payload.ShippingApartment);
+            var resolvedShippingEntrance = NormalizeOptionalText(payload.ShippingEntrance);
+            var resolvedShippingFloor = NormalizeOptionalText(payload.ShippingFloor);
+            var resolvedShippingAddress = BuildShippingAddressWithDetails(
+                baseShippingAddress,
+                resolvedShippingApartment,
+                resolvedShippingEntrance,
+                resolvedShippingFloor);
+            var shippingDataJson = JsonSerializer.Serialize(new
+            {
+                baseAddress = baseShippingAddress,
+                apartment = resolvedShippingApartment,
+                entrance = resolvedShippingEntrance,
+                floor = resolvedShippingFloor
+            });
             var initialHistory = new[]
             {
                 new Dictionary<string, object?>
@@ -373,6 +399,7 @@ public class OrdersController : ControllerBase
                 PromoDiscountAmount = promoCodeDiscountAmount,
                 PickupPointId = resolvedPickupPointId,
                 ShippingAddress = resolvedShippingAddress,
+                ShippingDataJson = shippingDataJson,
                 CustomerName = resolvedCustomerName,
                 CustomerEmail = resolvedCustomerEmail,
                 CustomerPhone = resolvedCustomerPhone,
@@ -581,6 +608,23 @@ public class OrdersController : ControllerBase
         return normalized;
     }
 
+    private static string BuildShippingAddressWithDetails(
+        string baseAddress,
+        string? apartment,
+        string? entrance,
+        string? floor)
+    {
+        var parts = new List<string> { baseAddress.Trim() };
+        if (!string.IsNullOrWhiteSpace(apartment))
+            parts.Add($"кв. {apartment}");
+        if (!string.IsNullOrWhiteSpace(entrance))
+            parts.Add($"подъезд {entrance}");
+        if (!string.IsNullOrWhiteSpace(floor))
+            parts.Add($"этаж {floor}");
+
+        return string.Join(", ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private async Task<string?> GetSettingOrConfigAsync(
         string key,
         string configPath,
@@ -612,6 +656,21 @@ public class OrdersController : ControllerBase
             "0" or "false" or "no" or "off" => false,
             _ => fallback
         };
+    }
+
+    private async Task<double> GetDoubleSettingAsync(
+        string key,
+        string configPath,
+        double fallback,
+        CancellationToken cancellationToken)
+    {
+        var raw = await GetSettingOrConfigAsync(key, configPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+
+        return double.TryParse(raw.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
     }
 
 }

@@ -7,6 +7,7 @@ import PageSeo from "@/components/PageSeo";
 import SafeRenderBoundary from "@/components/SafeRenderBoundary";
 import { fetchPublicSettings, getCachedPublicSettings } from "@/lib/site-settings";
 import { parseHomeTrustSettings } from "@/lib/home-trust-settings";
+import { cn } from "@/lib/utils";
 import {
   BadgeCheck,
   Flame,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 const HOME_KEYWORDS = [
   "fashiondemon",
@@ -109,43 +110,65 @@ function TrustCtaLink({
   );
 }
 
+const getHeroTitleLines = (title: string) => {
+  const normalizedTitle = String(title || "").trim();
+  const dashParts = normalizedTitle.split(/\s+-\s+/);
+  if (dashParts.length === 2) {
+    const tailWords = dashParts[1].trim().split(/\s+/).filter(Boolean);
+    if (tailWords.length > 1) {
+      return [`${dashParts[0]} - ${tailWords[0]}`, tailWords.slice(1).join(" ")];
+    }
+  }
+
+  return [normalizedTitle];
+};
+
 function HomeHeroSection({ hero }: { hero: any }) {
   if (!hero.enabled) return null;
 
+  const titleLines = getHeroTitleLines(hero.title);
+
   return (
     <section className="relative flex min-h-[calc(100svh-72px)] items-center overflow-hidden bg-black text-white">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,transparent_34%,rgba(220,38,38,0.16)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,transparent_34%,var(--fd-accent-soft)_100%)]" />
       <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
       <div className="container relative z-10 mx-auto px-4 py-20 md:py-28">
-        <div className="max-w-5xl space-y-8">
-          <p className="text-sm font-black uppercase tracking-[0.42em] text-red-500">
-            Fashion Demon
-          </p>
-          <h1 className="max-w-4xl text-5xl font-black uppercase leading-[0.9] tracking-normal sm:text-7xl lg:text-8xl">
-            {hero.title}
+        <div className="mx-auto max-w-5xl space-y-8 text-center">
+          {hero.eyebrowEnabled && hero.eyebrow ? (
+            <p className="text-sm font-black uppercase tracking-[0.42em] text-[var(--fd-accent)]">
+              {hero.eyebrow}
+            </p>
+          ) : null}
+          <h1 className="mx-auto max-w-4xl break-words text-[2rem] font-black uppercase leading-[0.9] tracking-normal sm:text-6xl lg:text-8xl">
+            {titleLines.map((line, index) => (
+              <span key={line} className="block">
+                {line}
+                {index < titleLines.length - 1 ? " " : ""}
+              </span>
+            ))}
           </h1>
-          <p className="max-w-2xl text-xl font-medium leading-8 text-white/68 md:text-2xl">
+          <p className="mx-auto max-w-[22rem] text-lg font-medium leading-7 text-white/68 sm:max-w-2xl sm:text-xl sm:leading-8 md:text-2xl">
             {hero.subtitle}
           </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="mx-auto flex w-full max-w-[20rem] flex-col justify-center gap-3 sm:max-w-none sm:flex-row sm:items-center">
             <TrustCtaLink
               to={hero.primaryCtaUrl}
-              className="inline-flex min-h-14 items-center justify-center bg-red-600 px-8 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-red-500"
+              className="inline-flex min-h-14 w-full items-center justify-center bg-[var(--fd-accent)] px-6 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-[var(--fd-accent-hover)] sm:w-auto sm:px-8"
             >
               {hero.primaryCtaText}
             </TrustCtaLink>
             {hero.secondaryCtaEnabled && (
               <TrustCtaLink
                 to={hero.secondaryCtaUrl}
-                className="inline-flex min-h-14 items-center justify-center border border-white/35 bg-transparent px-8 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:border-white hover:bg-white hover:text-black"
+                className="inline-flex min-h-14 w-full items-center justify-center border border-white/35 bg-transparent px-6 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:border-white hover:bg-white hover:text-black sm:w-auto sm:px-8"
               >
                 {hero.secondaryCtaText}
               </TrustCtaLink>
             )}
           </div>
           {hero.metaText && (
-            <p className="max-w-2xl text-sm font-semibold uppercase tracking-[0.16em] text-white/48">
+            <p className="mx-auto max-w-[18rem] text-xs font-semibold uppercase leading-6 tracking-[0.16em] text-white/48 sm:max-w-2xl sm:text-sm">
               {hero.metaText}
             </p>
           )}
@@ -165,18 +188,33 @@ function HomeBenefitsSection({ benefits }: { benefits: any }) {
           <h2 className="max-w-3xl text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
             {benefits.title}
           </h2>
-          <div className="h-1 w-24 bg-red-600" aria-hidden="true" />
+          <div className="h-1 w-24 bg-[var(--fd-accent)]" aria-hidden="true" />
         </div>
         <div className="grid gap-px overflow-hidden border border-white/10 bg-white/10 md:grid-cols-2 xl:grid-cols-4">
-          {benefits.items.map((item: any) => {
+          {benefits.items.map((item: any, index: number) => {
             const Icon = iconMap[item.icon as keyof typeof iconMap] || Sparkles;
+            const layout = item.layout || (index % 3 === 1 ? "center" : index % 3 === 2 ? "right" : "left");
+            const iconWrapperClassName = cn(
+              "mb-8 flex",
+              layout === "center" && "justify-center text-center",
+              layout === "right" && "justify-end text-right",
+              layout === "left" && "justify-start text-left",
+            );
+            const contentClassName = cn(
+              layout === "center" && "text-center",
+              layout === "right" && "text-right",
+            );
             return (
               <article key={item.id} className="min-h-[260px] bg-[#17171b] p-6 sm:p-8">
-                <Icon className="mb-8 h-10 w-10 text-red-600" strokeWidth={2.4} />
-                <h3 className="mb-4 text-2xl font-black uppercase leading-tight">
-                  {item.title}
-                </h3>
-                <p className="text-base leading-7 text-white/58">{item.description}</p>
+                <div className={iconWrapperClassName}>
+                  <Icon className="h-10 w-10 text-[var(--fd-accent)]" strokeWidth={2.4} />
+                </div>
+                <div className={contentClassName}>
+                  <h3 className="mb-4 text-2xl font-black uppercase leading-tight">
+                    {item.title}
+                  </h3>
+                  <p className="text-base leading-7 text-white/58">{item.description}</p>
+                </div>
               </article>
             );
           })}
@@ -190,10 +228,10 @@ function HomeAboutSection({ about }: { about: any }) {
   if (!about.enabled) return null;
 
   return (
-    <section className="bg-black py-20 text-white sm:py-28">
+    <section id="about" className="scroll-mt-24 bg-black py-20 text-white sm:py-28">
       <div className="container mx-auto grid gap-12 px-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
         <div className="space-y-6">
-          <p className="text-sm font-black uppercase tracking-[0.36em] text-red-500">
+          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent)]">
             {about.eyebrow}
           </p>
           <h2 className="text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
@@ -206,7 +244,7 @@ function HomeAboutSection({ about }: { about: any }) {
             {about.highlights.map((item: any, index: number) => (
               <article key={item.id} className="border border-white/12 bg-white/[0.04] p-5">
                 <div className="mb-4 flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center bg-red-600 text-sm font-black text-white">
+                  <span className="flex h-9 w-9 items-center justify-center bg-[var(--fd-accent)] text-sm font-black text-white">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <h3 className="text-xl font-black uppercase">{item.title}</h3>
@@ -225,10 +263,10 @@ function HomeReviewsSection({ reviews }: { reviews: any }) {
   if (!reviews.enabled || reviews.items.length === 0) return null;
 
   return (
-    <section className="bg-[#111114] py-20 text-white sm:py-28">
+    <section id="reviews" className="scroll-mt-24 bg-[#111114] py-20 text-white sm:py-28">
       <div className="container mx-auto px-4">
         <div className="mb-12 max-w-3xl space-y-4">
-          <p className="text-sm font-black uppercase tracking-[0.36em] text-red-500">
+          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent)]">
             {reviews.sourceLabel}
           </p>
           <h2 className="text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
@@ -259,7 +297,7 @@ function HomeReviewsSection({ reviews }: { reviews: any }) {
                     href={item.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex text-sm font-bold uppercase tracking-[0.16em] text-red-400 hover:text-red-300"
+                    className="inline-flex text-sm font-bold uppercase tracking-[0.16em] text-[var(--fd-accent)] hover:text-[var(--fd-accent-hover)]"
                   >
                     Оригинал на {item.source}
                   </a>
@@ -278,6 +316,7 @@ function HomeReviewsSection({ reviews }: { reviews: any }) {
 }
 
 export default function HomePage() {
+  const location = useLocation();
   const [publicSettings, setPublicSettings] = useState(() => getCachedPublicSettings());
   const homeTrustSettings = useMemo(
     () => parseHomeTrustSettings(publicSettings),
@@ -297,6 +336,17 @@ export default function HomePage() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!location.hash) return;
+
+    const element = document.getElementById(location.hash.slice(1));
+    if (element) {
+      window.requestAnimationFrame(() => {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [location.hash]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground selection:bg-black selection:text-white">
@@ -380,6 +430,7 @@ export default function HomePage() {
                 linkTo="/catalog?sort=popular"
                 fetchMode="popular"
                 dark
+                centerTitleOnMobile
               />
             </SafeRenderBoundary>
           </DeferredSection>

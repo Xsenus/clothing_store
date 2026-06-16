@@ -13,8 +13,10 @@ test("home trust hero falls back from broken json", () => {
   const hero = parseHomeTrustHero("{not-json");
 
   assert.equal(hero.enabled, true);
+  assert.equal(hero.eyebrowEnabled, false);
   assert.equal(hero.primaryCtaText, "Смотреть новинки");
   assert.equal(hero.primaryCtaUrl, "/catalog?sort=new");
+  assert.match(hero.metaText, /5000/);
 });
 
 test("home trust hero rejects unsafe cta urls", () => {
@@ -48,8 +50,30 @@ test("home trust benefits are sorted and hidden items are excluded", () => {
     ["a", "b"],
   );
   assert.deepEqual(
+    benefits.items.map((item) => item.layout),
+    ["left", "center"],
+  );
+  assert.deepEqual(
     benefits.allItems.map((item) => item.id),
     ["hidden", "a", "b"],
+  );
+});
+
+test("home trust benefit layouts are normalized", () => {
+  const benefits = parseHomeTrustBenefits(
+    JSON.stringify({
+      enabled: true,
+      title: "Benefits",
+      items: [
+        { id: "a", title: "First", description: "Visible", layout: "right", enabled: true },
+        { id: "b", title: "Second", description: "Visible", layout: "bad", enabled: true },
+      ],
+    }),
+  );
+
+  assert.deepEqual(
+    benefits.items.map((item) => item.layout),
+    ["right", "center"],
   );
 });
 

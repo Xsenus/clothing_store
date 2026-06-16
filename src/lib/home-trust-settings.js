@@ -16,8 +16,12 @@ export const HOME_TRUST_ICON_OPTIONS = [
   "message",
 ];
 
+export const HOME_TRUST_BENEFIT_LAYOUT_OPTIONS = ["left", "center", "right"];
+
 export const DEFAULT_HOME_TRUST_HERO = {
   enabled: true,
+  eyebrow: "",
+  eyebrowEnabled: false,
   title: "Смелость - это стиль",
   subtitle: "Переосмысляем уличную моду с демоническим характером",
   primaryCtaText: "Смотреть новинки",
@@ -25,7 +29,7 @@ export const DEFAULT_HOME_TRUST_HERO = {
   secondaryCtaText: "Выбрать свой образ",
   secondaryCtaUrl: "/catalog",
   secondaryCtaEnabled: true,
-  metaText: "Доставка 7-21 день • Бесплатно от 8000 ₽ • Возврат 14 дней",
+  metaText: "Доставка 1-7 дней в среднем • Бесплатно от 5000 ₽ • Возврат 14 дней",
 };
 
 export const DEFAULT_HOME_TRUST_BENEFITS = {
@@ -35,6 +39,7 @@ export const DEFAULT_HOME_TRUST_BENEFITS = {
     {
       id: "bold-design",
       icon: "flame",
+      layout: "left",
       title: "Смелый дизайн",
       description: "Уникальные принты, крой и детали, которых нет у других.",
       sortOrder: 10,
@@ -43,6 +48,7 @@ export const DEFAULT_HOME_TRUST_BENEFITS = {
     {
       id: "real-quality",
       icon: "shirt",
+      layout: "center",
       title: "Реальное качество",
       description: "Плотные ткани, аккуратная фурнитура и пошив. Носится долго.",
       sortOrder: 20,
@@ -51,14 +57,16 @@ export const DEFAULT_HOME_TRUST_BENEFITS = {
     {
       id: "honest-delivery",
       icon: "truck",
+      layout: "right",
       title: "Честные сроки",
-      description: "Понятная доставка без лишних обещаний. Средний срок - 7-21 день.",
+      description: "Понятная доставка без лишних обещаний. Средний срок - 1-7 дней.",
       sortOrder: 30,
       enabled: true,
     },
     {
       id: "easy-return",
       icon: "shield",
+      layout: "left",
       title: "Легко купить и вернуть",
       description: "Удобная оплата и возврат в течение 14 дней.",
       sortOrder: 40,
@@ -216,15 +224,31 @@ const normalizeIcon = (value, fallback = "sparkles") => {
   return HOME_TRUST_ICON_OPTIONS.includes(trimmed) ? trimmed : fallback;
 };
 
+const normalizeBenefitLayout = (value, fallback = "left") => {
+  const trimmed = normalizeOptionalString(value);
+  return HOME_TRUST_BENEFIT_LAYOUT_OPTIONS.includes(trimmed) ? trimmed : fallback;
+};
+
 const sortVisibleItems = (items) =>
   [...items]
     .filter((item) => item.enabled !== false)
     .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
+const withBenefitFallbackLayouts = (items) =>
+  items.map((item, index) => ({
+    ...item,
+    layout: normalizeBenefitLayout(
+      item.layout,
+      HOME_TRUST_BENEFIT_LAYOUT_OPTIONS[index % HOME_TRUST_BENEFIT_LAYOUT_OPTIONS.length],
+    ),
+  }));
+
 export const parseHomeTrustHero = (rawValue) => {
   const source = parseObjectSetting(rawValue, DEFAULT_HOME_TRUST_HERO);
   return {
     enabled: normalizeBoolean(source.enabled, DEFAULT_HOME_TRUST_HERO.enabled),
+    eyebrow: normalizeOptionalString(source.eyebrow),
+    eyebrowEnabled: normalizeBoolean(source.eyebrowEnabled, DEFAULT_HOME_TRUST_HERO.eyebrowEnabled),
     title: normalizeString(source.title, DEFAULT_HOME_TRUST_HERO.title),
     subtitle: normalizeString(source.subtitle, DEFAULT_HOME_TRUST_HERO.subtitle),
     primaryCtaText: normalizeString(source.primaryCtaText, DEFAULT_HOME_TRUST_HERO.primaryCtaText),
@@ -247,6 +271,7 @@ export const parseHomeTrustBenefits = (rawValue) => {
     return {
       id: normalizeItemId(item?.id, fallback.id || `benefit-${index + 1}`),
       icon: normalizeIcon(item?.icon, fallback.icon),
+      layout: normalizeOptionalString(item?.layout),
       title: normalizeString(item?.title, fallback.title),
       description: normalizeString(item?.description, fallback.description),
       sortOrder: normalizeSortOrder(item?.sortOrder, fallback.sortOrder ?? (index + 1) * 10),
@@ -254,11 +279,15 @@ export const parseHomeTrustBenefits = (rawValue) => {
     };
   });
 
+  const allItems = withBenefitFallbackLayouts(
+    [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)),
+  );
+
   return {
     enabled: normalizeBoolean(source.enabled, DEFAULT_HOME_TRUST_BENEFITS.enabled),
     title: normalizeString(source.title, DEFAULT_HOME_TRUST_BENEFITS.title),
-    items: sortVisibleItems(items),
-    allItems: items.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)),
+    items: withBenefitFallbackLayouts(sortVisibleItems(items)),
+    allItems,
   };
 };
 

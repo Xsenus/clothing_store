@@ -82,7 +82,10 @@ public record OrderPayload(
     string? PurchaseChannel,
     string? PaymentReturnUrl,
     string? VisitorId,
-    string? PromoCode);
+    string? PromoCode,
+    string? ShippingApartment,
+    string? ShippingEntrance,
+    string? ShippingFloor);
 
 public record AdminPromoCodePayload(
     string Code,

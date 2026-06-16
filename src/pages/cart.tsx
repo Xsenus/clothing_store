@@ -7,6 +7,9 @@ import { Link } from 'react-router';
 import { formatProductPrice } from '@/lib/price-format';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PageSeo from '@/components/PageSeo';
+import { getFreeShippingState } from '@/lib/checkout-shipping';
+import { fetchPublicSettings, getCachedPublicSettings } from '@/lib/site-settings';
+import { useEffect, useMemo, useState } from 'react';
 
 interface Product {
   _id: string;
@@ -20,6 +23,7 @@ interface Product {
 
 export default function CartPage() {
   const { cartItems, isLoading, clearCart } = useCart();
+  const [publicSettings, setPublicSettings] = useState(() => getCachedPublicSettings());
 
   const subtotal = cartItems.reduce((sum, item) => {
     const product = item.product as Product | undefined;
@@ -33,6 +37,24 @@ export default function CartPage() {
     if (!product?.sizeStock) return false;
     return (product.sizeStock[item.size] ?? 0) < item.quantity;
   });
+  const freeShippingState = useMemo(
+    () => getFreeShippingState(subtotal, publicSettings.checkout_free_shipping_threshold),
+    [publicSettings.checkout_free_shipping_threshold, subtotal],
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetchPublicSettings({ force: true }).then((settings) => {
+      if (mounted) {
+        setPublicSettings(settings);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   if (isLoading) return (
     <>
@@ -124,6 +146,11 @@ export default function CartPage() {
                     <span className="text-gray-600 uppercase tracking-wide">Доставка</span>
                     <span className="text-gray-400 italic">Рассчитывается при оформлении</span>
                   </div>
+                  <div className="border border-[color:var(--fd-accent)] bg-[var(--fd-accent-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
+                    {freeShippingState.reached
+                      ? `Бесплатная доставка от ${formatProductPrice(freeShippingState.threshold)} доступна`
+                      : `До бесплатной доставки осталось ${formatProductPrice(freeShippingState.remaining)}`}
+                  </div>
                 </div>
 
                 <div className="border-t border-gray-200 pt-6 mb-8">
@@ -134,7 +161,7 @@ export default function CartPage() {
                 </div>
 
                 <Link to="/checkout" className={`block w-full ${hasUnavailableItems ? "pointer-events-none" : ""}`}>
-                  <Button disabled={hasUnavailableItems} className="w-full py-6 text-lg font-black uppercase tracking-widest bg-black hover:bg-gray-800 text-white transition-all hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100">
+                  <Button disabled={hasUnavailableItems} className="w-full bg-[var(--fd-accent)] py-6 text-lg font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-soft)] transition-all hover:scale-[1.02] hover:bg-[var(--fd-accent-hover)] disabled:opacity-60 disabled:hover:scale-100">
                     ОФОРМИТЬ ЗАКАЗ
                   </Button>
                 </Link>

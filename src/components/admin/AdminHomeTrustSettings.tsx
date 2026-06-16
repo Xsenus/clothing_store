@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  HOME_TRUST_BENEFIT_LAYOUT_OPTIONS,
   HOME_TRUST_ICON_OPTIONS,
   parseHomeTrustAbout,
   parseHomeTrustBenefits,
@@ -39,6 +40,12 @@ const ICON_LABELS: Record<string, string> = {
   refresh: "Возврат",
   "badge-check": "Проверка",
   message: "Отзыв",
+};
+
+const LAYOUT_LABELS: Record<string, string> = {
+  left: "Слева",
+  center: "По центру",
+  right: "Справа",
 };
 
 const createId = (prefix: string) =>
@@ -151,6 +158,58 @@ export default function AdminHomeTrustSettings({
         </p>
       </div>
 
+      <section className="space-y-4 border border-neutral-200 p-4">
+        <div className="space-y-1">
+          <h3 className="text-lg font-black uppercase tracking-tight">Дизайн и доставка</h3>
+          <p className="text-sm text-muted-foreground">
+            Акцентный цвет кнопок и порог бесплатной доставки, которые используются на витрине и в оформлении заказа.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="space-y-1">
+            <FieldLabel htmlFor="site-accent-color">Основной акцент</FieldLabel>
+            <div className="flex gap-2">
+              <Input
+                id="site-accent-color"
+                type="color"
+                value={settings.site_accent_color || "#dc2626"}
+                onChange={(event) => updateSetting("site_accent_color", event.target.value)}
+                className="h-10 w-14 p-1"
+              />
+              <Input
+                value={settings.site_accent_color || "#dc2626"}
+                onChange={(event) => updateSetting("site_accent_color", event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <FieldLabel htmlFor="site-accent-hover-color">Акцент при наведении</FieldLabel>
+            <div className="flex gap-2">
+              <Input
+                id="site-accent-hover-color"
+                type="color"
+                value={settings.site_accent_hover_color || "#ef4444"}
+                onChange={(event) => updateSetting("site_accent_hover_color", event.target.value)}
+                className="h-10 w-14 p-1"
+              />
+              <Input
+                value={settings.site_accent_hover_color || "#ef4444"}
+                onChange={(event) => updateSetting("site_accent_hover_color", event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <FieldLabel htmlFor="checkout-free-shipping-threshold">Бесплатная доставка от</FieldLabel>
+            <Input
+              id="checkout-free-shipping-threshold"
+              inputMode="numeric"
+              value={settings.checkout_free_shipping_threshold || "5000"}
+              onChange={(event) => updateSetting("checkout_free_shipping_threshold", event.target.value)}
+            />
+          </div>
+        </div>
+      </section>
+
       <SectionShell
         title="Hero"
         description="Первый экран с оффером, CTA и короткой строкой доверия."
@@ -158,6 +217,17 @@ export default function AdminHomeTrustSettings({
         onToggle={(enabled) => saveHero({ enabled })}
       >
         <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1">
+            <FieldLabel htmlFor="home-hero-eyebrow">Надзаголовок</FieldLabel>
+            <Input id="home-hero-eyebrow" value={hero.eyebrow} onChange={(event) => saveHero({ eyebrow: event.target.value })} />
+          </div>
+          <label className="flex items-center gap-2 self-end pb-2 text-sm font-semibold">
+            <Checkbox
+              checked={hero.eyebrowEnabled}
+              onCheckedChange={(checked) => saveHero({ eyebrowEnabled: checked === true })}
+            />
+            Показывать надзаголовок
+          </label>
           <div className="space-y-1">
             <FieldLabel htmlFor="home-hero-title">Заголовок</FieldLabel>
             <Input id="home-hero-title" value={hero.title} onChange={(event) => saveHero({ title: event.target.value })} />
@@ -226,7 +296,7 @@ export default function AdminHomeTrustSettings({
                   </Button>
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-[180px_1fr_1fr]">
+              <div className="grid gap-3 md:grid-cols-[180px_180px_1fr_1fr]">
                 <div className="space-y-1">
                   <FieldLabel htmlFor={`benefit-icon-${item.id}`}>Иконка</FieldLabel>
                   <Select value={item.icon} onValueChange={(value) => updateBenefit(item.id, { icon: value })}>
@@ -234,6 +304,17 @@ export default function AdminHomeTrustSettings({
                     <SelectContent>
                       {HOME_TRUST_ICON_OPTIONS.map((icon) => (
                         <SelectItem key={icon} value={icon}>{ICON_LABELS[icon] || icon}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <FieldLabel htmlFor={`benefit-layout-${item.id}`}>Иконка в карточке</FieldLabel>
+                  <Select value={item.layout} onValueChange={(value) => updateBenefit(item.id, { layout: value })}>
+                    <SelectTrigger id={`benefit-layout-${item.id}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {HOME_TRUST_BENEFIT_LAYOUT_OPTIONS.map((layout) => (
+                        <SelectItem key={layout} value={layout}>{LAYOUT_LABELS[layout] || layout}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -265,6 +346,7 @@ export default function AdminHomeTrustSettings({
                   {
                     id: createId("benefit"),
                     icon: "sparkles",
+                    layout: "left",
                     title: "Новое преимущество",
                     description: "Коротко опишите, почему покупателю стоит выбрать магазин.",
                     sortOrder: (benefits.allItems.length + 1) * 10,

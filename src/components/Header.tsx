@@ -125,11 +125,14 @@ export default function Header() {
   const isHeroHeader = location.pathname === "/" && !isScrolled;
   const shouldHideHeroActions = isHeroHeader;
   const shouldHideDesktopAccountTrigger = isHeroHeader;
+  const activePathname = `${location.pathname}${location.hash}`;
   const cartLabel =
     totalItems > 0 ? `Корзина, товаров: ${totalItems}` : "Корзина";
   const navLinks = [
     { name: "ГЛАВНАЯ", path: "/" },
     { name: "КАТАЛОГ", path: "/catalog" },
+    { name: "О НАС", path: "/#about" },
+    { name: "ОТЗЫВЫ", path: "/#reviews" },
   ];
   const headerSocialLinks = headerLinks.slice(0, 4);
   const socialsPageEnabled = pageLinks.length > 0;
@@ -197,14 +200,14 @@ export default function Header() {
             : "bg-transparent text-foreground",
       )}
     >
-      <div className="container mx-auto flex h-16 items-center justify-between px-4 md:grid md:h-20 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
-        <div className="md:hidden">
+      <div className="container mx-auto flex h-16 items-center justify-between px-4 lg:grid lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
+        <div className="lg:hidden">
           {!shouldHideHeroActions && MobileMenuComponent ? (
             <MobileMenuComponent
               open={isMobileMenuOpen}
               onOpenChange={setIsMobileMenuOpen}
               navLinks={navLinks}
-              activePathname={location.pathname}
+              activePathname={activePathname}
               isAuthenticated={isAuthenticated}
               userPrimaryLabel={userPrimaryLabel}
               userSecondaryLabel={userSecondaryLabel}
@@ -237,18 +240,18 @@ export default function Header() {
 
         <Link
           to="/"
-          className="site-header-brand max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-tighter sm:text-xl md:max-w-full md:justify-self-start md:text-3xl"
+          className="site-header-brand max-w-[calc(100vw-7.5rem)] truncate text-lg font-black uppercase leading-none tracking-normal sm:text-xl lg:max-w-full lg:justify-self-start lg:text-3xl"
         >
           FASHION_DEMON
         </Link>
 
-        <nav className="hidden items-center gap-8 md:flex md:justify-self-center">
+        <nav className="hidden items-center gap-8 lg:flex lg:justify-self-center">
           {navLinks.map((link) => (
             <Link
               key={link.path}
               to={link.path}
               className={`site-header-nav-link text-sm font-bold tracking-widest transition-colors hover:text-muted-foreground ${
-                location.pathname === link.path
+                (link.path.includes("#") ? activePathname === link.path : location.pathname === link.path)
                   ? "underline decoration-2 underline-offset-4"
                   : ""
               }`}
@@ -258,14 +261,14 @@ export default function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 md:justify-self-end md:gap-4">
+        <div className="flex items-center gap-2 lg:justify-self-end lg:gap-4">
           {!shouldHideHeroActions && headerSocialLinks.length > 0 ? (
             <div className="hidden sm:flex">
               <SocialLinksList items={headerSocialLinks} variant="header" />
             </div>
           ) : null}
 
-          <div className="hidden md:block">
+          <div className="hidden lg:block">
             {!shouldHideHeroActions &&
             isAuthenticated &&
             !shouldHideDesktopAccountTrigger ? (

@@ -15,6 +15,9 @@ interface Product {
   images: string[];
   isNew?: boolean;
   likesCount?: number;
+  catalogImageUrl?: string;
+  sizes?: string[];
+  sizeStock?: Record<string, number>;
 }
 
 interface HomeProductSectionProps {
@@ -22,6 +25,7 @@ interface HomeProductSectionProps {
   linkTo: string;
   fetchMode: "new" | "popular";
   dark?: boolean;
+  centerTitleOnMobile?: boolean;
 }
 
 function ProductGridPlaceholder() {
@@ -51,6 +55,7 @@ export default function HomeProductSection({
   linkTo,
   fetchMode,
   dark = false,
+  centerTitleOnMobile = false,
 }: HomeProductSectionProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -92,8 +97,8 @@ export default function HomeProductSection({
 
   return (
     <>
-      <div className="mb-12 flex items-end justify-between">
-        <h2 className="text-4xl font-black uppercase tracking-tighter md:text-6xl">
+      <div className={centerTitleOnMobile ? "mb-12 flex flex-col items-center justify-between gap-4 text-center md:flex-row md:items-end md:text-left" : "mb-12 flex items-end justify-between"}>
+        <h2 className="text-4xl font-black uppercase tracking-normal md:text-6xl">
           {title}
         </h2>
         <Link to={linkTo} className={linkClassName}>

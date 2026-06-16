@@ -17,6 +17,7 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useProductMediaBackground } from "@/hooks/useProductMediaBackground";
 import { getProductCardImageDisplayClasses } from "@/lib/product-card-background";
+import { getCompactProductSizes } from "@/lib/product-sizes";
 import { formatProductPrice } from "@/lib/price-format";
 import {
   getCachedProductLikeState,
@@ -139,6 +140,7 @@ export default function ProductCard({
       : imageFitMode === "fill"
         ? ""
         : "group-hover:scale-105";
+  const compactSizes = getCompactProductSizes(product, 5);
 
   useEffect(() => {
     const cachedLikeState = getCachedProductLikeState(product._id);
@@ -426,6 +428,26 @@ export default function ProductCard({
           <span>{likesCount}</span>
         </div>
       </div>
+      {compactSizes.total > 0 && (
+        <div className="mt-3 flex min-h-6 flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            Размеры
+          </span>
+          {compactSizes.visible.map((size) => (
+            <span
+              key={size}
+              className="inline-flex h-6 min-w-6 items-center justify-center border border-black/15 px-1.5 text-[11px] font-black uppercase leading-none text-black"
+            >
+              {size}
+            </span>
+          ))}
+          {compactSizes.hiddenCount > 0 && (
+            <span className="inline-flex h-6 items-center justify-center px-1 text-[11px] font-bold text-muted-foreground">
+              +{compactSizes.hiddenCount}
+            </span>
+          )}
+        </div>
+      )}
       {isHiddenProduct && isAdmin && (
         <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
           Скрыт с витрины: видно только админу
