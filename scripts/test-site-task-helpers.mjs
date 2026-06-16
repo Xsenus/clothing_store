@@ -29,7 +29,45 @@ test("site theme derives soft accent from selected color", () => {
     accent: "#102030",
     hover: "#405060",
     soft: "rgba(16, 32, 48, 0.16)",
+    zones: {
+      hero: {
+        accent: "#102030",
+        hover: "#405060",
+        soft: "rgba(16, 32, 48, 0.16)",
+      },
+      decor: {
+        accent: "#102030",
+        hover: "#405060",
+        soft: "rgba(16, 32, 48, 0.16)",
+      },
+      product: {
+        accent: "#102030",
+        hover: "#405060",
+        soft: "rgba(16, 32, 48, 0.16)",
+      },
+      checkout: {
+        accent: "#102030",
+        hover: "#405060",
+        soft: "rgba(16, 32, 48, 0.16)",
+      },
+    },
   });
+});
+
+test("site theme lets zones override base accent safely", () => {
+  const theme = resolveSiteThemeSettings({
+    site_accent_color: "#102030",
+    site_accent_hover_color: "#405060",
+    site_accent_hero_color: "#aa0000",
+    site_accent_hero_hover_color: "#bb0000",
+    site_accent_product_color: "not-a-color",
+  });
+
+  assert.equal(theme.zones.hero.accent, "#aa0000");
+  assert.equal(theme.zones.hero.hover, "#bb0000");
+  assert.equal(theme.zones.hero.soft, "rgba(170, 0, 0, 0.16)");
+  assert.equal(theme.zones.product.accent, "#102030");
+  assert.equal(theme.zones.checkout.hover, "#405060");
 });
 
 test("free shipping threshold uses sane fallback and state", () => {

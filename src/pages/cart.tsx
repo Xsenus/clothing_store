@@ -146,7 +146,7 @@ export default function CartPage() {
                     <span className="text-gray-600 uppercase tracking-wide">Доставка</span>
                     <span className="text-gray-400 italic">Рассчитывается при оформлении</span>
                   </div>
-                  <div className="border border-[color:var(--fd-accent)] bg-[var(--fd-accent-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
+                  <div className="border border-[color:var(--fd-accent-checkout)] bg-[var(--fd-accent-checkout-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
                     {freeShippingState.reached
                       ? `Бесплатная доставка от ${formatProductPrice(freeShippingState.threshold)} доступна`
                       : `До бесплатной доставки осталось ${formatProductPrice(freeShippingState.remaining)}`}
@@ -161,7 +161,7 @@ export default function CartPage() {
                 </div>
 
                 <Link to="/checkout" className={`block w-full ${hasUnavailableItems ? "pointer-events-none" : ""}`}>
-                  <Button disabled={hasUnavailableItems} className="w-full bg-[var(--fd-accent)] py-6 text-lg font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-soft)] transition-all hover:scale-[1.02] hover:bg-[var(--fd-accent-hover)] disabled:opacity-60 disabled:hover:scale-100">
+                  <Button disabled={hasUnavailableItems} className="w-full bg-[var(--fd-accent-checkout)] py-6 text-lg font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-checkout-soft)] transition-all hover:scale-[1.02] hover:bg-[var(--fd-accent-checkout-hover)] disabled:opacity-60 disabled:hover:scale-100">
                     ОФОРМИТЬ ЗАКАЗ
                   </Button>
                 </Link>

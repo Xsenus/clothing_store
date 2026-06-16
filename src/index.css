@@ -36,6 +36,18 @@
     --fd-accent: #dc2626;
     --fd-accent-hover: #ef4444;
     --fd-accent-soft: rgba(220, 38, 38, 0.16);
+    --fd-accent-hero: #dc2626;
+    --fd-accent-hero-hover: #ef4444;
+    --fd-accent-hero-soft: rgba(220, 38, 38, 0.16);
+    --fd-accent-decor: #dc2626;
+    --fd-accent-decor-hover: #ef4444;
+    --fd-accent-decor-soft: rgba(220, 38, 38, 0.16);
+    --fd-accent-product: #dc2626;
+    --fd-accent-product-hover: #ef4444;
+    --fd-accent-product-soft: rgba(220, 38, 38, 0.16);
+    --fd-accent-checkout: #dc2626;
+    --fd-accent-checkout-hover: #ef4444;
+    --fd-accent-checkout-soft: rgba(220, 38, 38, 0.16);
   }
 
   .dark {

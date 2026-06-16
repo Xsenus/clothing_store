@@ -48,6 +48,61 @@ const LAYOUT_LABELS: Record<string, string> = {
   right: "Справа",
 };
 
+const ACCENT_COLOR_FIELDS = [
+  {
+    title: "Общий fallback",
+    description: "Используется, если цвет конкретной зоны не задан.",
+    colorKey: "site_accent_color",
+    hoverKey: "site_accent_hover_color",
+    colorFallback: "#dc2626",
+    hoverFallback: "#ef4444",
+  },
+  {
+    title: "Hero и первая кнопка",
+    description: "Первый экран главной и его основной CTA.",
+    colorKey: "site_accent_hero_color",
+    hoverKey: "site_accent_hero_hover_color",
+    colorFallback: "#dc2626",
+    hoverFallback: "#ef4444",
+  },
+  {
+    title: "Декор и доверие",
+    description: "Линии, иконки преимуществ, подписи в О нас и Отзывы.",
+    colorKey: "site_accent_decor_color",
+    hoverKey: "site_accent_decor_hover_color",
+    colorFallback: "#dc2626",
+    hoverFallback: "#ef4444",
+  },
+  {
+    title: "Товар",
+    description: "Кнопка В корзину и товарные CTA.",
+    colorKey: "site_accent_product_color",
+    hoverKey: "site_accent_product_hover_color",
+    colorFallback: "#dc2626",
+    hoverFallback: "#ef4444",
+  },
+  {
+    title: "Корзина и checkout",
+    description: "Оформление заказа, бесплатная доставка и финальные CTA.",
+    colorKey: "site_accent_checkout_color",
+    hoverKey: "site_accent_checkout_hover_color",
+    colorFallback: "#dc2626",
+    hoverFallback: "#ef4444",
+  },
+];
+
+const isHexColor = (value: string | undefined) =>
+  /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim());
+
+const getColorInputValue = (
+  settings: SettingsMap,
+  key: string,
+  fallback: string,
+) => {
+  const value = settings[key];
+  return isHexColor(value) ? value : fallback;
+};
+
 const createId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -165,39 +220,49 @@ export default function AdminHomeTrustSettings({
             Акцентный цвет кнопок и порог бесплатной доставки, которые используются на витрине и в оформлении заказа.
           </p>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="space-y-1">
-            <FieldLabel htmlFor="site-accent-color">Основной акцент</FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                id="site-accent-color"
-                type="color"
-                value={settings.site_accent_color || "#dc2626"}
-                onChange={(event) => updateSetting("site_accent_color", event.target.value)}
-                className="h-10 w-14 p-1"
-              />
-              <Input
-                value={settings.site_accent_color || "#dc2626"}
-                onChange={(event) => updateSetting("site_accent_color", event.target.value)}
-              />
+        <div className="grid gap-3 xl:grid-cols-2">
+          {ACCENT_COLOR_FIELDS.map((field) => (
+            <div key={field.colorKey} className="space-y-3 border border-neutral-200 p-3">
+              <div>
+                <h4 className="text-sm font-black uppercase tracking-tight">{field.title}</h4>
+                <p className="text-xs text-muted-foreground">{field.description}</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <FieldLabel htmlFor={`${field.colorKey}-picker`}>Основной цвет</FieldLabel>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`${field.colorKey}-picker`}
+                      type="color"
+                      value={getColorInputValue(settings, field.colorKey, field.colorFallback)}
+                      onChange={(event) => updateSetting(field.colorKey, event.target.value)}
+                      className="h-10 w-14 p-1"
+                    />
+                    <Input
+                      value={settings[field.colorKey] || field.colorFallback}
+                      onChange={(event) => updateSetting(field.colorKey, event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <FieldLabel htmlFor={`${field.hoverKey}-picker`}>Hover-цвет</FieldLabel>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`${field.hoverKey}-picker`}
+                      type="color"
+                      value={getColorInputValue(settings, field.hoverKey, field.hoverFallback)}
+                      onChange={(event) => updateSetting(field.hoverKey, event.target.value)}
+                      className="h-10 w-14 p-1"
+                    />
+                    <Input
+                      value={settings[field.hoverKey] || field.hoverFallback}
+                      onChange={(event) => updateSetting(field.hoverKey, event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="space-y-1">
-            <FieldLabel htmlFor="site-accent-hover-color">Акцент при наведении</FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                id="site-accent-hover-color"
-                type="color"
-                value={settings.site_accent_hover_color || "#ef4444"}
-                onChange={(event) => updateSetting("site_accent_hover_color", event.target.value)}
-                className="h-10 w-14 p-1"
-              />
-              <Input
-                value={settings.site_accent_hover_color || "#ef4444"}
-                onChange={(event) => updateSetting("site_accent_hover_color", event.target.value)}
-              />
-            </div>
-          </div>
+          ))}
           <div className="space-y-1">
             <FieldLabel htmlFor="checkout-free-shipping-threshold">Бесплатная доставка от</FieldLabel>
             <Input

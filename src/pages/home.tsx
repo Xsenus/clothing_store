@@ -130,13 +130,13 @@ function HomeHeroSection({ hero }: { hero: any }) {
 
   return (
     <section className="relative flex min-h-[calc(100svh-72px)] items-center overflow-hidden bg-black text-white">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,transparent_34%,var(--fd-accent-soft)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,transparent_34%,var(--fd-accent-hero-soft)_100%)]" />
       <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
       <div className="container relative z-10 mx-auto px-4 py-20 md:py-28">
         <div className="mx-auto max-w-5xl space-y-8 text-center">
           {hero.eyebrowEnabled && hero.eyebrow ? (
-            <p className="text-sm font-black uppercase tracking-[0.42em] text-[var(--fd-accent)]">
+            <p className="text-sm font-black uppercase tracking-[0.42em] text-[var(--fd-accent-hero)]">
               {hero.eyebrow}
             </p>
           ) : null}
@@ -154,7 +154,7 @@ function HomeHeroSection({ hero }: { hero: any }) {
           <div className="mx-auto flex w-full max-w-[20rem] flex-col justify-center gap-3 sm:max-w-none sm:flex-row sm:items-center">
             <TrustCtaLink
               to={hero.primaryCtaUrl}
-              className="inline-flex min-h-14 w-full items-center justify-center bg-[var(--fd-accent)] px-6 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-[var(--fd-accent-hover)] sm:w-auto sm:px-8"
+              className="inline-flex min-h-14 w-full items-center justify-center bg-[var(--fd-accent-hero)] px-6 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-[var(--fd-accent-hero-hover)] sm:w-auto sm:px-8"
             >
               {hero.primaryCtaText}
             </TrustCtaLink>
@@ -188,7 +188,7 @@ function HomeBenefitsSection({ benefits }: { benefits: any }) {
           <h2 className="max-w-3xl text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
             {benefits.title}
           </h2>
-          <div className="h-1 w-24 bg-[var(--fd-accent)]" aria-hidden="true" />
+          <div className="h-1 w-24 bg-[var(--fd-accent-decor)]" aria-hidden="true" />
         </div>
         <div className="grid gap-px overflow-hidden border border-white/10 bg-white/10 md:grid-cols-2 xl:grid-cols-4">
           {benefits.items.map((item: any, index: number) => {
@@ -207,7 +207,7 @@ function HomeBenefitsSection({ benefits }: { benefits: any }) {
             return (
               <article key={item.id} className="min-h-[260px] bg-[#17171b] p-6 sm:p-8">
                 <div className={iconWrapperClassName}>
-                  <Icon className="h-10 w-10 text-[var(--fd-accent)]" strokeWidth={2.4} />
+                  <Icon className="h-10 w-10 text-[var(--fd-accent-decor)]" strokeWidth={2.4} />
                 </div>
                 <div className={contentClassName}>
                   <h3 className="mb-4 text-2xl font-black uppercase leading-tight">
@@ -231,7 +231,7 @@ function HomeAboutSection({ about }: { about: any }) {
     <section id="about" className="scroll-mt-24 bg-black py-20 text-white sm:py-28">
       <div className="container mx-auto grid gap-12 px-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
         <div className="space-y-6">
-          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent)]">
+          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent-decor)]">
             {about.eyebrow}
           </p>
           <h2 className="text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
@@ -244,7 +244,7 @@ function HomeAboutSection({ about }: { about: any }) {
             {about.highlights.map((item: any, index: number) => (
               <article key={item.id} className="border border-white/12 bg-white/[0.04] p-5">
                 <div className="mb-4 flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center bg-[var(--fd-accent)] text-sm font-black text-white">
+                  <span className="flex h-9 w-9 items-center justify-center bg-[var(--fd-accent-decor)] text-sm font-black text-white">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <h3 className="text-xl font-black uppercase">{item.title}</h3>
@@ -266,7 +266,7 @@ function HomeReviewsSection({ reviews }: { reviews: any }) {
     <section id="reviews" className="scroll-mt-24 bg-[#111114] py-20 text-white sm:py-28">
       <div className="container mx-auto px-4">
         <div className="mb-12 max-w-3xl space-y-4">
-          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent)]">
+          <p className="text-sm font-black uppercase tracking-[0.36em] text-[var(--fd-accent-decor)]">
             {reviews.sourceLabel}
           </p>
           <h2 className="text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
@@ -297,7 +297,7 @@ function HomeReviewsSection({ reviews }: { reviews: any }) {
                     href={item.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex text-sm font-bold uppercase tracking-[0.16em] text-[var(--fd-accent)] hover:text-[var(--fd-accent-hover)]"
+                    className="inline-flex text-sm font-bold uppercase tracking-[0.16em] text-[var(--fd-accent-decor)] hover:text-[var(--fd-accent-decor-hover)]"
                   >
                     Оригинал на {item.source}
                   </a>

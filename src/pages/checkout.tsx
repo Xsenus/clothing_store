@@ -1554,7 +1554,7 @@ export default function CheckoutPage() {
                       Для администратора показаны все включенные службы доставки и их статус. Покупателю видны только рабочие варианты.
                     </p>
                   ) : null}
-                  <div className="border border-[color:var(--fd-accent)] bg-[var(--fd-accent-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
+                  <div className="border border-[color:var(--fd-accent-checkout)] bg-[var(--fd-accent-checkout-soft)] p-3 text-xs font-bold uppercase tracking-[0.12em] text-black">
                     {freeShippingState.reached
                       ? `Бесплатная доставка от ${formatProductPrice(freeShippingState.threshold)} применится к доступным службам`
                       : `До бесплатной доставки осталось ${formatProductPrice(freeShippingState.remaining)}`}
@@ -1911,7 +1911,7 @@ export default function CheckoutPage() {
 
                 <Button
                   type="submit"
-                  className="h-16 w-full rounded-none bg-[var(--fd-accent)] text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-soft)] transition-all hover:bg-[var(--fd-accent-hover)] disabled:opacity-60"
+                  className="h-16 w-full rounded-none bg-[var(--fd-accent-checkout)] text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-checkout-soft)] transition-all hover:bg-[var(--fd-accent-checkout-hover)] disabled:opacity-60"
                   disabled={!canSubmit}
                 >
                   {loading ? 'Обработка...' : `ОФОРМИТЬ ЗАКАЗ - ${formatProductPrice(total)}`}
@@ -2036,7 +2036,7 @@ export default function CheckoutPage() {
                   </span>
                 </div>
                 {freeShippingState.reached ? (
-                  <div className="text-xs uppercase tracking-wide text-[color:var(--fd-accent)]">
+                  <div className="text-xs uppercase tracking-wide text-[color:var(--fd-accent-checkout)]">
                     Бесплатная доставка от {formatProductPrice(freeShippingState.threshold)} применена к доступному тарифу.
                   </div>
                 ) : (

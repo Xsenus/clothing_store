@@ -866,7 +866,7 @@ export default function ProductDetailPage() {
 
             <Button 
               size="lg" 
-              className="w-full bg-[var(--fd-accent)] py-8 text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-soft)] transition-all hover:bg-[var(--fd-accent-hover)] disabled:opacity-60"
+              className="w-full bg-[var(--fd-accent-product)] py-8 text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_var(--fd-accent-product-soft)] transition-all hover:bg-[var(--fd-accent-product-hover)] disabled:opacity-60"
               onClick={handleAddToCart}
               disabled={!selectedSize || quantity <= 0}
             >

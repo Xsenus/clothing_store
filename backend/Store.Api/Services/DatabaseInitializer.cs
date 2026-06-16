@@ -760,6 +760,14 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "checkout_free_shipping_threshold", "5000");
         await EnsureAppSettingExistsAsync(db, "site_accent_color", "#dc2626");
         await EnsureAppSettingExistsAsync(db, "site_accent_hover_color", "#ef4444");
+        await EnsureAppSettingExistsAsync(db, "site_accent_hero_color", "#dc2626");
+        await EnsureAppSettingExistsAsync(db, "site_accent_hero_hover_color", "#ef4444");
+        await EnsureAppSettingExistsAsync(db, "site_accent_decor_color", "#dc2626");
+        await EnsureAppSettingExistsAsync(db, "site_accent_decor_hover_color", "#ef4444");
+        await EnsureAppSettingExistsAsync(db, "site_accent_product_color", "#dc2626");
+        await EnsureAppSettingExistsAsync(db, "site_accent_product_hover_color", "#ef4444");
+        await EnsureAppSettingExistsAsync(db, "site_accent_checkout_color", "#dc2626");
+        await EnsureAppSettingExistsAsync(db, "site_accent_checkout_hover_color", "#ef4444");
         await EnsureAppSettingExistsAsync(db, "checkout_self_pickup_title", "Новосибирск");
         await EnsureAppSettingExistsAsync(
             db,
