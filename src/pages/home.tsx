@@ -133,7 +133,7 @@ function HomeHeroSection({ hero }: { hero: any }) {
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,transparent_34%,var(--fd-accent-hero-soft)_100%)]" />
       <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
-      <div className="container relative z-10 mx-auto px-4 py-20 md:py-28">
+      <div className="container relative z-10 mx-auto px-4 pb-16 pt-28 md:py-28">
         <div className="mx-auto max-w-5xl space-y-8 text-center">
           {hero.eyebrowEnabled && hero.eyebrow ? (
             <p className="text-sm font-black uppercase tracking-[0.42em] text-[var(--fd-accent-hero)]">
@@ -338,15 +338,38 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!location.hash) return;
+    const currentHash = location.hash || window.location.hash;
+    if (!currentHash) return;
 
-    const element = document.getElementById(location.hash.slice(1));
-    if (element) {
-      window.requestAnimationFrame(() => {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    }
-  }, [location.hash]);
+    let cancelled = false;
+    const targetId = decodeURIComponent(currentHash.slice(1));
+    const isMobileViewport = window.matchMedia("(max-width: 767px)").matches;
+    const scrollToHashTarget = (behavior: ScrollBehavior) => {
+      const element = document.getElementById(targetId);
+      if (!cancelled && element) {
+        const targetTop = element.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo({ top: Math.max(0, targetTop), left: 0, behavior });
+      }
+    };
+
+    window.requestAnimationFrame(() => {
+      scrollToHashTarget("smooth");
+    });
+
+    const retryDelays = isMobileViewport
+      ? [120, 320, 620, 1000]
+      : [120, 320, 620];
+    const retryTimeoutIds = retryDelays.map((delay) =>
+      window.setTimeout(() => {
+        scrollToHashTarget("auto");
+      }, delay),
+    );
+
+    return () => {
+      cancelled = true;
+      retryTimeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, [location.hash, location.pathname]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground selection:bg-black selection:text-white">
