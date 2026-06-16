@@ -3,6 +3,7 @@ import Footer from '@/components/Footer';
 import "./admin.css";
 import { getBrowserStorageItem, removeBrowserStorageItem, setBrowserStorageItem } from '@/lib/browser-storage';
 import AdminAnalyticsTab, { type AdminAnalyticsResponse } from '@/components/admin/AdminAnalyticsTab';
+import AdminHomeTrustSettings from '@/components/admin/AdminHomeTrustSettings';
 import AdminPromoCodesSettings from '@/components/admin/AdminPromoCodesSettings';
 import AdminSocialLinksSettings from '@/components/admin/AdminSocialLinksSettings';
 import {
@@ -67,6 +68,10 @@ import {
 } from '@/lib/image-upload-optimization';
 import { getCachedPublicSettings, setCachedPublicSettings } from '@/lib/site-settings';
 import { DEFAULT_SITE_SOCIAL_LINKS_CONFIG_JSON } from '@/lib/social-links';
+import {
+  DEFAULT_HOME_TRUST_SETTINGS,
+  HOME_TRUST_SETTINGS_KEYS,
+} from '@/lib/home-trust-settings';
 import {
   getYooKassaConfigurationIssues,
   getYooMoneyConfigurationIssues,
@@ -1395,7 +1400,7 @@ type DictionaryKind = "sizes" | "materials" | "colors" | "categories" | "collect
 
 const ADMIN_NAVIGATION_STORAGE_KEY = "fashion_demon_admin_navigation_v1";
 const ADMIN_TAB_VALUES = ["products", "analytics", "orders", "users", "gallery", "dictionaries", "settings"] as const;
-const SETTINGS_GROUP_VALUES = ["orders", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
+const SETTINGS_GROUP_VALUES = ["orders", "home", "auth", "account-merge", "promo-codes", "smtp", "metrics", "integrations", "legal", "backup", "general"] as const;
 const AUTH_SETTINGS_CATALOG_VALUES = ["telegram", "telegram-widget", "telegram-gateway", "google", "vk", "yandex"] as const;
 const GENERAL_SETTINGS_CATALOG_VALUES = ["branding", "checkout", "catalog-card", "catalog-page", "product-page", "social-links", "upload-media"] as const;
 const INTEGRATION_CATALOG_VALUES = ["telegram", "yoomoney", "yookassa", "robokassa", "dadata", "yandex", "cdek", "russian-post", "avito"] as const;
@@ -1723,6 +1728,7 @@ const DEFAULT_APP_SETTINGS: Record<string, string> = {
   product_detail_background_color: "#e9e3da",
   product_detail_image_fit_mode: "contain",
   product_detail_media_size_mode: "compact",
+  ...DEFAULT_HOME_TRUST_SETTINGS,
   privacy_policy: PRIVACY_POLICY,
   user_agreement: USER_AGREEMENT,
   public_offer: PUBLIC_OFFER,
@@ -1951,6 +1957,8 @@ const getSettingsKeysForSaveScope = ({
   switch (settingsGroup) {
     case "orders":
       return ORDER_SETTINGS_KEYS;
+    case "home":
+      return HOME_TRUST_SETTINGS_KEYS;
     case "auth":
       return dedupeSettingKeys(
         AUTH_CORE_SETTING_KEYS,
@@ -5970,6 +5978,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const telegramBotFormErrors = getTelegramBotFormErrors(telegramBotForm);
 
   const settingsGroups = [
+    { id: "home", label: "Главная" },
     { id: "orders", label: "Заказы" },
     { id: "auth", label: "Авторизация" },
     { id: "account-merge", label: "Объединение аккаунтов" },
@@ -9794,6 +9803,13 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 </div>
 
                 <div className="order-2 space-y-4 lg:order-2">
+                  {selectedSettingsGroup === "home" && (
+                    <AdminHomeTrustSettings
+                      settings={settings}
+                      updateSetting={updateSetting}
+                    />
+                  )}
+
                   {selectedSettingsGroup === "account-merge" && renderUserMergePanel()}
 
                   {selectedSettingsGroup === "auth" && (

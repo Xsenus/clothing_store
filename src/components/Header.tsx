@@ -189,10 +189,12 @@ export default function Header() {
     <header
       data-hero-header={isHeroHeader ? "true" : "false"}
       className={cn(
-        "fixed left-0 right-0 top-0 z-50 text-foreground transition-all duration-300",
+        "fixed left-0 right-0 top-0 z-50 transition-all duration-300",
         isScrolled
-          ? "border-b bg-background/80 backdrop-blur-md"
-          : "bg-transparent",
+          ? "border-b bg-background/80 text-foreground backdrop-blur-md"
+          : isHeroHeader
+            ? "bg-transparent text-white"
+            : "bg-transparent text-foreground",
       )}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:grid md:h-20 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">

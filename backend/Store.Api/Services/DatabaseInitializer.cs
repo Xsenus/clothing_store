@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -691,6 +692,10 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_title", "Коллекции");
         await EnsureAppSettingExistsAsync(db, "catalog_collections_slider_description", "");
+        foreach (var (key, value) in GetDefaultHomeTrustSettings())
+        {
+            await EnsureAppSettingExistsAsync(db, key, value);
+        }
         await EnsureAppSettingExistsAsync(db, "telegram_login_enabled", "true");
         await EnsureAppSettingExistsAsync(db, "telegram_widget_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "telegram_gateway_enabled", "false");
@@ -817,6 +822,64 @@ public class DatabaseInitializer
         }
 
         await db.SaveChangesAsync();
+    }
+
+    private static IReadOnlyDictionary<string, string> GetDefaultHomeTrustSettings()
+    {
+        static string ToJson(object value) => JsonSerializer.Serialize(value);
+
+        return new Dictionary<string, string>
+        {
+            ["home_trust_hero_json"] = ToJson(new
+            {
+                enabled = true,
+                title = "Смелость - это стиль",
+                subtitle = "Переосмысляем уличную моду с демоническим характером",
+                primaryCtaText = "Смотреть новинки",
+                primaryCtaUrl = "/catalog?sort=new",
+                secondaryCtaText = "Выбрать свой образ",
+                secondaryCtaUrl = "/catalog",
+                secondaryCtaEnabled = true,
+                metaText = "Доставка 7-21 день • Бесплатно от 8000 ₽ • Возврат 14 дней"
+            }),
+            ["home_trust_benefits_json"] = ToJson(new
+            {
+                enabled = true,
+                title = "Почему выбирают Fashion Demon",
+                items = new[]
+                {
+                    new { id = "bold-design", icon = "flame", title = "Смелый дизайн", description = "Уникальные принты, крой и детали, которых нет у других.", sortOrder = 10, enabled = true },
+                    new { id = "real-quality", icon = "shirt", title = "Реальное качество", description = "Плотные ткани, аккуратная фурнитура и пошив. Носится долго.", sortOrder = 20, enabled = true },
+                    new { id = "honest-delivery", icon = "truck", title = "Честные сроки", description = "Понятная доставка без лишних обещаний. Средний срок - 7-21 день.", sortOrder = 30, enabled = true },
+                    new { id = "easy-return", icon = "shield", title = "Легко купить и вернуть", description = "Удобная оплата и возврат в течение 14 дней.", sortOrder = 40, enabled = true }
+                }
+            }),
+            ["home_trust_about_json"] = ToJson(new
+            {
+                enabled = true,
+                eyebrow = "О нас",
+                title = "Fashion Demon - магазин для тех, кто выбирает характер",
+                text = "Мы собираем выразительный streetwear с акцентом на посадку, материалы и детали. Каждая вещь должна выглядеть уверенно в образе и спокойно переживать повседневную носку.",
+                highlights = new[]
+                {
+                    new { id = "real-store", title = "Реальный магазин", description = "Принимаем заказы, отвечаем на вопросы и сопровождаем покупку до получения.", enabled = true, sortOrder = 10 },
+                    new { id = "clear-terms", title = "Понятные условия", description = "Сроки, доставка, оплата и возврат описаны заранее, без мелкого шрифта.", enabled = true, sortOrder = 20 },
+                    new { id = "support", title = "Поддержка", description = "Если нужен размер, статус заказа или помощь с возвратом - мы на связи.", enabled = true, sortOrder = 30 }
+                }
+            }),
+            ["home_trust_reviews_json"] = ToJson(new
+            {
+                enabled = true,
+                title = "Что говорят покупатели",
+                description = "Отзывы добавляются вручную из открытых источников. У каждого отзыва есть ссылка на оригинал.",
+                sourceLabel = "Отзывы взяты с Otzovik",
+                items = new[]
+                {
+                    new { id = "review-darkwave", text = "Худи огонь! Качество реально хорошее, сидит идеально. Доставка пришла за 11 дней.", author = "@darkwave23", location = "Москва", source = "Otzovik", sourceUrl = "", sortOrder = 10, enabled = true },
+                    new { id = "review-inferno", text = "Футболка очень плотная, принт не трескается. Уже заказал вторую в другом цвете.", author = "@inferno_style", location = "Санкт-Петербург", source = "Otzovik", sourceUrl = "", sortOrder = 20, enabled = true }
+                }
+            })
+        };
     }
 
     private IReadOnlyDictionary<string, string> GetDefaultLegalTextSettings()

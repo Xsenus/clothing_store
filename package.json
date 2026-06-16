@@ -12,6 +12,7 @@
     "build:dev": "vite build --mode development && node scripts/generate-seo-assets.mjs development --out-dir dist",
     "preview": "vite preview",
     "seo:assets": "node scripts/generate-seo-assets.mjs production --out-dir dist",
+    "test": "node --no-warnings --test scripts/test-home-trust-settings.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{js,jsx}\"",
     "lint:fix": "eslint \"src/**/*.{js,jsx}\" --fix"

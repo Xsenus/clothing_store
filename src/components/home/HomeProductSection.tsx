@@ -87,8 +87,8 @@ export default function HomeProductSection({
     ? "hidden border-b-2 border-white pb-1 text-sm font-bold uppercase tracking-widest transition-colors hover:border-gray-300 hover:text-gray-300 md:block"
     : "hidden border-b-2 border-black pb-1 text-sm font-bold uppercase tracking-widest transition-colors hover:border-gray-600 hover:text-gray-600 md:block";
   const buttonClassName = dark
-    ? "w-full rounded-none border-white py-6 font-bold uppercase tracking-widest text-white hover:bg-white hover:text-black"
-    : "w-full rounded-none border-black py-6 font-bold uppercase tracking-widest text-black hover:bg-black hover:text-white";
+    ? "w-full rounded-none border-white bg-transparent py-6 font-bold uppercase tracking-widest text-white hover:bg-white hover:text-black"
+    : "w-full rounded-none border-black bg-transparent py-6 font-bold uppercase tracking-widest text-black hover:bg-black hover:text-white";
 
   return (
     <>
@@ -97,7 +97,7 @@ export default function HomeProductSection({
           {title}
         </h2>
         <Link to={linkTo} className={linkClassName}>
-          Все
+          Смотреть все
         </Link>
       </div>
 
@@ -118,7 +118,7 @@ export default function HomeProductSection({
       <div className="mt-12 text-center md:hidden">
         <Link to={linkTo}>
           <Button variant="outline" className={buttonClassName}>
-            Все
+            Смотреть все
           </Button>
         </Link>
       </div>
