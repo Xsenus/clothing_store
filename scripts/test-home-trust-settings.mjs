@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   DEFAULT_HOME_TRUST_BENEFITS,
+  DEFAULT_HOME_TRUST_REVIEWS,
   parseHomeTrustBenefits,
   parseHomeTrustHero,
   parseHomeTrustReviews,
@@ -54,6 +55,30 @@ test("home trust benefits are sorted and hidden items are excluded", () => {
 
 test("home trust defaults do not mention Poizon", () => {
   assert.doesNotMatch(JSON.stringify(DEFAULT_HOME_TRUST_BENEFITS), /poizon/i);
+});
+
+test("home trust defaults use real otzovik review links", () => {
+  const reviews = parseHomeTrustReviews(JSON.stringify(DEFAULT_HOME_TRUST_REVIEWS));
+
+  assert.deepEqual(
+    reviews.items.map((item) => item.sourceUrl),
+    [
+      "https://otzovik.com/review_18405429.html",
+      "https://otzovik.com/review_18396489.html",
+    ],
+  );
+  assert.deepEqual(
+    reviews.items.map((item) => item.author),
+    ["polporer", "dianka m"],
+  );
+  assert.deepEqual(
+    reviews.items.map((item) => item.text),
+    [
+      "Заказывала пару вещичек (зипка + тишка). Мне все очень понравилось! доставка относительно быстрая. По размерам все отлично подошло, качество хорошее.",
+      "Покупаю давно тут еще со времён когда в тг и озоне были вещи, качество нормальное, цены низкие, доставка быстрая;",
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(reviews), /darkwave|inferno/i);
 });
 
 test("manual reviews keep valid otzovik links and hide disabled reviews", () => {
