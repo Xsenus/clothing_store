@@ -184,8 +184,8 @@ function HomeBenefitsSection({ benefits }: { benefits: any }) {
   return (
     <section className="bg-[#111114] py-20 text-white sm:py-24">
       <div className="container mx-auto px-4">
-        <div className="mb-12 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <h2 className="max-w-3xl text-4xl font-black uppercase leading-none tracking-normal md:text-6xl">
+        <div className="mb-12 flex flex-col items-start gap-4 lg:items-center lg:text-center">
+          <h2 className="max-w-3xl text-4xl font-black uppercase leading-none tracking-normal md:text-6xl lg:mx-auto">
             {benefits.title}
           </h2>
           <div className="h-1 w-24 bg-[var(--fd-accent-decor)]" aria-hidden="true" />
@@ -195,17 +195,18 @@ function HomeBenefitsSection({ benefits }: { benefits: any }) {
             const Icon = iconMap[item.icon as keyof typeof iconMap] || Sparkles;
             const layout = item.layout || (index % 3 === 1 ? "center" : index % 3 === 2 ? "right" : "left");
             const iconWrapperClassName = cn(
-              "mb-8 flex",
+              "mb-8 flex lg:justify-center lg:text-center",
               layout === "center" && "justify-center text-center",
-              layout === "right" && "justify-end text-right",
-              layout === "left" && "justify-start text-left",
+              layout === "right" && "justify-end text-right lg:justify-center lg:text-center",
+              layout === "left" && "justify-start text-left lg:justify-center lg:text-center",
             );
             const contentClassName = cn(
+              "lg:text-center",
               layout === "center" && "text-center",
-              layout === "right" && "text-right",
+              layout === "right" && "text-right lg:text-center",
             );
             return (
-              <article key={item.id} className="min-h-[260px] bg-[#17171b] p-6 sm:p-8">
+              <article key={item.id} className="min-h-[260px] bg-[#17171b] p-6 sm:p-8 lg:flex lg:flex-col lg:items-center lg:text-center">
                 <div className={iconWrapperClassName}>
                   <Icon className="h-10 w-10 text-[var(--fd-accent-decor)]" strokeWidth={2.4} />
                 </div>
