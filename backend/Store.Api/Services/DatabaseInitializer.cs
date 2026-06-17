@@ -768,6 +768,7 @@ public class DatabaseInitializer
         await EnsureAppSettingExistsAsync(db, "site_accent_product_hover_color", "#ef4444");
         await EnsureAppSettingExistsAsync(db, "site_accent_checkout_color", "#dc2626");
         await EnsureAppSettingExistsAsync(db, "site_accent_checkout_hover_color", "#ef4444");
+        await EnsureAppSettingExistsAsync(db, "home_about_nav_to_page_enabled", "false");
         await EnsureAppSettingExistsAsync(db, "checkout_self_pickup_title", "Новосибирск");
         await EnsureAppSettingExistsAsync(
             db,

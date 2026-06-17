@@ -3,6 +3,7 @@ export const HOME_TRUST_SETTINGS_KEYS = [
   "home_trust_benefits_json",
   "home_trust_about_json",
   "home_trust_reviews_json",
+  "home_about_nav_to_page_enabled",
 ];
 
 export const HOME_TRUST_ICON_OPTIONS = [
@@ -140,6 +141,7 @@ export const DEFAULT_HOME_TRUST_SETTINGS = {
   home_trust_benefits_json: JSON.stringify(DEFAULT_HOME_TRUST_BENEFITS),
   home_trust_about_json: JSON.stringify(DEFAULT_HOME_TRUST_ABOUT),
   home_trust_reviews_json: JSON.stringify(DEFAULT_HOME_TRUST_REVIEWS),
+  home_about_nav_to_page_enabled: "false",
 };
 
 const isPlainObject = (value) =>

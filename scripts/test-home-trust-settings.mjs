@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_HOME_TRUST_SETTINGS,
   DEFAULT_HOME_TRUST_BENEFITS,
   DEFAULT_HOME_TRUST_REVIEWS,
+  HOME_TRUST_SETTINGS_KEYS,
   parseHomeTrustBenefits,
   parseHomeTrustHero,
   parseHomeTrustReviews,
@@ -17,6 +19,11 @@ test("home trust hero falls back from broken json", () => {
   assert.equal(hero.primaryCtaText, "Смотреть новинки");
   assert.equal(hero.primaryCtaUrl, "/catalog?sort=new");
   assert.match(hero.metaText, /5000/);
+});
+
+test("home trust settings include about page navigation flag", () => {
+  assert.equal(DEFAULT_HOME_TRUST_SETTINGS.home_about_nav_to_page_enabled, "false");
+  assert.ok(HOME_TRUST_SETTINGS_KEYS.includes("home_about_nav_to_page_enabled"));
 });
 
 test("home trust hero rejects unsafe cta urls", () => {

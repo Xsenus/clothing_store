@@ -107,7 +107,7 @@ export default function Header() {
   const { user, isAuthenticated } = useAuth();
   const { signOut } = useAuthActions();
   const confirmAction = useConfirmDialog();
-  const { headerLinks, pageLinks } = useSiteSocialLinks();
+  const { headerLinks, pageLinks, publicSettings } = useSiteSocialLinks();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -123,15 +123,21 @@ export default function Header() {
   const userCompactLabel = getUserCompactLabel(user);
   const userSecondaryLabel = getUserSecondaryLabel(user, userPrimaryLabel);
   const isHeroHeader = location.pathname === "/" && !isScrolled;
+  const isDarkSurfaceHeader =
+    !isScrolled && (location.pathname === "/" || location.pathname === "/about");
   const shouldHideHeroActions = isHeroHeader;
   const shouldHideDesktopAccountTrigger = isHeroHeader;
   const activePathname = `${location.pathname}${location.hash}`;
   const cartLabel =
     totalItems > 0 ? `Корзина, товаров: ${totalItems}` : "Корзина";
+  const aboutNavPath =
+    publicSettings.home_about_nav_to_page_enabled === "true"
+      ? "/about"
+      : "/#about";
   const navLinks = [
     { name: "ГЛАВНАЯ", path: "/" },
     { name: "КАТАЛОГ", path: "/catalog" },
-    { name: "О НАС", path: "/#about" },
+    { name: "О НАС", path: aboutNavPath },
     { name: "ОТЗЫВЫ", path: "/#reviews" },
   ];
   const headerSocialLinks = headerLinks.slice(0, 4);
@@ -195,7 +201,7 @@ export default function Header() {
         "fixed left-0 right-0 top-0 z-50 transition-all duration-300",
         isScrolled
           ? "border-b bg-background/80 text-foreground backdrop-blur-md"
-          : isHeroHeader
+          : isDarkSurfaceHeader
             ? "bg-transparent text-white"
             : "bg-transparent text-foreground",
       )}

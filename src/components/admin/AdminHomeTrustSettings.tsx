@@ -213,6 +213,25 @@ export default function AdminHomeTrustSettings({
         </p>
       </div>
 
+      <section className="space-y-3 border border-neutral-200 p-4">
+        <label className="flex items-start gap-3 text-sm font-semibold">
+          <Checkbox
+            checked={settings.home_about_nav_to_page_enabled === "true"}
+            onCheckedChange={(checked) =>
+              updateSetting("home_about_nav_to_page_enabled", checked === true ? "true" : "false")
+            }
+          />
+          <span className="space-y-1">
+            <span className="block text-base font-black uppercase tracking-tight">
+              Открывать отдельную страницу «О нас»
+            </span>
+            <span className="block font-normal text-muted-foreground">
+              Если включено, пункт меню «О нас» ведет на /about. Если выключено, остается переход к блоку «О нас» на главной.
+            </span>
+          </span>
+        </label>
+      </section>
+
       <section className="space-y-4 border border-neutral-200 p-4">
         <div className="space-y-1">
           <h3 className="text-lg font-black uppercase tracking-tight">Дизайн и доставка</h3>

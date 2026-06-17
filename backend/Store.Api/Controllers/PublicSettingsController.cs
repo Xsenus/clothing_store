@@ -60,6 +60,7 @@ public class PublicSettingsController : ControllerBase
         "home_trust_benefits_json",
         "home_trust_about_json",
         "home_trust_reviews_json",
+        "home_about_nav_to_page_enabled",
         "support_contact_email",
         "support_dialog_message",
         "social_links_config_json",

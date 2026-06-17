@@ -68,6 +68,14 @@ export default function Footer() {
             <ul className="space-y-2 text-gray-300">
               <li>
                 <Link
+                  to="/about"
+                  className="transition-colors hover:text-white"
+                >
+                  О нас
+                </Link>
+              </li>
+              <li>
+                <Link
                   to="/profile"
                   className="transition-colors hover:text-white"
                 >

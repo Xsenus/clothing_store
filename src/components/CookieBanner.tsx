@@ -69,21 +69,21 @@ export default function CookieBanner() {
 
   return (
     <>
-      <div className="fixed bottom-4 left-4 right-4 z-[100] border border-white/20 bg-black/92 p-3 text-white shadow-2xl backdrop-blur md:left-auto md:max-w-md">
+      <div className="fixed bottom-3 left-3 right-3 z-[100] max-w-[calc(100vw-1.5rem)] border border-white/20 bg-black/92 p-3 text-white shadow-2xl backdrop-blur sm:bottom-4 sm:left-4 sm:right-4 sm:max-w-[calc(100vw-2rem)] md:left-auto md:max-w-md">
         <p className="text-xs leading-relaxed text-white/88 md:text-sm">
           {summaryText}
         </p>
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
           <Button
             variant="ghost"
-            className="h-9 rounded-none px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white"
+            className="h-9 w-full rounded-none px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white sm:w-auto"
             onClick={() => setDetailsOpen(true)}
           >
             Подробнее
           </Button>
           <Button
             variant="outline"
-            className="h-9 rounded-none border-white/35 bg-transparent px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white"
+            className="h-9 w-full rounded-none border-white/35 bg-transparent px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white sm:w-auto"
             onClick={() => {
               rejectCookieConsent();
               setVisible(false);
@@ -92,7 +92,7 @@ export default function CookieBanner() {
             Отклонить
           </Button>
           <Button
-            className="h-9 rounded-none bg-white px-3 text-xs font-semibold uppercase tracking-[0.14em] text-black hover:bg-gray-200"
+            className="h-9 w-full rounded-none bg-white px-3 text-xs font-semibold uppercase tracking-[0.14em] text-black hover:bg-gray-200 sm:w-auto"
             onClick={() => {
               acceptCookieConsent();
               setVisible(false);
