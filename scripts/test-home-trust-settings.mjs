@@ -10,6 +10,11 @@ import {
   parseHomeTrustHero,
   parseHomeTrustReviews,
 } from "../src/lib/home-trust-settings.js";
+import {
+  getHomeAnchorRetryDelays,
+  getHomeAnchorScrollTop,
+  isHomeAnchorId,
+} from "../src/lib/home-anchor-scroll.js";
 
 test("home trust hero falls back from broken json", () => {
   const hero = parseHomeTrustHero("{not-json");
@@ -24,6 +29,40 @@ test("home trust hero falls back from broken json", () => {
 test("home trust settings include about page navigation flag", () => {
   assert.equal(DEFAULT_HOME_TRUST_SETTINGS.home_about_nav_to_page_enabled, "false");
   assert.ok(HOME_TRUST_SETTINGS_KEYS.includes("home_about_nav_to_page_enabled"));
+});
+
+test("home anchors only allow existing home sections", () => {
+  assert.equal(isHomeAnchorId("about"), true);
+  assert.equal(isHomeAnchorId("reviews"), true);
+  assert.equal(isHomeAnchorId("new-arrivals"), true);
+  assert.equal(isHomeAnchorId("catalog"), false);
+  assert.equal(isHomeAnchorId(""), false);
+});
+
+test("home anchor scroll top keeps fixed header offset", () => {
+  assert.equal(
+    getHomeAnchorScrollTop({
+      elementTop: 500,
+      scrollY: 300,
+      headerHeight: 80,
+      extraOffset: 12,
+    }),
+    708,
+  );
+  assert.equal(
+    getHomeAnchorScrollTop({
+      elementTop: 20,
+      scrollY: 0,
+      headerHeight: 80,
+      extraOffset: 12,
+    }),
+    0,
+  );
+});
+
+test("home anchor retries are short and deterministic", () => {
+  assert.deepEqual(getHomeAnchorRetryDelays(true), [120, 320, 700, 1200, 2000, 3000]);
+  assert.deepEqual(getHomeAnchorRetryDelays(false), [160, 520, 1200]);
 });
 
 test("home trust hero rejects unsafe cta urls", () => {

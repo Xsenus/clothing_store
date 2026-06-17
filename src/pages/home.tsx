@@ -5,6 +5,11 @@ import HomeCollectionSliderSection from "@/components/home/HomeCollectionSliderS
 import HomeProductSection from "@/components/home/HomeProductSection";
 import PageSeo from "@/components/PageSeo";
 import SafeRenderBoundary from "@/components/SafeRenderBoundary";
+import {
+  getHomeAnchorRetryDelays,
+  getHomeAnchorScrollTop,
+  isHomeAnchorId,
+} from "@/lib/home-anchor-scroll";
 import { fetchPublicSettings, getCachedPublicSettings } from "@/lib/site-settings";
 import { parseHomeTrustSettings } from "@/lib/home-trust-settings";
 import { cn } from "@/lib/utils";
@@ -20,7 +25,7 @@ import {
   Truck,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router";
 
 const HOME_KEYWORDS = [
@@ -338,32 +343,37 @@ export default function HomePage() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const currentHash = location.hash || window.location.hash;
     if (!currentHash) return;
 
     let cancelled = false;
     const targetId = decodeURIComponent(currentHash.slice(1));
-    const isMobileViewport = window.matchMedia("(max-width: 767px)").matches;
-    const scrollToHashTarget = (behavior: ScrollBehavior) => {
+    if (!isHomeAnchorId(targetId)) return;
+
+    const scrollToHashTarget = () => {
       const element = document.getElementById(targetId);
       if (!cancelled && element) {
-        const targetTop = element.getBoundingClientRect().top + window.scrollY;
-        window.scrollTo({ top: Math.max(0, targetTop), left: 0, behavior });
+        const headerHeight =
+          document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+        const targetTop = getHomeAnchorScrollTop({
+          elementTop: element.getBoundingClientRect().top,
+          scrollY: window.scrollY,
+          headerHeight,
+        });
+
+        window.scrollTo({ top: targetTop, left: 0, behavior: "auto" });
       }
     };
 
-    window.requestAnimationFrame(() => {
-      scrollToHashTarget("smooth");
-    });
+    scrollToHashTarget();
 
-    const retryDelays = isMobileViewport
-      ? [120, 320, 620, 1000]
-      : [120, 320, 620];
-    const retryTimeoutIds = retryDelays.map((delay) =>
-      window.setTimeout(() => {
-        scrollToHashTarget("auto");
-      }, delay),
+    const isMobileViewport = window.matchMedia("(max-width: 767px)").matches;
+    const retryTimeoutIds = getHomeAnchorRetryDelays(isMobileViewport).map(
+      (delay) =>
+        window.setTimeout(() => {
+          scrollToHashTarget();
+        }, delay),
     );
 
     return () => {
