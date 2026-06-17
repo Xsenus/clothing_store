@@ -463,10 +463,8 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const nextTab = normalizeProfileTab(searchParams.get("tab"), isAdmin);
-    if (nextTab !== activeTab) {
-      setActiveTab(nextTab);
-    }
-  }, [activeTab, isAdmin, searchParams]);
+    setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
+  }, [isAdmin, searchParams]);
 
   const loadOrders = async () => {
     const ordersRes = await FLOW.getUserOrders({ input: {} });
