@@ -43,7 +43,10 @@ export default function HeaderMobileMenu({
 }: HeaderMobileMenuProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="left" className="border-r-border bg-background">
+      <SheetContent
+        side="left"
+        className="h-[100dvh] max-h-[100dvh] overflow-y-auto overscroll-contain border-r-border bg-background pb-[calc(env(safe-area-inset-bottom)+7rem)] touch-pan-y"
+      >
         <SheetHeader className="sr-only">
           <SheetTitle>Навигационное меню</SheetTitle>
           <SheetDescription>
